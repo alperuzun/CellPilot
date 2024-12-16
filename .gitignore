@@ -1,0 +1,6 @@
+pipeline_venv/
+figures/
+output/
+cellranger_data/
+__pycache__/
+clustering/
