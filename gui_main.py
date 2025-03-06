@@ -1,11 +1,11 @@
 import sys
 print("Python path:", sys.executable)
 print("Python version:", sys.version)
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                             QProgressBar, QSpinBox, QDoubleSpinBox, QLineEdit,
                             QTabWidget, QGroupBox, QRadioButton, QMessageBox, QComboBox, QCheckBox, QButtonGroup)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 import sys
 import os
 from pipeline_runner import PipelineRunner, PreprocessingRunner, ClusteringRunner
@@ -556,37 +556,58 @@ class PipelineGUI(QMainWindow):
             self.marker_file_label.setText(os.path.basename(file))
     
     def run_cellranger(self):
-        """Run Cell Ranger"""
-        if not hasattr(self, 'fastq_files'):
-            QMessageBox.warning(self, "Error", "Please select FASTQ files first!")
-            return
-        if not hasattr(self, 'reference_dir'):
-            QMessageBox.warning(self, "Error", "Please select reference genome first!")
-            return
-        if not hasattr(self, 'cr_output_dir'):
-            QMessageBox.warning(self, "Error", "Please select output directory first!")
-            return
+        """Run Cell Ranger processing"""
+        try:
+            # Validate inputs
+            if not hasattr(self, 'fastq_files') or not self.fastq_files:
+                QMessageBox.warning(self, "Error", "Please select FASTQ files")
+                return
             
-        # Disable run button
-        self.cr_run_btn.setEnabled(False)
-        
-        # Create runner thread with all parameters
-        self.cr_runner = PipelineRunner(
-            fastq_files=self.fastq_files,
-            output_dir=self.cr_output_dir,
-            sample_id=self.sample_id_input.text(),
-            sample_name=self.sample_name_input.text(),
-            cores=self.cores_spin.value(),
-            memory=self.mem_spin.value()
-        )
-        
-        # Connect signals
-        self.cr_runner.progress_updated.connect(self.progress.setValue)
-        self.cr_runner.status_updated.connect(self.status_label.setText)
-        self.cr_runner.finished.connect(self.cellranger_finished)
-        
-        # Start processing
-        self.cr_runner.start()
+            if not hasattr(self, 'reference_dir') or not self.reference_dir:
+                QMessageBox.warning(self, "Error", "Please select reference genome directory")
+                return
+            
+            if not hasattr(self, 'cr_output_dir') or not self.cr_output_dir:
+                QMessageBox.warning(self, "Error", "Please select output directory")
+                return
+            
+            # Get sample name and ID
+            sample_name = self.sample_name_input.text()
+            if not sample_name:
+                QMessageBox.warning(self, "Error", "Please enter a sample name")
+                return
+            
+            # Create PipelineRunner instance with debug logging
+            print(f"Creating pipeline runner with:")
+            print(f"FASTQ files: {self.fastq_files}")
+            print(f"Reference: {self.reference_dir}")
+            print(f"Output: {self.cr_output_dir}")
+            print(f"Sample name: {sample_name}")
+            
+            self.pipeline_runner = PipelineRunner(
+                fastq_files=self.fastq_files,
+                reference_path=self.reference_dir,
+                output_dir=self.cr_output_dir,
+                sample_name=sample_name,
+                sample_id=self.sample_id_input.text(),
+                cores=self.cores_spin.value(),
+                memory=self.mem_spin.value()
+            )
+            
+            # Connect signals
+            self.pipeline_runner.status_updated.connect(self.update_status)
+            self.pipeline_runner.error_occurred.connect(self.handle_error)
+            self.pipeline_runner.finished.connect(self.cellranger_finished)
+            
+            # Disable run button
+            self.cr_run_btn.setEnabled(False)
+            
+            # Start processing
+            self.pipeline_runner.start()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to start Cell Ranger: {str(e)}")
+            self.cr_run_btn.setEnabled(True)
     
     def run_preprocessing(self):
         """Run preprocessing"""
@@ -709,7 +730,8 @@ class PipelineGUI(QMainWindow):
     def cellranger_finished(self):
         """Handle Cell Ranger completion"""
         self.cr_run_btn.setEnabled(True)
-        QMessageBox.information(self, "Complete", "Cell Ranger processing complete!")
+        self.status_label.setText("Cell Ranger processing complete!")
+        QMessageBox.information(self, "Success", "Cell Ranger processing completed successfully!")
     
     def preprocessing_finished(self):
         """Handle preprocessing completion"""
@@ -735,6 +757,17 @@ class PipelineGUI(QMainWindow):
             elif task == 'analysis':
                 self.analysis_output_dir = directory
                 self.analysis_output_label.setText(directory)
+    
+    def update_status(self, message):
+        """Update status label with message"""
+        self.status_label.setText(message)
+        print(message)  # Also print to console for debugging
+        
+    def handle_error(self, error_message):
+        """Handle error messages"""
+        QMessageBox.critical(self, "Error", error_message)
+        self.cr_run_btn.setEnabled(True)
+        self.status_label.setText(f"Error: {error_message}")
 
 class ReferenceSetManager(QWidget):
     def __init__(self):

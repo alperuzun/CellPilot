@@ -1,0 +1,7 @@
+data/
+reference/
+*.pyc
+__pycache__/
+.git/
+# Don't ignore Cell Ranger tar file
+!cellranger-8.0.1.tar.gz 
