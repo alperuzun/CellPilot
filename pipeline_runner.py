@@ -1,252 +1,115 @@
 from PyQt5.QtCore import QThread, pyqtSignal
 import os
-import subprocess
-from pathlib import Path
-from pipeline import run_pipeline
-import anndata
-import scanpy as sc
-from datetime import datetime
 
-class PipelineRunner(QThread):
-    progress_updated = pyqtSignal(int)
-    status_updated = pyqtSignal(str)
-    error_occurred = pyqtSignal(str)
-    
+class AnnotationRunner(QThread):
+    """
+    A QThread to run the annotate() function from annotate.py.
+    Handles both preprocessing parameters (if not preprocessed) and annotation parameters.
+    """
+
+    update_progress = pyqtSignal(int, str)  # (progress int, status string)
+    finished = pyqtSignal(str)              # emits the path to the final annotated file
+    error = pyqtSignal(str)                 # emits error messages
+
     def __init__(
         self,
-        fastq_files,
+        input_file,
         output_dir,
-        sample_id,
-        sample_name,
-        cores=4,
-        memory=16,
-        mt_threshold=20,
-        ribo_threshold=40,
-        reference_path="/input/refdata-gex-GRCh38-2024-A"
-    ):
-        super().__init__()
-        self.fastq_files = fastq_files
-        self.output_dir = output_dir
-        self.sample_id = sample_id
-        self.sample_name = sample_name
-        self.cores = cores
-        self.memory = memory
-        self.mt_threshold = mt_threshold
-        self.ribo_threshold = ribo_threshold
-        self.reference_path = reference_path
-        
-    def run(self):
-        try:
-            # Step 1: Run Cell Ranger
-            self.status_updated.emit("Running Cell Ranger...")
-            self.progress_updated.emit(10)
-            cellranger_output = self.run_cellranger()
-            
-            if not cellranger_output:
-                raise Exception("Cell Ranger processing failed")
-            
-            # Step 2: Run analysis pipeline
-            self.status_updated.emit("Running analysis pipeline...")
-            self.progress_updated.emit(50)
-            
-            run_pipeline(
-                input_path=cellranger_output,
-                output_dir=self.output_dir,
-                mt_threshold=self.mt_threshold,
-                ribo_threshold=self.ribo_threshold
-            )
-            
-            self.progress_updated.emit(100)
-            
-        except Exception as e:
-            self.status_updated.emit(f"Error: {str(e)}")
-            
-    def run_cellranger(self):
-        try:
-            # Add debug logging
-            self.status_updated.emit("Checking Cell Ranger installation...")
-            result = subprocess.run(['which', 'cellranger'], capture_output=True, text=True)
-            self.status_updated.emit(f"Cell Ranger path: {result.stdout}")
-            
-            # Create directories if they don't exist
-            input_dir = os.path.join(self.output_dir, "input")
-            fastq_dir = os.path.join(input_dir, "fastqs")
-            os.makedirs(fastq_dir, exist_ok=True)
-            
-            # Link FASTQ files to input directory
-            for fastq in self.fastq_files:
-                dest = os.path.join(fastq_dir, os.path.basename(fastq))
-                if not os.path.exists(dest):
-                    os.symlink(fastq, dest)
-            
-            # Prepare Cell Ranger command with required --create-bam argument
-            cellranger_cmd = [
-                "cellranger", "count",
-                f"--id={self.sample_id}",
-                f"--fastqs={fastq_dir}",
-                f"--sample={self.sample_name}",
-                f"--transcriptome={self.reference_path}",
-                f"--localcores={self.cores}",
-                f"--localmem={self.memory}",
-                f"--output-dir={self.output_dir}",
-                "--create-bam=true"
-            ]
-            
-            # Log the command
-            self.status_updated.emit(f"Running command: {' '.join(cellranger_cmd)}")
-            
-            process = subprocess.Popen(
-                cellranger_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                cwd=self.output_dir
-            )
-            
-            # Real-time output logging
-            while True:
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
-                    break
-                if output:
-                    self.status_updated.emit(output.strip())
-            
-            # Check for errors
-            _, stderr = process.communicate()
-            if process.returncode != 0:
-                raise Exception(f"Cell Ranger failed with error: {stderr}")
-            
-            self.status_updated.emit("Cell Ranger processing complete!")
-            
-            return os.path.join(
-                self.output_dir,
-                self.sample_id,
-                "outs",
-                "filtered_feature_bc_matrix.h5"
-            )
-            
-        except Exception as e:
-            self.error_occurred.emit(str(e))
-            return None
-
-class PreprocessingRunner(QThread):
-    progress_updated = pyqtSignal(int)
-    status_updated = pyqtSignal(str)
-    
-    def __init__(
-        self,
-        input_file: str,
-        output_dir: str,
-        mt_threshold: float = 20,
-        ribo_threshold: float = 40
+        preprocessed=False,
+        species="human",
+        use_cellmarker=True,
+        use_panglao=False,
+        use_cancer_single_cell_atlas=False,
+        preprocessing_params=None,
+        name=""
     ):
         super().__init__()
         self.input_file = input_file
         self.output_dir = output_dir
-        self.mt_threshold = mt_threshold
-        self.ribo_threshold = ribo_threshold
-    
+        self.preprocessed = preprocessed
+        self.species = species.lower()
+        self.use_cellmarker = use_cellmarker
+        self.use_panglao = use_panglao
+        self.use_cancer_single_cell_atlas = use_cancer_single_cell_atlas
+        self.preprocessing_params = preprocessing_params or DEFAULT_PARAMS
+        self.name = name
+
     def run(self):
         try:
-            self.status_updated.emit("Starting preprocessing...")
-            self.progress_updated.emit(10)
-            
-            # Import preprocessing module
-            import preprocess
-            
-            # Run preprocessing with filepath
-            self.status_updated.emit("Running preprocessing steps...")
-            adata_pp = preprocess.pp(
-                filepath=self.input_file,  # Changed from adata to filepath
-                output_dir=self.output_dir,
-                mt_threshold=self.mt_threshold,
-                ribo_threshold=self.ribo_threshold
-            )
-            self.progress_updated.emit(80)
-            
-            # Save results
-            self.status_updated.emit("Saving results...")
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M')
-            output_file = os.path.join(
-                self.output_dir,
-                f"preprocessed_{timestamp}.h5ad"
-            )
-            adata_pp.write(output_file)
-            
-            self.progress_updated.emit(100)
-            self.status_updated.emit("Preprocessing complete!")
-            
-        except Exception as e:
-            self.status_updated.emit(f"Error during preprocessing: {str(e)}")
+            self.update_progress.emit(5, "Importing annotate.py...")
+            from annotate import annotate
 
-class ClusteringRunner(QThread):
-    progress_updated = pyqtSignal(int)
-    status_updated = pyqtSignal(str)
-    plot_created = pyqtSignal()
-    error_occurred = pyqtSignal(str)
-    
+            self.update_progress.emit(15, "Running annotation...")
+
+            # Call the annotate() function from annotate.py
+            adata_result = annotate(
+                input_file=self.input_file,
+                output_dir=self.output_dir,
+                preprocessed=self.preprocessed,
+                preprocessing_params=self.preprocessing_params,
+                species=self.species,
+                use_cellmarker=self.use_cellmarker,
+                use_panglao=self.use_panglao,
+                use_cancer_single_cell_atlas=self.use_cancer_single_cell_atlas,
+                name=self.name
+            )
+
+            # We can't know the exact final file name from the function unless we parse the logs
+            # For now, just guess or store the last saved file under output_dir
+            final_file = os.path.join(self.output_dir, "annotated_latest.h5ad")  # or parse from the function
+            self.update_progress.emit(100, "Annotation complete!")
+            self.finished.emit(final_file)
+
+        except Exception as e:
+            self.error.emit(str(e))
+            raise
+
+################################################################################
+# Add this new AnalysisRunner to pipeline_runner.py
+################################################################################
+
+class AnalysisRunner(QThread):
+    """
+    A QThread to run the CellPhoneDB analysis (lab/SingleCell/analysis.py).
+    Redirects progress and print statements to the GUI.
+    """
+
+    update_progress = pyqtSignal(int, str)
+    finished = pyqtSignal(str)  # typically the final output or status
+    error = pyqtSignal(str)
+
     def __init__(
         self,
-        input_file: str,
-        output_dir: str,
-        n_pcs: int = 30,
-        resolution: float = 0.5,
-        n_top_genes: int = 2000,
-        random_state: int = 42
+        input_file,
+        output_dir,
+        column_name,
+        cpdb_file_path,
+        name
     ):
         super().__init__()
         self.input_file = input_file
         self.output_dir = output_dir
-        self.n_pcs = n_pcs
-        self.resolution = resolution
-        self.n_top_genes = n_top_genes
-        self.random_state = random_state
-        
-        # Disable interactive plotting
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        plt.ioff()
-    
+        self.column_name = column_name
+        self.cpdb_file_path = cpdb_file_path
+        self.name = name
+
     def run(self):
         try:
-            print(f"ClusteringRunner starting with input file: {self.input_file}")
-            self.status_updated.emit("Starting clustering...")
-            self.progress_updated.emit(10)
-            
-            # Import clustering module
-            print("Importing cluster module...")
-            import cluster
-            
-            # Run clustering
-            print("Running clustering steps...")
-            self.status_updated.emit("Running clustering steps...")
-            adata_clustered, cluster_stats = cluster.cluster(
-                filepath=self.input_file,
-                output_dir=self.output_dir,
-                n_pcs=self.n_pcs,
-                resolution=self.resolution,
-                n_top_genes=self.n_top_genes,
-                random_state=self.random_state,
-                save_plots=True
-            )
-            
-            print("Clustering complete!")
-            self.progress_updated.emit(100)
-            self.status_updated.emit("Clustering complete!")
-            
-        except Exception as e:
-            print(f"Error in ClusteringRunner: {str(e)}")
-            self.error_occurred.emit(str(e))
+            from analysis import run_cell_phone_db
 
-def load_data(filepath: str) -> anndata.AnnData:
-    """Load data from H5 or H5AD file"""
-    try:
-        if filepath.endswith('.h5ad'):
-            return sc.read_h5ad(filepath)
-        elif filepath.endswith('.h5'):
-            return sc.read_10x_h5(filepath)
-        else:
-            raise ValueError(f"Unsupported file format: {filepath}")
-    except Exception as e:
-        raise Exception(f"Error loading file {filepath}: {str(e)}")
+            self.update_progress.emit(10, "Starting CellPhoneDB analysis...")
+            run_cell_phone_db(
+                input_file=self.input_file,
+                output_dir=self.output_dir,
+                column_name=self.column_name,
+                cpdb_file_path=self.cpdb_file_path,
+                name=self.name
+            )
+            self.update_progress.emit(100, "CellPhoneDB analysis complete!")
+            self.finished.emit("Analysis finished successfully!")
+        except Exception as e:
+            self.error.emit(str(e))
+            raise
+
+if __name__ == "__main__":
+    print("AnnotationRunner test usage here if desired.")

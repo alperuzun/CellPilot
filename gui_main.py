@@ -1,800 +1,653 @@
 import sys
+import io
+import traceback
 print("Python path:", sys.executable)
 print("Python version:", sys.version)
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                             QProgressBar, QSpinBox, QDoubleSpinBox, QLineEdit,
-                            QTabWidget, QGroupBox, QRadioButton, QMessageBox, QComboBox, QCheckBox, QButtonGroup)
+    QGroupBox, QMessageBox, QComboBox, QCheckBox, QFormLayout,
+    QGraphicsDropShadowEffect, QDockWidget, QScrollArea,
+    QGridLayout, QDialog, QTabWidget, QTextEdit
+)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-import sys
-import os
-from pipeline_runner import PipelineRunner, PreprocessingRunner, ClusteringRunner
+from PyQt5.QtGui import QPalette, QColor, QFont, QPixmap, QTextCursor
 
-class PipelineGUI(QMainWindow):
+import os
+
+from pipeline_runner import AnnotationRunner, AnalysisRunner
+
+################################################################################
+# 1) Create an EmittingStream to redirect print statements to a PyQt signal
+################################################################################
+from PyQt5.QtCore import QObject, pyqtSignal
+
+class EmittingStream(QObject):
+    text_written = pyqtSignal(str)
+
+    def write(self, text):
+        if text.strip():
+            self.text_written.emit(text)
+
+    def flush(self):
+        pass
+################################################################################
+# 2) Add a QTabWidget in the main GUI, with "Annotation" and new "Analysis" tabs
+################################################################################
+class SingleTabGUI(QMainWindow):
+    """
+    A streamlined GUI with a single 'Annotation' tab.
+    Applies a Discord-inspired dark theme with subtle purple highlights.
+    """
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Single Cell RNA-seq Pipeline")
-        self.setMinimumWidth(1000)
-        self.setMinimumHeight(800)
-        
-        # Create main widget and layout
+        self.setWindowTitle("Single-Cell Annotation Tool 🚀")
+        self.setGeometry(150, 100, 960, 600)
+
+        # Apply a custom Discord-like dark theme
+        self.setPalette(self.create_discord_palette())
+
+        # Instead of a main_widget alone, let's create a QTabWidget
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+
+        self.annotation_tab = QWidget()
+        self.analysis_tab = QWidget()
+
+        # Original annotation setup
+        self.setup_annotation_tab(self.annotation_tab)
+        self.tabs.addTab(self.annotation_tab, "Annotation")
+
+        # New analysis setup
+        self.setup_analysis_tab(self.analysis_tab)
+        self.tabs.addTab(self.analysis_tab, "Analysis")
+
+        # Also add a log area at the bottom (or side)
+        self.log_text_edit = QTextEdit()
+        self.log_text_edit.setReadOnly(True)
+        self.log_text_edit.setStyleSheet("background-color: #2F3136; color: #DCDDDE;")
+        # We'll place it under the tabs in a central widget layout
+
         main_widget = QWidget()
+        main_layout = QVBoxLayout(main_widget)
+        main_layout.addWidget(self.tabs)
+        main_layout.addWidget(self.log_text_edit)
+
         self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
+
+        # Hook Python's stdout/stderr to our EmittingStream
+        self.stdout_stream = EmittingStream()
+        self.stdout_stream.text_written.connect(self.append_to_log)
+        sys.stdout = self.stdout_stream
+        sys.stderr = self.stdout_stream
+
+        self.show()
+
+    def create_discord_palette(self):
+        """
+        Create a custom palette using colors reminiscent of Discord's dark mode theme.
+        """
+        palette = QPalette()
+
+        # Window background (very dark charcoal)
+        palette.setColor(QPalette.Window, QColor("#2F3136"))
         
-        # Create tab widget
-        tabs = QTabWidget()
+        # Text color
+        palette.setColor(QPalette.WindowText, QColor("#DCDDDE"))
         
-        # Add tabs
-        tabs.addTab(self.create_cellranger_tab(), "1. Cell Ranger")
-        tabs.addTab(self.create_preprocessing_tab(), "2. Preprocessing")
-        tabs.addTab(self.create_clustering_tab(), "3. Clustering")
-        tabs.addTab(self.create_analysis_tab(), "4. Analysis")
+        # Base for text inputs
+        palette.setColor(QPalette.Base, QColor("#40444B"))
         
-        layout.addWidget(tabs)
+        # Alternate base (slightly darker)
+        palette.setColor(QPalette.AlternateBase, QColor("#2F3136"))
         
-        # Add global progress bar and status
-        self.progress = QProgressBar()
-        layout.addWidget(self.progress)
+        # Tooltips
+        palette.setColor(QPalette.ToolTipBase, QColor("#1E1F22"))
+        palette.setColor(QPalette.ToolTipText, QColor("#DCDDDE"))
+
+        # Normal text
+        palette.setColor(QPalette.Text, QColor("#DCDDDE"))
         
-        self.status_label = QLabel("")
-        layout.addWidget(self.status_label)
-    
-    def create_cellranger_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        # Button
+        palette.setColor(QPalette.Button, QColor("#40444B"))
+        palette.setColor(QPalette.ButtonText, QColor("#FFFFFF"))
         
-        # Input section
-        input_group = QGroupBox("Input Files")
-        input_layout = QVBoxLayout(input_group)
+        # Highlight (Discord brand-ish purple)
+        palette.setColor(QPalette.Highlight, QColor("#7289DA"))
+        palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
         
-        # FASTQ files
-        fastq_layout = QHBoxLayout()
-        self.fastq_label = QLabel("No FASTQ files selected")
-        fastq_btn = QPushButton("Select FASTQ Files")
-        fastq_btn.clicked.connect(self.select_fastq_files)
-        fastq_layout.addWidget(fastq_btn)
-        fastq_layout.addWidget(self.fastq_label)
-        input_layout.addLayout(fastq_layout)
-        
-        # Reference genome
-        ref_layout = QHBoxLayout()
-        self.ref_label = QLabel("No reference genome selected")
-        ref_btn = QPushButton("Select Reference")
-        ref_btn.clicked.connect(self.select_reference)
-        ref_layout.addWidget(ref_btn)
-        ref_layout.addWidget(self.ref_label)
-        input_layout.addLayout(ref_layout)
-        
-        layout.addWidget(input_group)
-        
-        # Add sample information
-        sample_group = QGroupBox("Sample Information")
-        sample_layout = QVBoxLayout(sample_group)
-        
-        # Sample ID
-        id_layout = QHBoxLayout()
-        id_layout.addWidget(QLabel("Sample ID:"))
-        self.sample_id_input = QLineEdit()
-        self.sample_id_input.setText("run_sample1")  # Default value
-        id_layout.addWidget(self.sample_id_input)
-        sample_layout.addLayout(id_layout)
-        
-        # Sample Name
-        name_layout = QHBoxLayout()
-        name_layout.addWidget(QLabel("Sample Name:"))
-        self.sample_name_input = QLineEdit()
-        name_layout.addWidget(self.sample_name_input)
-        sample_layout.addLayout(name_layout)
-        
-        layout.addWidget(sample_group)
-        
-        # Cell Ranger parameters
-        param_group = QGroupBox("Cell Ranger Parameters")
-        param_layout = QVBoxLayout(param_group)
-        
-        # Cores
-        cores_layout = QHBoxLayout()
-        cores_layout.addWidget(QLabel("Number of Cores:"))
-        self.cores_spin = QSpinBox()
-        self.cores_spin.setRange(1, 32)
-        self.cores_spin.setValue(8)
-        cores_layout.addWidget(self.cores_spin)
-        param_layout.addLayout(cores_layout)
-        
-        # Memory
-        mem_layout = QHBoxLayout()
-        mem_layout.addWidget(QLabel("Memory (GB):"))
-        self.mem_spin = QSpinBox()
-        self.mem_spin.setRange(16, 256)
-        self.mem_spin.setValue(64)
-        mem_layout.addWidget(self.mem_spin)
-        param_layout.addLayout(mem_layout)
-        
-        layout.addWidget(param_group)
+        return palette
+
+    def setup_annotation_tab(self, parent_widget):
+        """
+        Create a single interface that includes:
+         - Input file selection
+         - Output directory selection
+         - Preprocessed vs. raw data
+         - Preprocessing parameters
+         - Annotation parameters
+         - Run button
+         - Progress display
+        """
+        layout = QVBoxLayout(parent_widget)
+
+        # =========================
+        # (1) 📂 Input File / Directory
+        # =========================
+        file_group = QGroupBox("📂 Input File / Directory")
+        self.apply_shadow(file_group)
+        file_form = QFormLayout()
+
+        # Input file path
+        self.input_file_edit = QLineEdit()
+        self.input_file_edit.setPlaceholderText("Path to input file (H5AD, H5, CSV, TXT, or MTX)...")
+        file_button = QPushButton("Browse…")
+        file_button.clicked.connect(self.select_input_file)
+
+        file_hlayout = QHBoxLayout()
+        file_hlayout.addWidget(self.input_file_edit)
+        file_hlayout.addWidget(file_button)
+        file_form.addRow("Input File:", file_hlayout)
         
         # Output directory
-        out_group = QGroupBox("Output")
-        out_layout = QVBoxLayout(out_group)
-        
-        out_dir_layout = QHBoxLayout()
-        self.cr_output_label = QLabel("No output directory selected")
-        out_btn = QPushButton("Select Output Directory")
-        out_btn.clicked.connect(lambda: self.select_output_dir('cellranger'))
-        out_dir_layout.addWidget(out_btn)
-        out_dir_layout.addWidget(self.cr_output_label)
-        out_layout.addLayout(out_dir_layout)
-        
-        layout.addWidget(out_group)
-        
-        # Run button
-        self.cr_run_btn = QPushButton("Run Cell Ranger")
-        self.cr_run_btn.clicked.connect(self.run_cellranger)
-        layout.addWidget(self.cr_run_btn)
-        
-        return tab
-    
-    def create_preprocessing_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        
-        # Input section
-        input_group = QGroupBox("Input")
-        input_layout = QVBoxLayout(input_group)
-        
-        # Option to use Cell Ranger output or custom input
-        self.use_cr_output = QRadioButton("Use Cell Ranger Output")
-        self.use_custom_input = QRadioButton("Use Custom Input")
-        self.use_cr_output.setChecked(True)
-        
-        input_layout.addWidget(self.use_cr_output)
-        input_layout.addWidget(self.use_custom_input)
-        
-        # Custom input selection
-        custom_input_layout = QHBoxLayout()
-        self.pp_input_label = QLabel("No input file selected")
-        input_btn = QPushButton("Select Input File")
-        input_btn.clicked.connect(self.select_preprocessing_input)
-        custom_input_layout.addWidget(input_btn)
-        custom_input_layout.addWidget(self.pp_input_label)
-        input_layout.addLayout(custom_input_layout)
-        
-        layout.addWidget(input_group)
-        
-        # Parameters
-        param_group = QGroupBox("Preprocessing Parameters")
-        param_layout = QVBoxLayout(param_group)
-        
-        # MT threshold
-        mt_layout = QHBoxLayout()
-        mt_layout.addWidget(QLabel("MT Threshold (%):"))
-        self.mt_threshold = QDoubleSpinBox()
-        self.mt_threshold.setRange(0, 100)
-        self.mt_threshold.setValue(20)
-        mt_layout.addWidget(self.mt_threshold)
-        param_layout.addLayout(mt_layout)
-        
-        # Ribo threshold
-        ribo_layout = QHBoxLayout()
-        ribo_layout.addWidget(QLabel("Ribo Threshold (%):"))
-        self.ribo_threshold = QDoubleSpinBox()
-        self.ribo_threshold.setRange(0, 100)
-        self.ribo_threshold.setValue(40)
-        ribo_layout.addWidget(self.ribo_threshold)
-        param_layout.addLayout(ribo_layout)
-        
-        layout.addWidget(param_group)
-        
-        # Output
-        out_group = QGroupBox("Output")
-        out_layout = QVBoxLayout(out_group)
-        
-        out_dir_layout = QHBoxLayout()
-        self.pp_output_label = QLabel("No output directory selected")
-        out_btn = QPushButton("Select Output Directory")
-        out_btn.clicked.connect(lambda: self.select_output_dir('preprocessing'))
-        out_dir_layout.addWidget(out_btn)
-        out_dir_layout.addWidget(self.pp_output_label)
-        out_layout.addLayout(out_dir_layout)
-        
-        layout.addWidget(out_group)
-        
-        # Run button
-        self.pp_run_btn = QPushButton("Run Preprocessing")
-        self.pp_run_btn.clicked.connect(self.run_preprocessing)
-        layout.addWidget(self.pp_run_btn)
-        
-        # Connect radio buttons to enable/disable custom input
-        self.use_cr_output.toggled.connect(lambda checked: input_btn.setEnabled(not checked))
-        self.use_custom_input.toggled.connect(lambda checked: input_btn.setEnabled(checked))
-        
-        # Initially disable input selection if using Cell Ranger output
-        input_btn.setEnabled(False)
-        
-        return tab
-    
-    def create_clustering_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        
-        # Input section
-        input_group = QGroupBox("Input")
-        input_layout = QVBoxLayout(input_group)
-        
-        # Option to use preprocessing output or custom input
-        self.use_pp_output = QRadioButton("Use Preprocessing Output")
-        self.use_custom_cluster_input = QRadioButton("Use Custom Input")
-        self.use_pp_output.setChecked(True)
-        
-        input_layout.addWidget(self.use_pp_output)
-        input_layout.addWidget(self.use_custom_cluster_input)
-        
-        # Custom input selection
-        custom_input_layout = QHBoxLayout()
-        self.cluster_input_label = QLabel("No input file selected")
-        input_btn = QPushButton("Select Input File")
-        input_btn.clicked.connect(self.select_clustering_input)
-        custom_input_layout.addWidget(input_btn)
-        custom_input_layout.addWidget(self.cluster_input_label)
-        input_layout.addLayout(custom_input_layout)
-        
-        layout.addWidget(input_group)
-        
-        # Clustering parameters
-        param_group = QGroupBox("Clustering Parameters")
-        param_layout = QVBoxLayout(param_group)
-        
-        # Number of PCs
-        pc_layout = QHBoxLayout()
-        pc_layout.addWidget(QLabel("Number of PCs:"))
-        self.n_pcs = QSpinBox()
-        self.n_pcs.setRange(10, 100)
-        self.n_pcs.setValue(30)
-        pc_layout.addWidget(self.n_pcs)
-        param_layout.addLayout(pc_layout)
-        
-        # Resolution
-        res_layout = QHBoxLayout()
-        res_layout.addWidget(QLabel("Resolution:"))
-        self.resolution = QDoubleSpinBox()
-        self.resolution.setRange(0.1, 2.0)
-        self.resolution.setSingleStep(0.1)
-        self.resolution.setValue(0.5)
-        res_layout.addWidget(self.resolution)
-        param_layout.addLayout(res_layout)
-        
-        # Number of top genes
-        genes_layout = QHBoxLayout()
-        genes_layout.addWidget(QLabel("Number of Top Genes:"))
-        self.n_top_genes = QSpinBox()
-        self.n_top_genes.setRange(500, 5000)
-        self.n_top_genes.setSingleStep(100)
-        self.n_top_genes.setValue(2000)
-        genes_layout.addWidget(self.n_top_genes)
-        param_layout.addLayout(genes_layout)
-        
-        layout.addWidget(param_group)
-        
-        # Output
-        out_group = QGroupBox("Output")
-        out_layout = QVBoxLayout(out_group)
-        
-        out_dir_layout = QHBoxLayout()
-        self.cluster_output_label = QLabel("No output directory selected")
-        out_btn = QPushButton("Select Output Directory")
-        out_btn.clicked.connect(lambda: self.select_output_dir('clustering'))
-        out_dir_layout.addWidget(out_btn)
-        out_dir_layout.addWidget(self.cluster_output_label)
-        out_layout.addLayout(out_dir_layout)
-        
-        layout.addWidget(out_group)
-        
-        # Run button
-        self.cluster_run_btn = QPushButton("Run Clustering")
-        self.cluster_run_btn.clicked.connect(self.run_clustering)
-        layout.addWidget(self.cluster_run_btn)
-        
-        # Connect radio buttons
-        self.use_pp_output.toggled.connect(lambda checked: input_btn.setEnabled(not checked))
-        self.use_custom_cluster_input.toggled.connect(lambda checked: input_btn.setEnabled(checked))
-        
-        # Initially disable input selection
-        input_btn.setEnabled(False)
-        
-        return tab
-    
-    def create_analysis_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        
-        # Input section
-        input_group = QGroupBox("Input")
-        input_layout = QVBoxLayout(input_group)
-        
-        # Option to use clustering output or custom input
-        self.use_cluster_output = QRadioButton("Use Clustering Output")
-        self.use_custom_analysis_input = QRadioButton("Use Custom Input")
-        self.use_cluster_output.setChecked(True)
-        
-        input_layout.addWidget(self.use_cluster_output)
-        input_layout.addWidget(self.use_custom_analysis_input)
-        
-        # Custom input selection
-        custom_input_layout = QHBoxLayout()
-        self.analysis_input_label = QLabel("No input file selected")
-        input_btn = QPushButton("Select Input File")
-        input_btn.clicked.connect(self.select_analysis_input)
-        custom_input_layout.addWidget(input_btn)
-        custom_input_layout.addWidget(self.analysis_input_label)
-        input_layout.addLayout(custom_input_layout)
-        
-        layout.addWidget(input_group)
-        
-        # Analysis Method
-        method_group = QGroupBox("Analysis Method")
-        method_layout = QVBoxLayout(method_group)
-        
-        # Create button group to make selections exclusive
-        self.method_group = QButtonGroup()
-        
-        # Method selection
-        self.celltypist_radio = QRadioButton("CellTypist")
-        self.reference_radio = QRadioButton("Reference-based")
-        self.marker_radio = QRadioButton("Marker-based")
-        
-        # Add buttons to group
-        self.method_group.addButton(self.celltypist_radio)
-        self.method_group.addButton(self.reference_radio)
-        self.method_group.addButton(self.marker_radio)
-        
-        self.celltypist_radio.setChecked(True)
-        
-        method_layout.addWidget(self.celltypist_radio)
-        method_layout.addWidget(self.reference_radio)
-        method_layout.addWidget(self.marker_radio)
-        
-        # Connect radio buttons to show/hide relevant options
-        self.method_group.buttonClicked.connect(self.method_changed)
-        
-        layout.addWidget(method_group)
-        
-        # Method-specific options
-        self.method_options = QGroupBox("Method Options")
-        self.method_options_layout = QVBoxLayout(self.method_options)
-        
-        # CellTypist options (default)
-        self.create_celltypist_options()
-        
-        layout.addWidget(self.method_options)
-        
-        # Output
-        out_group = QGroupBox("Output")
-        out_layout = QVBoxLayout(out_group)
-        
-        out_dir_layout = QHBoxLayout()
-        self.analysis_output_label = QLabel("No output directory selected")
-        out_btn = QPushButton("Select Output Directory")
-        out_btn.clicked.connect(lambda: self.select_output_dir('analysis'))
-        out_dir_layout.addWidget(out_btn)
-        out_dir_layout.addWidget(self.analysis_output_label)
-        out_layout.addLayout(out_dir_layout)
-        
-        layout.addWidget(out_group)
-        
-        # Run button
-        self.analysis_run_btn = QPushButton("Run Analysis")
-        self.analysis_run_btn.clicked.connect(self.run_analysis)
-        layout.addWidget(self.analysis_run_btn)
-        
-        # Connect radio buttons
-        self.use_cluster_output.toggled.connect(lambda checked: input_btn.setEnabled(not checked))
-        self.use_custom_analysis_input.toggled.connect(lambda checked: input_btn.setEnabled(checked))
-        
-        # Initially disable input selection
-        input_btn.setEnabled(False)
-        
-        return tab
-    
-    def create_celltypist_options(self):
-        """Create CellTypist-specific options"""
-        # Clear existing options
-        self.clear_method_options()
-        
-        # Model selection
-        model_layout = QHBoxLayout()
-        model_layout.addWidget(QLabel("Model:"))
-        self.model_combo = QComboBox()
-        self.model_combo.addItems(['Immune_All_High.pkl', 'Human_Lung_Atlas.pkl'])
-        model_layout.addWidget(self.model_combo)
-        self.method_options_layout.addLayout(model_layout)
-        
-        # Confidence threshold
-        conf_layout = QHBoxLayout()
-        conf_layout.addWidget(QLabel("Confidence Threshold:"))
-        self.confidence_threshold = QDoubleSpinBox()
-        self.confidence_threshold.setRange(0, 1)
-        self.confidence_threshold.setSingleStep(0.1)
-        self.confidence_threshold.setValue(0.5)
-        conf_layout.addWidget(self.confidence_threshold)
-        self.method_options_layout.addLayout(conf_layout)
-    
-    def create_reference_options(self):
-        """Create reference-based options"""
-        self.clear_method_options()
-        
-        # Reference file selection
-        ref_layout = QHBoxLayout()
-        self.ref_file_label = QLabel("No reference file selected")
-        ref_btn = QPushButton("Select Reference File")
-        ref_btn.clicked.connect(self.select_reference_file)
-        ref_layout.addWidget(ref_btn)
-        ref_layout.addWidget(self.ref_file_label)
-        self.method_options_layout.addLayout(ref_layout)
-        
-        # Batch correction option
-        batch_layout = QHBoxLayout()
-        self.batch_correction = QCheckBox("Use batch correction")
-        self.batch_correction.setChecked(True)
-        batch_layout.addWidget(self.batch_correction)
-        self.method_options_layout.addLayout(batch_layout)
-    
-    def create_marker_options(self):
-        """Create marker-based options"""
-        self.clear_method_options()
-        
-        # Marker file selection
-        marker_layout = QHBoxLayout()
-        self.marker_file_label = QLabel("No marker file selected")
-        marker_btn = QPushButton("Select Marker File")
-        marker_btn.clicked.connect(self.select_marker_file)
-        marker_layout.addWidget(marker_btn)
-        marker_layout.addWidget(self.marker_file_label)
-        self.method_options_layout.addLayout(marker_layout)
-    
-    def clear_method_options(self):
-        """Clear all widgets from method options layout"""
-        while self.method_options_layout.count():
-            child = self.method_options_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-            elif child.layout():
-                # Clear nested layouts
-                while child.layout().count():
-                    subchild = child.layout().takeAt(0)
-                    if subchild.widget():
-                        subchild.widget().deleteLater()
-    
-    def method_changed(self, button):
-        """Handle method selection change"""
-        if button == self.celltypist_radio:
-            self.create_celltypist_options()
-        elif button == self.reference_radio:
-            self.create_reference_options()
-        elif button == self.marker_radio:
-            self.create_marker_options()
-    
-    def select_fastq_files(self):
-        """Select FASTQ files"""
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select FASTQ Files",
-            "",
-            "FASTQ Files (*.fastq *.fq *.fastq.gz *.fq.gz)"
-        )
-        if files:
-            self.fastq_files = files
-            self.fastq_label.setText(f"{len(files)} files selected")
-    
-    def select_reference(self):
-        """Select reference genome"""
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select Reference Genome Directory"
-        )
-        if directory:
-            self.reference_dir = directory
-            self.ref_label.setText(directory)
-    
-    def select_preprocessing_input(self):
-        """Select preprocessing input file"""
-        file, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Input File",
-            "",
-            "All Supported Files (*.h5 *.h5ad);;H5AD Files (*.h5ad);;H5 Files (*.h5);;All Files (*.*)"
-        )
-        if file:
-            self.pp_input_file = file
-            self.pp_input_label.setText(os.path.basename(file))
-    
-    def select_clustering_input(self):
-        """Select clustering input file"""
-        file, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Input File",
-            "",
-            "All Supported Files (*.h5 *.h5ad);;H5AD Files (*.h5ad);;H5 Files (*.h5);;All Files (*.*)"
-        )
-        if file:
-            self.cluster_input_file = file
-            self.cluster_input_label.setText(os.path.basename(file))
-    
-    def select_analysis_input(self):
-        """Select analysis input file"""
-        file, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Input File",
-            "",
-            "All Supported Files (*.h5 *.h5ad);;H5AD Files (*.h5ad);;H5 Files (*.h5);;All Files (*.*)"
-        )
-        if file:
-            self.analysis_input_file = file
-            self.analysis_input_label.setText(os.path.basename(file))
-    
-    def select_reference_file(self):
-        """Select reference file for analysis"""
-        file, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Reference File",
-            "",
-            "H5AD Files (*.h5ad);;CSV Files (*.csv);;All Files (*.*)"
-        )
-        if file:
-            self.reference_file = file
-            self.ref_file_label.setText(os.path.basename(file))
-    
-    def select_marker_file(self):
-        """Select marker gene file"""
-        file, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Marker File",
-            "",
-            "CSV Files (*.csv);;Text Files (*.txt);;All Files (*.*)"
-        )
-        if file:
-            self.marker_file = file
-            self.marker_file_label.setText(os.path.basename(file))
-    
-    def run_cellranger(self):
-        """Run Cell Ranger processing"""
-        try:
-            # Validate inputs
-            if not hasattr(self, 'fastq_files') or not self.fastq_files:
-                QMessageBox.warning(self, "Error", "Please select FASTQ files")
-                return
-            
-            if not hasattr(self, 'reference_dir') or not self.reference_dir:
-                QMessageBox.warning(self, "Error", "Please select reference genome directory")
-                return
-            
-            if not hasattr(self, 'cr_output_dir') or not self.cr_output_dir:
-                QMessageBox.warning(self, "Error", "Please select output directory")
-                return
-            
-            # Get sample name and ID
-            sample_name = self.sample_name_input.text()
-            if not sample_name:
-                QMessageBox.warning(self, "Error", "Please enter a sample name")
-                return
-            
-            # Create PipelineRunner instance with debug logging
-            print(f"Creating pipeline runner with:")
-            print(f"FASTQ files: {self.fastq_files}")
-            print(f"Reference: {self.reference_dir}")
-            print(f"Output: {self.cr_output_dir}")
-            print(f"Sample name: {sample_name}")
-            
-            self.pipeline_runner = PipelineRunner(
-                fastq_files=self.fastq_files,
-                reference_path=self.reference_dir,
-                output_dir=self.cr_output_dir,
-                sample_name=sample_name,
-                sample_id=self.sample_id_input.text(),
-                cores=self.cores_spin.value(),
-                memory=self.mem_spin.value()
-            )
-            
-            # Connect signals
-            self.pipeline_runner.status_updated.connect(self.update_status)
-            self.pipeline_runner.error_occurred.connect(self.handle_error)
-            self.pipeline_runner.finished.connect(self.cellranger_finished)
-            
-            # Disable run button
-            self.cr_run_btn.setEnabled(False)
-            
-            # Start processing
-            self.pipeline_runner.start()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to start Cell Ranger: {str(e)}")
-            self.cr_run_btn.setEnabled(True)
-    
-    def run_preprocessing(self):
-        """Run preprocessing"""
-        # Get input file
-        input_file = None
-        if self.use_cr_output.isChecked():
-            if hasattr(self, 'cr_output_dir'):
-                input_file = os.path.join(
-                    self.cr_output_dir,
-                    "cellranger_output/sample1/outs/filtered_feature_bc_matrix.h5"
-                )
-        else:
-            if hasattr(self, 'pp_input_file'):
-                input_file = self.pp_input_file
-                
+        self.output_dir_edit = QLineEdit()
+        self.output_dir_edit.setPlaceholderText("Path to output directory...")
+        out_button = QPushButton("Browse…")
+        out_button.clicked.connect(self.select_output_dir)
+
+        out_hlayout = QHBoxLayout()
+        out_hlayout.addWidget(self.output_dir_edit)
+        out_hlayout.addWidget(out_button)
+        file_form.addRow("Output Dir:", out_hlayout)
+
+        # New "Annotation Name" field
+        self.annotation_name_edit = QLineEdit()
+        self.annotation_name_edit.setPlaceholderText("Name for annotation run (e.g. 'sampleA')")
+        file_form.addRow("Annotation Name:", self.annotation_name_edit)
+
+        file_group.setLayout(file_form)
+        layout.addWidget(file_group)
+
+        # =========================
+        # (2) Preprocessed Checkbox
+        # =========================
+        self.preprocessed_checkbox = QCheckBox("File is already preprocessed")
+        self.preprocessed_checkbox.setChecked(False)
+        self.preprocessed_checkbox.stateChanged.connect(self.toggle_preprocessing_params)
+        layout.addWidget(self.preprocessed_checkbox)
+
+        # =========================
+        # (3) 💾 Preprocessing Parameters
+        # =========================
+        self.preprocess_group = QGroupBox("💾 Preprocessing Parameters")
+        self.apply_shadow(self.preprocess_group)
+        self.preprocess_layout = QGridLayout()
+
+        self.preprocess_layout.addWidget(QLabel("Mito Threshold:"), 0, 0)
+        self.mito_threshold_spin = QDoubleSpinBox()
+        self.mito_threshold_spin.setRange(0, 1)
+        self.mito_threshold_spin.setValue(0.05)
+        self.preprocess_layout.addWidget(self.mito_threshold_spin, 0, 1)
+
+        self.preprocess_layout.addWidget(QLabel("Min Genes:"), 0, 2)
+        self.min_genes_spin = QSpinBox()
+        self.min_genes_spin.setRange(0, 50000)
+        self.min_genes_spin.setValue(250)
+        self.preprocess_layout.addWidget(self.min_genes_spin, 0, 3)
+
+        self.preprocess_layout.addWidget(QLabel("Min Counts:"), 1, 0)
+        self.min_counts_spin = QSpinBox()
+        self.min_counts_spin.setRange(0, 100000)
+        self.min_counts_spin.setValue(500)
+        self.preprocess_layout.addWidget(self.min_counts_spin, 1, 1)
+
+        self.preprocess_layout.addWidget(QLabel("Number of HVGs:"), 1, 2)
+        self.n_hvgs_spin = QSpinBox()
+        self.n_hvgs_spin.setRange(500, 10000)
+        self.n_hvgs_spin.setValue(2000)
+        self.preprocess_layout.addWidget(self.n_hvgs_spin, 1, 3)
+
+        self.preprocess_layout.addWidget(QLabel("Number of PCs:"), 2, 0)
+        self.n_pcs_spin = QSpinBox()
+        self.n_pcs_spin.setRange(10, 300)
+        self.n_pcs_spin.setValue(50)
+        self.preprocess_layout.addWidget(self.n_pcs_spin, 2, 1)
+
+        self.preprocess_layout.addWidget(QLabel("Number of Neighbors:"), 2, 2)
+        self.neighbors_spin = QSpinBox()
+        self.neighbors_spin.setRange(1, 200)
+        self.neighbors_spin.setValue(15)
+        self.preprocess_layout.addWidget(self.neighbors_spin, 2, 3)
+
+        self.preprocess_layout.addWidget(QLabel("Leiden Resolution:"), 3, 0)
+        self.resolution_dspin = QDoubleSpinBox()
+        self.resolution_dspin.setRange(0.1, 5.0)
+        self.resolution_dspin.setValue(0.8)
+        self.resolution_dspin.setSingleStep(0.1)
+        self.preprocess_layout.addWidget(self.resolution_dspin, 3, 1)
+
+        self.preprocess_group.setLayout(self.preprocess_layout)
+        layout.addWidget(self.preprocess_group)
+        self.toggle_preprocessing_params()  # Hide if "already preprocessed" is checked
+
+        # =========================
+        # (4) 🚀 Annotation Parameters
+        # =========================
+        anno_group = QGroupBox("🚀 Annotation Parameters")
+        self.apply_shadow(anno_group)
+        anno_layout = QFormLayout()
+
+        self.species_combo = QComboBox()
+        self.species_combo.addItems(["human", "mouse"])
+        anno_layout.addRow("Species:", self.species_combo)
+
+        self.cellmarker_checkbox = QCheckBox("Use CellMarker (OmicVerse)")
+        self.cellmarker_checkbox.setChecked(True)
+        anno_layout.addRow(self.cellmarker_checkbox)
+
+        self.panglao_checkbox = QCheckBox("Use Panglao DB")
+        self.panglao_checkbox.setChecked(False)
+        anno_layout.addRow(self.panglao_checkbox)
+
+        self.cancer_sca_checkbox = QCheckBox("Use Cancer Single Cell Atlas")
+        self.cancer_sca_checkbox.setChecked(False)
+        anno_layout.addRow(self.cancer_sca_checkbox)
+
+        self.confidence_spin = QDoubleSpinBox()
+        self.confidence_spin.setRange(0.0, 1.0)
+        self.confidence_spin.setValue(0.5)
+        self.confidence_spin.setSingleStep(0.05)
+        anno_layout.addRow("Confidence Threshold:", self.confidence_spin)
+
+        anno_group.setLayout(anno_layout)
+        layout.addWidget(anno_group)
+
+        # =========================
+        # (5) Run Button
+        # =========================
+        self.run_button = QPushButton("Run Annotation")
+        self.run_button.setStyleSheet("""
+            QPushButton {
+                background-color: #7289DA;
+                color: #FFFFFF;
+                padding: 10px 18px;
+                font-weight: bold;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #8697E2;
+            }
+            QPushButton:disabled {
+                background-color: #4D5A84;
+                color: #AAAAAA;
+            }
+        """)
+        self.run_button.clicked.connect(self.run_annotation)
+        layout.addWidget(self.run_button)
+
+        # =========================
+        # (6) Progress Bar & Label
+        # =========================
+        self.progress_label = QLabel("Progress:")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_label)
+        layout.addWidget(self.progress_bar)
+
+        parent_widget.setLayout(layout)
+
+    def apply_shadow(self, group_box):
+        """
+        Apply a drop shadow effect to group boxes for a modern, elevated look.
+        """
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setOffset(4, 4)
+        shadow.setColor(QColor(0, 0, 0, 180))  # Semi-transparent black
+        group_box.setGraphicsEffect(shadow)
+
+    def toggle_preprocessing_params(self):
+        """Show or hide the preprocessing parameters group based on preprocessed checkbox."""
+        is_preprocessed = self.preprocessed_checkbox.isChecked()
+        self.preprocess_group.setVisible(not is_preprocessed)
+
+    def select_input_file(self):
+        """Prompt user to pick the input file."""
+        dialog = QFileDialog()
+        dialog.setFileMode(QFileDialog.ExistingFile)
+        dialog.setNameFilter("Data Files (*.h5ad *.h5 *.csv *.txt *.mtx);;All Files (*.*)")
+        if dialog.exec_():
+            fname = dialog.selectedFiles()[0]
+            self.input_file_edit.setText(fname)
+
+    def select_output_dir(self):
+        """Prompt user to pick the output directory."""
+        dialog = QFileDialog()
+        dialog.setFileMode(QFileDialog.Directory)
+        if dialog.exec_():
+            dirname = dialog.selectedFiles()[0]
+            self.output_dir_edit.setText(dirname)
+
+    def run_annotation(self):
+        """Collect user inputs, create an AnnotationRunner, and start it."""
+        input_file = self.input_file_edit.text().strip()
+        output_dir = self.output_dir_edit.text().strip()
+        annotation_name = self.annotation_name_edit.text().strip()
         if not input_file:
-            QMessageBox.warning(self, "Error", "Please select input file first!")
+            QMessageBox.warning(self, "Error", "Please select an input file.")
             return
-            
-        if not hasattr(self, 'pp_output_dir'):
-            QMessageBox.warning(self, "Error", "Please select output directory first!")
+        if not output_dir:
+            QMessageBox.warning(self, "Error", "Please select an output directory.")
             return
         
-        # Disable run button
-        self.pp_run_btn.setEnabled(False)
-        
-        # Create runner thread
-        self.pp_runner = PreprocessingRunner(
+        preprocessed = self.preprocessed_checkbox.isChecked()
+        species = self.species_combo.currentText().strip()
+        use_cellmarker = self.cellmarker_checkbox.isChecked()
+        use_panglao = self.panglao_checkbox.isChecked()
+        use_cancer_sca = self.cancer_sca_checkbox.isChecked()
+
+        pp_params = {
+            'mito_prefix': 'MT-',
+            'mito_threshold': self.mito_threshold_spin.value(),
+            'min_genes': self.min_genes_spin.value(),
+            'min_counts': self.min_counts_spin.value(),
+            'n_hvgs': self.n_hvgs_spin.value(),
+            'n_pcs': self.n_pcs_spin.value(),
+            'n_neighbors': self.neighbors_spin.value(),
+            'resolution': self.resolution_dspin.value()
+        }
+
+        self.anno_thread = AnnotationRunner(
             input_file=input_file,
-            output_dir=self.pp_output_dir,
-            mt_threshold=self.mt_threshold.value(),
-            ribo_threshold=self.ribo_threshold.value()
+            output_dir=output_dir,
+            preprocessed=preprocessed,
+            species=species,
+            use_cellmarker=use_cellmarker,
+            use_panglao=use_panglao,
+            use_cancer_single_cell_atlas=use_cancer_sca,
+            preprocessing_params=pp_params,
+            name=annotation_name
         )
-        
-        # Connect signals
-        self.pp_runner.progress_updated.connect(self.progress.setValue)
-        self.pp_runner.status_updated.connect(self.status_label.setText)
-        self.pp_runner.finished.connect(self.preprocessing_finished)
-        
-        # Start processing
-        self.pp_runner.start()
-    
-    def run_clustering(self):
-        """Run clustering"""
-        print("Starting clustering...")
-        
-        # Get input file
-        input_file = None
-        if self.use_pp_output.isChecked():
-            if hasattr(self, 'pp_output_dir'):
-                print(f"Looking for preprocessed files in: {self.pp_output_dir}")
-                try:
-                    pp_files = [f for f in os.listdir(self.pp_output_dir) 
-                              if f.startswith('preprocessed_') and f.endswith('.h5ad')]
-                    print(f"Found preprocessed files: {pp_files}")
-                    if pp_files:
-                        latest_file = max(pp_files)
-                        input_file = os.path.join(self.pp_output_dir, latest_file)
-                        print(f"Selected input file: {input_file}")
-                except Exception as e:
-                    print(f"Error finding preprocessed files: {str(e)}")
-        else:
-            if hasattr(self, 'cluster_input_file'):
-                input_file = self.cluster_input_file
-                print(f"Using custom input file: {input_file}")
-                
-        if not input_file:
-            QMessageBox.warning(self, "Error", "Please select input file first!")
-            return
-            
-        if not hasattr(self, 'cluster_output_dir'):
-            QMessageBox.warning(self, "Error", "Please select output directory first!")
-            return
-        
-        try:
-            # Disable run button
-            self.cluster_run_btn.setEnabled(False)
-            
-            # Create runner thread
-            print("Creating ClusteringRunner...")
-            self.cluster_runner = ClusteringRunner(
-                input_file=input_file,
-                output_dir=self.cluster_output_dir,
-                n_pcs=self.n_pcs.value(),
-                resolution=self.resolution.value(),
-                n_top_genes=self.n_top_genes.value(),
-                random_state=42
+
+        self.anno_thread.update_progress.connect(self.on_progress)
+        self.anno_thread.finished.connect(self.on_finished)
+        self.anno_thread.error.connect(self.on_error)
+
+        self.run_button.setEnabled(False)
+        self.anno_thread.start()
+
+    def on_progress(self, progress_value, status_msg):
+        """Slot to update the progress bar and status label."""
+        self.progress_bar.setValue(progress_value)
+        if status_msg:
+            self.progress_label.setText(f"Progress: {status_msg}")
+
+    def on_finished(self, final_file):
+        """Slot called when the annotation finishes."""
+        self.run_button.setEnabled(True)
+        self.progress_bar.setValue(100)
+        self.progress_label.setText(f"Annotation complete! Results saved: {final_file}")
+        QMessageBox.information(self, "Done", f"Annotation complete! See {final_file}")
+
+        # 2) Optionally, show a popup displaying any PNGs in the output directory
+        from glob import glob
+        import os
+        out_dir = os.path.dirname(final_file)  # or self.output_dir_edit.text().strip()
+        png_paths = glob(os.path.join(out_dir, "*.png"))
+        if not png_paths:
+            return  # no images, just skip
+
+        # Create a dialog listing images
+        self.show_png_dialog(png_paths)
+
+    def show_png_dialog(self, png_paths):
+        """
+        Displays the .png images in a simple QDialog with a QVBoxLayout/QScrollArea.
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Annotation Output - PNG Previews")
+        dialog.resize(800, 600)
+
+        scroll = QScrollArea(dialog)
+        container = QWidget()
+        vlayout = QVBoxLayout(container)
+
+        # Store original pixmaps, plus one QLabel per image
+        self.zoom_factor = 1.0
+        self.preview_labels = []
+        self.original_pixmaps = []
+
+        for path in png_paths:
+            label = QLabel()
+            pix = QPixmap(path)
+            self.original_pixmaps.append(pix)
+            self.preview_labels.append(label)
+            # Initially set the pixmap (zoom_factor = 1.0)
+            scaled_pix = pix.scaled(
+                pix.width() * self.zoom_factor,
+                pix.height() * self.zoom_factor,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
             )
+            label.setPixmap(scaled_pix)
+
+            vlayout.addWidget(label)
+
+        scroll.setWidget(container)
+        dialog_layout = QVBoxLayout()
+        dialog_layout.addWidget(scroll)
+
+        # -- Add Zoom In / Zoom Out buttons at the bottom --
+        zoom_button_layout = QHBoxLayout()
+        zoom_in_btn = QPushButton("Zoom In")
+        zoom_out_btn = QPushButton("Zoom Out")
+        zoom_button_layout.addWidget(zoom_in_btn)
+        zoom_button_layout.addWidget(zoom_out_btn)
+        # Connect clicks
+        zoom_in_btn.clicked.connect(lambda: self.change_zoom(0.1))
+        zoom_out_btn.clicked.connect(lambda: self.change_zoom(-0.1))
+        dialog_layout.addLayout(zoom_button_layout)
+
+        dialog.setLayout(dialog_layout)
+
+        dialog.exec_()
+
+    def change_zoom(self, delta):
+        """
+        Increase or decrease self.zoom_factor by 'delta',
+        then rescale all preview labels accordingly.
+        """
+        # Avoid going below 0.1x or above, say, 5x
+        new_zoom = self.zoom_factor + delta
+        new_zoom = max(0.1, min(new_zoom, 5.0))
+
+        self.zoom_factor = new_zoom
+        # Rescale each label's pixmap
+        for pix, label in zip(self.original_pixmaps, self.preview_labels):
+            scaled_pix = pix.scaled(
+                pix.width() * self.zoom_factor,
+                pix.height() * self.zoom_factor,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            label.setPixmap(scaled_pix)
+
+    def on_error(self, error_message):
+        """Slot for handling errors."""
+        self.run_button.setEnabled(True)
+        QMessageBox.critical(self, "Error", f"Annotation failed: {error_message}")
+
+    ############################################################################
+    # 5) New Analysis tab setup
+    ############################################################################
+    def setup_analysis_tab(self, parent_widget):
+        # Instead of a plain form layout, let's nest it inside a group box titled "Cell Interaction"
+        main_layout = QVBoxLayout(parent_widget)
+
+        cell_interaction_box = QGroupBox("Cell Interaction")
+        self.apply_shadow(cell_interaction_box)
+        layout = QFormLayout()
+        cell_interaction_box.setLayout(layout)
+
+        # Then add cell_interaction_box to parent_widget
+        main_layout.addWidget(cell_interaction_box)
+        parent_widget.setLayout(main_layout)
+
+        # Input file
+        self.cpdb_input_edit = QLineEdit()
+        self.cpdb_input_edit.setPlaceholderText("Path to annotated .h5ad file")
+        input_btn = QPushButton("Browse")
+        input_btn.clicked.connect(lambda: self.select_file_for_widget(self.cpdb_input_edit))
+        hl_1 = QHBoxLayout()
+        hl_1.addWidget(self.cpdb_input_edit)
+        hl_1.addWidget(input_btn)
+        layout.addRow("Input File:", hl_1)
+
+        # Output directory
+        self.cpdb_output_dir = QLineEdit()
+        self.cpdb_output_dir.setPlaceholderText("Path to analysis output directory")
+        out_btn = QPushButton("Browse")
+        out_btn.clicked.connect(lambda: self.select_dir_for_widget(self.cpdb_output_dir))
+        hl_2 = QHBoxLayout()
+        hl_2.addWidget(self.cpdb_output_dir)
+        hl_2.addWidget(out_btn)
+        layout.addRow("Output Dir:", hl_2)
+
+        # Column name in adata.obs for cell types
+        self.cpdb_column_edit = QLineEdit()
+        self.cpdb_column_edit.setPlaceholderText("Cell Label in adata.obs (e.g. 'cellmarker')")
+        layout.addRow("Label Column Name:", self.cpdb_column_edit)
+
+        # CPDB file path
+        self.cpdb_file_edit = QLineEdit()
+        self.cpdb_file_edit.setPlaceholderText("Path to CellPhoneDB db zip (e.g. data/cellphonedb.zip)")
+        cpdb_btn = QPushButton("Browse")
+        cpdb_btn.clicked.connect(lambda: self.select_file_for_widget(self.cpdb_file_edit))
+        hl_3 = QHBoxLayout()
+        hl_3.addWidget(self.cpdb_file_edit)
+        hl_3.addWidget(cpdb_btn)
+        layout.addRow("CPDB File:", hl_3)
+
+        # Analysis name
+        self.cpdb_name_edit = QLineEdit()
+        self.cpdb_name_edit.setPlaceholderText("Name prefix for output (e.g. 'lung')")
+        layout.addRow("Analysis Name:", self.cpdb_name_edit)
+        
+        # Run button
+        self.cpdb_run_btn = QPushButton("Run CellPhoneDB →")
+        self.cpdb_run_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #7289DA; color: #FFFFFF; padding: 8px 14px;
+                font-weight: bold; border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #8697E2;
+            }
+            QPushButton:disabled {
+                background-color: #4D5A84;
+                color: #AAAAAA;
+            }
+        """)
+        self.cpdb_run_btn.clicked.connect(self.run_cellphonedb_analysis)
+        layout.addRow(self.cpdb_run_btn)
+
+        # Make a horizontal layout so the bar spans the width
+        progress_hlayout = QHBoxLayout()
+        self.analysis_progress_label = QLabel("Analysis Progress:")
+        self.analysis_progress_bar = QProgressBar()
+        self.analysis_progress_bar.setValue(0)
+        # Stretch the bar to fill remaining space
+        progress_hlayout.addWidget(self.analysis_progress_label)
+        progress_hlayout.addWidget(self.analysis_progress_bar, 1)
+        layout.addRow(progress_hlayout)
+
+        main_layout.addWidget(cell_interaction_box)
+        parent_widget.setLayout(main_layout)
+
+    ############################################################################
+    # 6) Helpers to select file/directory for analysis tab
+    ############################################################################
+    def select_file_for_widget(self, line_edit):
+        dialog = QFileDialog(self)
+        dialog.setFileMode(QFileDialog.ExistingFile)
+        if dialog.exec_():
+            line_edit.setText(dialog.selectedFiles()[0])
+
+    def select_dir_for_widget(self, line_edit):
+        dialog = QFileDialog(self)
+        dialog.setFileMode(QFileDialog.Directory)
+        if dialog.exec_():
+            line_edit.setText(dialog.selectedFiles()[0])
+
+    ############################################################################
+    # 7) Method to run the actual analysis in a separate thread
+    ############################################################################
+    def run_cellphonedb_analysis(self):
+        input_file = self.cpdb_input_edit.text().strip()
+        out_dir = self.cpdb_output_dir.text().strip()
+        col_name = self.cpdb_column_edit.text().strip()
+        cpdb_zip = self.cpdb_file_edit.text().strip()
+        name_str = self.cpdb_name_edit.text().strip() or "analysis"
+
+        if not input_file or not out_dir or not col_name or not cpdb_zip:
+            QMessageBox.warning(self, "Invalid Input", "Please fill in all required fields.")
+            return
             
-            # Connect signals
-            print("Connecting signals...")
-            self.cluster_runner.progress_updated.connect(self.progress.setValue)
-            self.cluster_runner.status_updated.connect(self.status_label.setText)
-            self.cluster_runner.error_occurred.connect(self.handle_clustering_error)
-            self.cluster_runner.finished.connect(self.clustering_finished)
-            
-            # Start processing
-            print("Starting clustering runner...")
-            self.cluster_runner.start()
-            
-        except Exception as e:
-            print(f"Error in run_clustering: {str(e)}")
-            self.handle_clustering_error(str(e))
-    
-    def handle_clustering_error(self, error_msg):
-        """Handle clustering errors"""
-        self.cluster_run_btn.setEnabled(True)
-        QMessageBox.critical(self, "Error", f"Clustering failed: {error_msg}")
-    
-    def clustering_finished(self):
-        """Handle clustering completion"""
-        self.cluster_run_btn.setEnabled(True)
-        QMessageBox.information(self, "Complete", "Clustering complete!")
-    
-    def run_analysis(self):
-        """Run analysis"""
-        # Similar implementation to run_preprocessing
-        pass
-    
-    def cellranger_finished(self):
-        """Handle Cell Ranger completion"""
-        self.cr_run_btn.setEnabled(True)
-        self.status_label.setText("Cell Ranger processing complete!")
-        QMessageBox.information(self, "Success", "Cell Ranger processing completed successfully!")
-    
-    def preprocessing_finished(self):
-        """Handle preprocessing completion"""
-        self.pp_run_btn.setEnabled(True)
-        QMessageBox.information(self, "Complete", "Preprocessing complete!")
-    
-    def select_output_dir(self, task):
-        """Select output directory for specific task"""
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            f"Select Output Directory for {task.title()}"
+        self.cpdb_run_btn.setEnabled(False)
+
+        self.analysis_thread = AnalysisRunner(
+            input_file=input_file,
+            output_dir=out_dir,
+            column_name=col_name,
+            cpdb_file_path=cpdb_zip,
+            name=name_str
         )
-        if directory:
-            if task == 'cellranger':
-                self.cr_output_dir = directory
-                self.cr_output_label.setText(directory)
-            elif task == 'preprocessing':
-                self.pp_output_dir = directory
-                self.pp_output_label.setText(directory)
-            elif task == 'clustering':
-                self.cluster_output_dir = directory
-                self.cluster_output_label.setText(directory)
-            elif task == 'analysis':
-                self.analysis_output_dir = directory
-                self.analysis_output_label.setText(directory)
-    
-    def update_status(self, message):
-        """Update status label with message"""
-        self.status_label.setText(message)
-        print(message)  # Also print to console for debugging
-        
-    def handle_error(self, error_message):
-        """Handle error messages"""
-        QMessageBox.critical(self, "Error", error_message)
-        self.cr_run_btn.setEnabled(True)
-        self.status_label.setText(f"Error: {error_message}")
+        # Connect our new progress bar
+        self.analysis_thread.update_progress.connect(self.on_analysis_progress)
+        self.analysis_thread.finished.connect(self.on_analysis_finished)
+        self.analysis_thread.error.connect(self.on_analysis_error)
+        self.analysis_thread.start()
 
-class ReferenceSetManager(QWidget):
-    def __init__(self):
-        super().__init__()
-        layout = QVBoxLayout(self)
-        
-        # Reference set table
-        self.ref_table = QTableWidget()
-        self.ref_table.setColumnCount(4)
-        self.ref_table.setHorizontalHeaderLabels([
-            'Reference Name', 'Type', 'Species', 'Tissue'
-        ])
-        layout.addWidget(self.ref_table)
-        
-        # Add custom reference button
-        add_btn = QPushButton("Add Custom Reference")
-        add_btn.clicked.connect(self.add_custom_reference)
-        layout.addWidget(add_btn)
-        
-    def add_custom_reference(self):
-        dialog = CustomReferenceDialog()
-        if dialog.exec():
-            ref_data = dialog.get_reference_data()
-            self.add_reference_to_table(ref_data)
+    def on_analysis_progress(self, percent, message):
+        # Now direct to our new analysis bar/label
+        self.analysis_progress_bar.setValue(percent)
+        if message:
+            self.analysis_progress_label.setText(f"Analysis Progress: {message}")
 
-if __name__ == '__main__':
+    def on_analysis_finished(self, msg):
+        self.cpdb_run_btn.setEnabled(True)
+        # Freed up the thread
+        self.analysis_progress_bar.setValue(100)
+        self.append_to_log(f"{msg}\n")
+        QMessageBox.information(self, "Done", msg)
+
+        # 3) Preview images in the analysis output folder when finished
+        from glob import glob
+        import os
+        out_dir = self.cpdb_output_dir.text().strip()  # The directory user selected
+        png_paths = glob(os.path.join(out_dir, "*.png"))
+        if png_paths:
+            self.show_png_dialog(png_paths)
+
+    def on_analysis_error(self, error_message):
+        self.cpdb_run_btn.setEnabled(True)
+        traceback.print_exc()  # Also send to the log
+        QMessageBox.critical(self, "Error", f"CellPhoneDB analysis failed: {error_message}")
+
+    def append_to_log(self, text):
+        """
+        Slot that receives text from EmittingStream and appends it to log_text_edit.
+        """
+        # Move cursor to end and insert text
+        self.log_text_edit.moveCursor(QTextCursor.End)
+        self.log_text_edit.insertPlainText(text + "\n")
+        self.log_text_edit.moveCursor(QTextCursor.End)
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = PipelineGUI()
+    window = SingleTabGUI()
     window.show()
-    sys.exit(app.exec()) 
+    sys.exit(app.exec_())
