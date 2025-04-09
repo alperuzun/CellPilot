@@ -1,4 +1,4 @@
-# Cell Pilot
+# CellPilot
 
 <p align="center">
   <img src="cellpilot_logo.png" alt="CellPilot Logo" width="300"/>
