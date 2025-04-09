@@ -88,9 +88,9 @@ When you run the annotation pipeline with raw data, it performs these preprocess
 The annotation process uses reference databases to assign cell types:
 
 1. **Reference Databases**
-   - **CellMarker (OmicVerse)**: Comprehensive cell marker database for human and mouse
-   - **PanglaoDB** (optional): Database of cell type markers from various tissues
-   - **Cancer Single Cell Atlas** (optional): Cancer-specific cell markers
+   - **CellMarker**: Comprehensive cell marker database for human and mouse
+   - **PanglaoDB**: Database of cell type markers from various tissues
+   - **Cancer Single Cell Atlas**: Cancer-specific cell markers
 
 2. **Annotation Method**
    - Compares cluster marker genes with reference databases
