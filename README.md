@@ -3,8 +3,8 @@
 <p align="center">
   <img src="cellpilot_logo.png" alt="CellPilot Logo" width="300"/>
 </p>
+
 ## CellPilot is a graphical interface for single-cell RNA-seq analysis, integrating quality control, normalization, dimensionality reduction, clustering, and automated cell type annotation into a streamlined workflow.
-Below are the minimal steps to set up a **conda environment** and run `gui_main.py`.
 
 ## Prerequisites
 
