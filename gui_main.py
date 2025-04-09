@@ -38,13 +38,11 @@ class EmittingStream(QObject):
 ################################################################################
 class SingleTabGUI(QMainWindow):
     """
-    A streamlined GUI with a single 'Annotation' tab.
-    Applies a Discord-inspired dark theme with subtle purple highlights.
     """
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Single-Cell Annotation Tool 🚀")
+        self.setWindowTitle("CellPilot 🚀")
         self.setGeometry(150, 100, 960, 600)
 
         # Apply a custom Discord-like dark theme
