@@ -21,3 +21,4 @@ cellranger-8.0.1/
 cellranger-8.0.1/
 temp/
 models/
+models/GDSC_exp.tsv.gz
