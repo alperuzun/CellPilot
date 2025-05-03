@@ -201,9 +201,10 @@ def run_cell_phone_db(input_file, output_dir, column_name='cell_type', cpdb_file
     print(f"CellPhoneDB analysis for {name} completed successfully!")
     return cpdb_results
 
-def run_inferncnv(input_file, output_dir, name, reference_key='cell_type', gtf_path='db/gencode.v47.annotation.gtf.gz', reference_cat=None, cnv_threshold=0.03, cores=4,):
+def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db/gencode.v47.annotation.gtf.gz', reference_cat=None, cnv_threshold=0.03, cores=4,):
     import infercnvpy as cnv
-
+    if reference_key == "": reference_key = None
+    if reference_cat == "": reference_cat = None
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
     adata = sc.read_h5ad(input_file)
@@ -236,13 +237,19 @@ def run_inferncnv(input_file, output_dir, name, reference_key='cell_type', gtf_p
     cnv.tl.leiden(adata)
     cnv.tl.umap(adata)
     cnv.tl.cnv_score(adata)
-    sc.pl.umap(adata, color="cnv_score", save=os.path.join(output_dir, f'{name}_cnv_umap_{timestamp}.png'), show=False)
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sc.pl.umap(adata, color="cnv_score", ax=ax, show=False)
+    fig.savefig(os.path.join(output_dir, f'{name}_cnv_umap_{timestamp}.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig)  # Close the figure to prevent blank subsequent plots
     print(f"UMAP plot saved to {name}_cnv_umap_{timestamp}.png")
     adata.obs["cnv_status"] = "normal"
     adata.obs.loc[
         adata.obs["cnv_score"]>cnv_threshold, "cnv_status"
     ] = "tumor"
-    sc.pl.umap(adata, color="cnv_status", save=os.path.join(output_dir, f'{name}_cnv_umap_status_{timestamp}.png'), show=False)
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sc.pl.umap(adata, color="cnv_status", ax=ax, show=False)
+    fig.savefig(os.path.join(output_dir, f'{name}_cnv_umap_status_{timestamp}.png'), dpi=300, bbox_inches='tight')
+    plt.close(fig)
     print(f"UMAP plot saved to {name}_cnv_umap_status_{timestamp}.png")
     tumor=adata[adata.obs['cnv_status']=='tumor']
     adata=tumor
