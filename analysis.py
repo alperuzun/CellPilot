@@ -224,6 +224,7 @@ def run_inferncnv(input_file, output_dir, name, reference_key='cell_type', gtf_p
             window_size=250,
         )
     else:
+        reference_cat = reference_cat.split(',')
         cnv.tl.infercnv(
             adata,
             reference_key=reference_key,
