@@ -892,14 +892,13 @@ class SingleTabGUI(QMainWindow):
 
         # reference_key
         self.reference_key_edit = QLineEdit()
-        self.reference_key_edit.setText("cell_type")
         self.reference_key_edit.setPlaceholderText("Reference key in adata.obs")
-        t_layout.addRow("Reference Key:", self.reference_key_edit)
+        t_layout.addRow("Reference Key (optional):", self.reference_key_edit)
 
         # reference_cat
         self.reference_cat_edit = QLineEdit()
         self.reference_cat_edit.setPlaceholderText("Comma-separated list (e.g. B,T,NK)")
-        t_layout.addRow("Reference Categories:", self.reference_cat_edit)
+        t_layout.addRow("Reference Categories (optional):", self.reference_cat_edit)
 
         # gtf_path
         self.gtf_path_edit = QLineEdit()
@@ -973,8 +972,8 @@ class SingleTabGUI(QMainWindow):
         <ul>
             <li><b>Input File</b>: Annotated <code>.h5ad</code> file.</li>
             <li><b>GTF Path</b>: GENCODE gene-annotation GTF (default <code>db/gencode.v47.annotation.gtf.gz</code>).</li>
-            <li><b>Reference Key</b>: Column defining normal reference cells (default <code>cell_type</code>).</li>
-            <li><b>Reference Categories</b>: Comma-separated labels considered normal (e.g. <code>B,T,NK</code>).</li>
+            <li><b>Reference Key</b>: Column defining normal reference cells (default <code>cell_type</code>). Leave blank to use average expression of all cells as reference baseline.</li>
+            <li><b>Reference Categories</b>: Comma-separated labels considered normal (e.g. <code>B,T,NK</code>). If there are specific cell normal cell types in the refereence key column to use as a baseline, list them here or else leave blank (ex: if you have labels like "normal" or "control").</li>
             <li><b>CNV Threshold</b>: Score above which cells are labelled tumor (default 0.03).</li>
             <li><b>CPU Cores</b>: Number of parallel workers (default 4).</li>
             <li><b>Output Dir</b>: Folder for all outputs.</li>
