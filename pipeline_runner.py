@@ -22,7 +22,8 @@ class AnnotationRunner(QThread):
         use_panglao=False,
         use_cancer_single_cell_atlas=False,
         preprocessing_params=None,
-        name=""
+        name="",
+        cpus=4
     ):
         super().__init__()
         self.input_file = input_file
@@ -34,6 +35,7 @@ class AnnotationRunner(QThread):
         self.use_cancer_single_cell_atlas = use_cancer_single_cell_atlas
         self.preprocessing_params = preprocessing_params or DEFAULT_PARAMS
         self.name = name
+        self.cpus = cpus
 
     def run(self):
         try:
@@ -52,7 +54,8 @@ class AnnotationRunner(QThread):
                 use_cellmarker=self.use_cellmarker,
                 use_panglao=self.use_panglao,
                 use_cancer_single_cell_atlas=self.use_cancer_single_cell_atlas,
-                name=self.name
+                name=self.name,
+                cpus=self.cpus
             )
 
             # We can't know the exact final file name from the function unless we parse the logs
@@ -69,6 +72,7 @@ class AnnotationRunner(QThread):
 # Add this new AnalysisRunner to pipeline_runner.py
 ################################################################################
 
+# CellPhoneDB runner
 class AnalysisRunner(QThread):
     """
     A QThread to run the CellPhoneDB analysis (lab/SingleCell/analysis.py).
@@ -85,7 +89,9 @@ class AnalysisRunner(QThread):
         output_dir,
         column_name,
         cpdb_file_path,
-        name
+        name,
+        counts_min=10,
+        plot_column_names=None
     ):
         super().__init__()
         self.input_file = input_file
@@ -93,6 +99,8 @@ class AnalysisRunner(QThread):
         self.column_name = column_name
         self.cpdb_file_path = cpdb_file_path
         self.name = name
+        self.counts_min = counts_min
+        self.plot_column_names = plot_column_names or []
 
     def run(self):
         try:
@@ -104,7 +112,9 @@ class AnalysisRunner(QThread):
                 output_dir=self.output_dir,
                 column_name=self.column_name,
                 cpdb_file_path=self.cpdb_file_path,
-                name=self.name
+                name=self.name,
+                counts_min=self.counts_min,
+                plot_column_names=self.plot_column_names,
             )
             self.update_progress.emit(100, "CellPhoneDB analysis complete!")
             self.finished.emit("Analysis finished successfully!")
