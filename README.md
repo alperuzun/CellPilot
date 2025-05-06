@@ -156,6 +156,11 @@ For detailed Cell Ranger instructions, see the [10x Genomics documentation](http
 * Annotated `.h5ad` file (output of the "Annotation" tab)  
 * Cell-type label column (default **`cell_type`**)  
 * CellPhoneDB database ZIP (default **`db/cellphonedb.zip`**)  
+* **Counts Min** (optional): min. significant LR pairs to draw an edge (default 10)  
+* **Plot Detailed Interactions**:
+  * **All** – plot every cell type (default)  
+  * comma-separated labels – only those  
+  * empty – skip detailed dot-plots  
 * Output directory (created if missing)
 
 #### Tumor Prediction / Drug Response

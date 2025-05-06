@@ -121,11 +121,23 @@ class SingleTabGUI(QMainWindow):
         self.setPalette(self.create_discord_palette())
 
         # Instead of a main_widget alone, let's create a QTabWidget
-        self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        self.tab_widget = QTabWidget()
+        self.setCentralWidget(self.tab_widget)
 
-        self.annotation_tab = QWidget()
-        self.analysis_tab = QWidget()
+        # Annotation tab
+        annot_tab = QWidget()
+        self.setup_annotation_tab(annot_tab)
+        self.tab_widget.addTab(annot_tab, "Annotation")
+
+        # Analysis tab
+        analysis_tab = QWidget()
+        self.setup_analysis_tab(analysis_tab)
+        self.tab_widget.addTab(analysis_tab, "Analysis")
+
+        # About tab  🛈
+        about_tab = QWidget()
+        self.setup_about_tab(about_tab)
+        self.tab_widget.addTab(about_tab, "About")
 
         # Create a scrollable area for the tabs
         scroll_area = QScrollArea()
@@ -134,15 +146,8 @@ class SingleTabGUI(QMainWindow):
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
 
-        # Now set up both tabs inside the scroll widget
-        self.setup_annotation_tab(self.annotation_tab)
-        self.tabs.addTab(self.annotation_tab, "Annotation")
-        
-        self.setup_analysis_tab(self.analysis_tab)
-        self.tabs.addTab(self.analysis_tab, "Analysis")
-
         # Add the tabs to scroll_layout, then set scroll_widget as scroll_area's content
-        scroll_layout.addWidget(self.tabs)
+        scroll_layout.addWidget(self.tab_widget)
         scroll_area.setWidget(scroll_widget)
 
         # Also add a log area at the bottom (or side)
@@ -462,13 +467,6 @@ class SingleTabGUI(QMainWindow):
         self.cancer_sca_checkbox.setChecked(False)
         anno_layout.addRow(self.cancer_sca_checkbox)
 
-        self.confidence_spin = QDoubleSpinBox()
-        self.confidence_spin.setToolTip("Minimum confidence score required for cell type assignment.\nHigher values are more stringent but may leave more cells unlabeled.")
-        self.confidence_spin.setRange(0.0, 1.0)
-        self.confidence_spin.setValue(0.5)
-        self.confidence_spin.setSingleStep(0.05)
-        anno_layout.addRow("Confidence Threshold:", self.confidence_spin)
-
         anno_group_main = QVBoxLayout()
         anno_group_main.addLayout(anno_layout)
         
@@ -786,7 +784,26 @@ class SingleTabGUI(QMainWindow):
         self.cpdb_name_edit.setPlaceholderText("Name prefix for output (e.g. 'lung')")
         self.cpdb_name_edit.setToolTip("A descriptive name for this analysis\nWill be used in output filenames")
         layout.addRow("Analysis Name:", self.cpdb_name_edit)
-        
+
+        # counts_min  🔢
+        self.cpdb_counts_min_spin = QSpinBox()
+        self.cpdb_counts_min_spin.setRange(1, 1000)
+        self.cpdb_counts_min_spin.setValue(10)
+        self.cpdb_counts_min_spin.setToolTip(
+            "Minimum number of significant ligand–receptor pairs required\n"
+            "to keep a connection in chord / network plots (default 10).")
+        layout.addRow("Counts Min:", self.cpdb_counts_min_spin)
+
+        # Plot-detailed-interactions  📝
+        self.cpdb_plot_cells_edit = QLineEdit("All")          # default → All
+        self.cpdb_plot_cells_edit.setPlaceholderText("All  (or: B cell,T cell)")
+        self.cpdb_plot_cells_edit.setToolTip(
+            "Generate detailed dot-plots for specific cell labels.\n"
+            " • All  → plot every cell type\n"
+            " • (empty) → skip detailed dot-plots\n"
+            " • label1,label2,… → only those labels")
+        layout.addRow("Plot Detailed Interactions:", self.cpdb_plot_cells_edit)
+
         # Run button
         self.cpdb_run_btn = QPushButton("Run CellPhoneDB →")
         self.cpdb_run_btn.setStyleSheet("""
@@ -850,6 +867,14 @@ class SingleTabGUI(QMainWindow):
             <li><b>CPDB File</b>: CellPhoneDB database ZIP (default <code>db/cellphonedb.zip</code>).</li>
             <li><b>Output Dir</b>: Folder for results.</li>
             <li><b>Analysis Name</b>: Optional prefix for outputs.</li>
+            <li><b>Counts Min</b>: Minimum significant pairs to draw an edge (default 10).</li>
+            <li><b>Plot&nbsp;Detailed&nbsp;Interactions</b>:
+                <ul>
+                  <li><code>All</code> (default) – plot every cell type</li>
+                  <li>comma-separated labels – plot only those</li>
+                  <li>leave blank – skip detailed dot-plots</li>
+                </ul>
+            </li>
         </ul>
         """
         cell_box_layout.addWidget(InfoSidebar("", cpdb_info))
@@ -1007,6 +1032,9 @@ class SingleTabGUI(QMainWindow):
         col_name = self.cpdb_column_edit.text().strip()
         cpdb_zip = self.cpdb_file_edit.text().strip()
         name_str = self.cpdb_name_edit.text().strip() or "analysis"
+        counts_min = self.cpdb_counts_min_spin.value()
+        plot_cells_str = self.cpdb_plot_cells_edit.text().strip()
+        plot_cells = [x.strip() for x in plot_cells_str.split(",") if x.strip()]
 
         if not input_file or not out_dir or not col_name or not cpdb_zip:
             QMessageBox.warning(self, "Invalid Input", "Please fill in all required fields.")
@@ -1015,11 +1043,13 @@ class SingleTabGUI(QMainWindow):
         self.cpdb_run_btn.setEnabled(False)
 
         self.analysis_thread = AnalysisRunner(
-                input_file=input_file,
+            input_file=input_file,
             output_dir=out_dir,
             column_name=col_name,
             cpdb_file_path=cpdb_zip,
-            name=name_str
+            name=name_str,
+            counts_min=counts_min,
+            plot_column_names=plot_cells,
         )
         # Connect our new progress bar
         self.analysis_thread.update_progress.connect(self.on_analysis_progress)
@@ -1069,7 +1099,7 @@ class SingleTabGUI(QMainWindow):
         input_file  = self.tumor_input_edit.text().strip()
         output_dir  = self.tumor_output_dir.text().strip()
         name        = self.tumor_name_edit.text().strip() or "tumor"
-        ref_key     = self.reference_key_edit.text().strip() or "cell_type"
+        ref_key     = self.reference_key_edit.text().strip()   # empty → None handled downstream
         ref_cat_str = self.reference_cat_edit.text().strip()
         ref_cat     = [x.strip() for x in ref_cat_str.split(",") if x.strip()]
         gtf_path    = self.gtf_path_edit.text().strip() or "db/gencode.v47.annotation.gtf.gz"
@@ -1118,6 +1148,36 @@ class SingleTabGUI(QMainWindow):
     def on_tumor_error(self, err):
         self.tumor_run_btn.setEnabled(True)
         QMessageBox.critical(self, "Error", f"InferCNV analysis failed: {err}")
+
+    ############################################################################
+    # 8) About / Info tab (logo + editable blurb)
+    ############################################################################
+    def setup_about_tab(self, parent_widget):
+        """
+        Simple tab that shows the Brown-University logo (or a placeholder)
+        and a QTextEdit where you can type / paste the project description,
+        lab info, GitHub link, citation, etc.
+        """
+        layout = QVBoxLayout(parent_widget)
+
+        # ── Read-only project description ───────────────────────────────────
+        about_lbl = QLabel()
+        about_lbl.setAlignment(Qt.AlignTop)
+        about_lbl.setWordWrap(True)
+        about_lbl.setOpenExternalLinks(True)      # enable clickable URL
+        about_lbl.setTextFormat(Qt.RichText)
+        about_lbl.setText("""
+        <h2>CellPilot</h2>
+        <p><b>CellPilot</b> is an open-source graphical interface that streamlines single-cell RNA-seq analysis – from preprocessing &amp; automated cell-type annotation to cell–cell communication profiling and CNV-based tumor prediction with downstream drug-response scoring.</p>
+
+        <p>This work is developed and maintained by the <b>Uzun Lab</b>, <b>Brown University</b>.</p>
+
+        <p>GitHub repository: <a href="https://github.com/alperuzun/CellPilot">github.com/alperuzun/CellPilot</a></p>
+        """)
+        layout.addWidget(about_lbl)
+
+        # Fill remaining space nicely
+        layout.addStretch()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

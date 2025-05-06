@@ -6,9 +6,24 @@ import omicverse as ov
 import os
 from cellphonedb.src.core.methods import cpdb_statistical_analysis_method
 from datetime import datetime
+import infercnvpy as cnv
+import platform, multiprocessing as mp
+
+# macOS: avoid "The process has fork … YOU MUST exec()" spam
+if platform.system() == "Darwin":
+    import os, sys
+    # Disable the CoreFoundation safety check (needs to be set before CF is imported)
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+    # Ensure every new worker is started with spawn, not plain fork
+    try:
+        if mp.get_start_method(allow_none=True) != "spawn":
+            mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        # start-method already set somewhere else – ignore
+        pass
 
 #cellphondeb, openchord, P
-def run_cell_phone_db(input_file, output_dir, column_name='cell_type', cpdb_file_path='db/cellphonedb.zip', name='', counts_min=10):
+def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_name='cell_type', cpdb_file_path='db/cellphonedb.zip', name='', counts_min=10):
     """
     Run CellPhoneDB analysis on the given AnnData object.
     
@@ -19,11 +34,19 @@ def run_cell_phone_db(input_file, output_dir, column_name='cell_type', cpdb_file
     column_name (str): The column name in adata.obs that contains the cell type labels.
     cpdb_file_path (str): The path to the CellPhoneDB database zip file.
     name (str): Name prefix for output files.
+    plot_column_names : list
+        • ["All"] → plot every cell type  
+        • []      → skip dot-plots  
+        • other   → plot only the listed labels
     
     Returns:
     --------
     dict: The CellPhoneDB results dictionary.
     """
+    import anndata as ad
+    import ktplotspy as kpy
+
+
     print(f"Starting CellPhoneDB analysis for {name}...")
     
     # Create output directory if it doesn't exist
@@ -75,6 +98,7 @@ def run_cell_phone_db(input_file, output_dir, column_name='cell_type', cpdb_file
     os.makedirs(out_path, exist_ok=True)
     
     # Run CellPhoneDB analysis
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M')
     print("Running CellPhoneDB statistical analysis...")
     try:
         cpdb_results = cpdb_statistical_analysis_method.call(
@@ -98,7 +122,7 @@ def run_cell_phone_db(input_file, output_dir, column_name='cell_type', cpdb_file
             separator='|',
             debug=False,
             output_path=out_path,
-            output_suffix=None
+            output_suffix=timestamp
         )
     except Exception as e:
         print(f"Error in CellPhoneDB analysis: {str(e)}")
@@ -117,42 +141,52 @@ def run_cell_phone_db(input_file, output_dir, column_name='cell_type', cpdb_file
         celltype_key=column_name
     )
     
-    # Generate timestamp for filenames
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M')
-    
-    # Plot heatmap
-    print("Generating heatmap...")
-    fig, ax = plt.subplots(figsize=(14, 12))
-    ov.pl.cpdb_heatmap(
-        adata,
-        interaction['interaction_edges'],
-        celltype_key=column_name,
-        fontsize=11,
-        ax=ax,
-        legend_kws={'fontsize': 10, 'bbox_to_anchor': (1.2, 1), 'loc': 'upper left'}
-    )
-    plt.tight_layout()
-    plt.subplots_adjust(right=0.8)
-    heatmap_path = os.path.join(output_dir, f'{name}_heatmap_{timestamp}.png')
-    plt.savefig(heatmap_path, dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    print(f"Heatmap saved to {heatmap_path}")
-    
-    print("Generating chord diagram...")
-    try:
-        chord = ov.pl.cpdb_chord(
-            adata,
-            interaction['interaction_edges'],
+    means = pd.read_csv(os.path.join(output_dir, f'{name}_cpdb_results/statistical_analysis_means_{timestamp}.txt'), sep="\t")
+    pvalues = pd.read_csv(os.path.join(output_dir, f'{name}_cpdb_results/statistical_analysis_pvalues_{timestamp}.txt'), sep="\t")
+    deconvoluted = pd.read_csv(os.path.join(output_dir, f'{name}_cpdb_results/statistical_analysis_deconvoluted_{timestamp}.txt'), sep="\t")
+    interaction_scores = pd.read_csv(os.path.join(output_dir, f'{name}_cpdb_results/statistical_analysis_interaction_scores_{timestamp}.txt'), sep="\t")
+
+    import ktplotspy as kpy
+
+    p = kpy.plot_cpdb_heatmap(pvals=pvalues, figsize=(5, 5), title="Sum of significant interactions")
+    p.savefig(os.path.join(output_dir, f'{name}_heatmap_{timestamp}.png'), dpi=300, bbox_inches='tight')
+    print(f"Heatmap saved to {os.path.join(output_dir, f'{name}_heatmap_{timestamp}.png')}")
+
+    # ------------------------------------------------------------------
+    # normalise plot_column_names                                          
+    # ------------------------------------------------------------------
+    plot_column_names = [str(x).strip() for x in plot_column_names if str(x).strip()]
+
+    cell_types = list(adata.obs[column_name].unique())
+
+    if len(plot_column_names) == 0:
+        selected_cell_types = []                    
+    elif len(plot_column_names) == 1 and plot_column_names[0].lower() == "all":
+        selected_cell_types = cell_types
+    else:
+        selected_cell_types = [cell_type for cell_type in cell_types if cell_type.lower() in list(map(str.lower, plot_column_names))]
+        if len(selected_cell_types) == 0:
+            raise ValueError(f"No valid cell types found in {column_name} column. Please check the column names and try again.")
+    print(f"Selected cell types: {selected_cell_types}")
+
+    # -------------------------------------------------------------
+    # Detailed dot-plots
+    # -------------------------------------------------------------
+    for cell_type1 in selected_cell_types:
+        print(f"Generating dot plot for {cell_type1}...")
+        p = kpy.plot_cpdb(
+            adata=adata,
+            cell_type1=cell_type1,
+            cell_type2='.',
+            means=means,
+            pvals=pvalues,
             celltype_key=column_name,
-            count_min=counts_min,
-            fontsize=12,
-            padding=50,
-            radius=100,
-            save=os.path.join(output_dir, f'{name}_chord_{timestamp}.png')
+            figsize=(13,20),
+            title=f"All Cell-Cell Interactions for {cell_type1}"
         )
-        print(f"Chord diagram saved to {os.path.join(output_dir, f'{name}_chord_{timestamp}.png')}")
-    except Exception as e:
-        print(f"Error generating chord diagram: {str(e)}")
+
+        p.save(os.path.join(output_dir, f'{name}_dotplot_{cell_type1}_{timestamp}.png'))
+        print(f"Dot plot saved to {os.path.join(output_dir, f'{name}_dotplot_{cell_type1}_{timestamp}.png')}")
     
     # Plot network
     print("Generating network plot...")
@@ -278,13 +312,14 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
 
 if __name__ == "__main__":
 
-    run_inferncnv(input_file='output/test_run/annotated_test_20250429_2353.h5ad',
-                  output_dir='output/test_run/inferncnv',
-                  name='test',
-                  reference_key='cellmarker',
-                  cores=4)
-    
-    # run_cell_phone_db(input_file='output/test_run/annotated_test_20250429_2353.h5ad',
-    #               output_dir='output/test_run/cellphonedb4',
+    # run_inferncnv(input_file='output/test_run/annotated_test_20250429_2353.h5ad',
+    #               output_dir='output/test_run/inferncnv',
     #               name='test',
-    #               column_name='cell_type')
+    #               reference_key='cellmarker',
+    #               cores=4)
+    
+    run_cell_phone_db(input_file='output/test_run/annotated_test_20250429_2353.h5ad',
+                  output_dir='output/test_run/cellphonedb4',
+                  name='test',
+                  column_name='cell_type',
+                  cpdb_file_path='db/cellphonedb.zip')
