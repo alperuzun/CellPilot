@@ -54,8 +54,7 @@ class AnnotationRunner(QThread):
                 use_cellmarker=self.use_cellmarker,
                 use_panglao=self.use_panglao,
                 use_cancer_single_cell_atlas=self.use_cancer_single_cell_atlas,
-                name=self.name,
-                cpus=self.cpus
+                name=self.name
             )
 
             # We can't know the exact final file name from the function unless we parse the logs
