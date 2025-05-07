@@ -624,6 +624,9 @@ class SingleTabGUI(QMainWindow):
         self.run_button.setEnabled(False)
         self.anno_thread.start()
 
+        name_val = annotation_name or "analysis"
+        self.annotation_prefix = name_val
+
     def on_progress(self, progress_value, status_msg):
         """Slot to update the progress bar and status label."""
         self.progress_bar.setValue(progress_value)
@@ -641,84 +644,65 @@ class SingleTabGUI(QMainWindow):
         from glob import glob
         import os
         out_dir = os.path.dirname(final_file)  # or self.output_dir_edit.text().strip()
-        png_paths = glob(os.path.join(out_dir, "*.png"))
+        # preview only files that start with the analysis prefix
+        prefix    = self.annotation_prefix            # the name we passed earlier
+        png_paths = glob(os.path.join(out_dir, f"{prefix}_*.png"))
+        if png_paths:
+            self.show_png_slideshow(png_paths)
+
+    def show_png_slideshow(self, png_paths):
+        """
+        Show PNGs one-by-one in a small slideshow dialog with
+        "Previous / Next" buttons.  Wrap-around navigation.
+        """
         if not png_paths:
-            return  # no images, just skip
+            return
 
-        # Create a dialog listing images
-        self.show_png_dialog(png_paths)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Result preview")
+        dlg.resize(900, 750)
 
-    def show_png_dialog(self, png_paths):
-        """
-        Displays the .png images in a simple QDialog with a QVBoxLayout/QScrollArea.
-        """
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Annotation Output - PNG Previews")
-        dialog.resize(800, 600)
+        vbox = QVBoxLayout(dlg)
 
-        scroll = QScrollArea(dialog)
-        container = QWidget()
-        vlayout = QVBoxLayout(container)
+        img_label = QLabel(alignment=Qt.AlignCenter)
+        vbox.addWidget(img_label, 1)
 
-        # Store original pixmaps, plus one QLabel per image
-        self.zoom_factor = 1.0
-        self.preview_labels = []
-        self.original_pixmaps = []
+        btn_layout = QHBoxLayout()
+        prev_btn  = QPushButton("← Previous")
+        next_btn  = QPushButton("Next →")
+        close_btn = QPushButton("Close")
+        btn_layout.addWidget(prev_btn)
+        btn_layout.addWidget(next_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+        vbox.addLayout(btn_layout)
 
-        for path in png_paths:
-            label = QLabel()
-            pix = QPixmap(path)
-            self.original_pixmaps.append(pix)
-            self.preview_labels.append(label)
-            # Initially set the pixmap (zoom_factor = 1.0)
-            scaled_pix = pix.scaled(
-                pix.width() * self.zoom_factor,
-                pix.height() * self.zoom_factor,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
+        # ---- navigation logic -----------------------------------------
+        index = {"i": 0}            # mutable wrapper for inner functions
+
+        def show_current():
+            path = png_paths[index["i"]]
+            pix = QPixmap(path).scaled(
+                dlg.width() * 0.9, dlg.height() * 0.9,
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
-            label.setPixmap(scaled_pix)
+            img_label.setPixmap(pix)
+            dlg.setWindowTitle(f"{index['i']+1}/{len(png_paths)} – {os.path.basename(path)}")
 
-            vlayout.addWidget(label)
+        def prev():
+            index["i"] = (index["i"] - 1) % len(png_paths)
+            show_current()
 
-        scroll.setWidget(container)
-        dialog_layout = QVBoxLayout()
-        dialog_layout.addWidget(scroll)
+        def nxt():
+            index["i"] = (index["i"] + 1) % len(png_paths)
+            show_current()
 
-        # -- Add Zoom In / Zoom Out buttons at the bottom --
-        zoom_button_layout = QHBoxLayout()
-        zoom_in_btn = QPushButton("Zoom In")
-        zoom_out_btn = QPushButton("Zoom Out")
-        zoom_button_layout.addWidget(zoom_in_btn)
-        zoom_button_layout.addWidget(zoom_out_btn)
-        # Connect clicks
-        zoom_in_btn.clicked.connect(lambda: self.change_zoom(0.1))
-        zoom_out_btn.clicked.connect(lambda: self.change_zoom(-0.1))
-        dialog_layout.addLayout(zoom_button_layout)
+        prev_btn.clicked.connect(prev)   # navigate images
+        next_btn.clicked.connect(nxt)
+        close_btn.clicked.connect(dlg.accept)
+        show_current()
 
-        dialog.setLayout(dialog_layout)
-
-        dialog.exec_()
-
-    def change_zoom(self, delta):
-        """
-        Increase or decrease self.zoom_factor by 'delta',
-        then rescale all preview labels accordingly.
-        """
-        # Avoid going below 0.1x or above, say, 5x
-        new_zoom = self.zoom_factor + delta
-        new_zoom = max(0.1, min(new_zoom, 5.0))
-
-        self.zoom_factor = new_zoom
-        # Rescale each label's pixmap
-        for pix, label in zip(self.original_pixmaps, self.preview_labels):
-            scaled_pix = pix.scaled(
-                pix.width() * self.zoom_factor,
-                pix.height() * self.zoom_factor,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            label.setPixmap(scaled_pix)
+        dlg.exec_()
 
     def on_error(self, error_message):
         """Slot for handling errors."""
@@ -1074,9 +1058,11 @@ class SingleTabGUI(QMainWindow):
         from glob import glob
         import os
         out_dir = self.cpdb_output_dir.text().strip()  # The directory user selected
-        png_paths = glob(os.path.join(out_dir, "*.png"))
+        # preview only files that start with the analysis prefix
+        prefix    = self.analysis_thread.name            # the name we passed earlier
+        png_paths = glob(os.path.join(out_dir, f"{prefix}_*.png"))
         if png_paths:
-            self.show_png_dialog(png_paths)
+            self.show_png_slideshow(png_paths)
 
     def on_analysis_error(self, error_message):
         self.cpdb_run_btn.setEnabled(True)
@@ -1141,9 +1127,11 @@ class SingleTabGUI(QMainWindow):
         # preview PNGs
         from glob import glob
         import os
-        pngs = glob(os.path.join(self.tumor_output_dir.text().strip(), "*.png"))
+        prefix = self.tumor_thread.kwargs["name"]
+        pngs   = glob(os.path.join(self.tumor_output_dir.text().strip(),
+                                   f"{prefix}_*.png"))
         if pngs:
-            self.show_png_dialog(pngs)
+            self.show_png_slideshow(pngs)
 
     def on_tumor_error(self, err):
         self.tumor_run_btn.setEnabled(True)
@@ -1168,7 +1156,21 @@ class SingleTabGUI(QMainWindow):
         about_lbl.setTextFormat(Qt.RichText)
         about_lbl.setText("""
         <h2>CellPilot</h2>
-        <p><b>CellPilot</b> is an open-source graphical interface that streamlines single-cell RNA-seq analysis – from preprocessing &amp; automated cell-type annotation to cell–cell communication profiling and CNV-based tumor prediction with downstream drug-response scoring.</p>
+        <p><b>CellPilot</b> is an open-source, end-to-end workflow featuring a user-friendly graphical
+        interface for comprehensive single-cell RNA-seq analysis. It streamlines essential
+        steps such as quality control, preprocessing, dimensionality reduction (PCA and UMAP),
+        Leiden clustering, and cell-type annotation using reference databases like
+        <b>CellMarker</b> and <b>PanglaoDB</b>. Designed for performance and accessibility,
+        CellPilot allows researchers to transition efficiently from raw data to high-quality
+        visualizations with minimal manual input.</p>
+
+        <p>Beyond the essentials, CellPilot quantifies cell–cell communication through
+        <b>CellPhoneDB</b>, letting users explore ligand–receptor signalling landscapes.
+        It further supports tumor prediction and drug-response analysis: leveraging
+        <b>scDrug</b>, it predicts drug sensitivity from single-cell IC50 profiles to pinpoint
+        candidate therapies, and integrates <b>inferCNV</b> to infer copy-number variation and
+        functional behaviour of tumour cells—together forming a robust downstream
+        drug-screening and therapeutic-discovery platform.</p>
 
         <p>This work is developed and maintained by the <b>Uzun Lab</b>, <b>Brown University</b>.</p>
 

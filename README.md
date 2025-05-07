@@ -4,7 +4,9 @@
   <img src="cellpilot_logo.png" alt="CellPilot Logo" width="300"/>
 </p>
 
-## CellPilot is a graphical interface for single-cell RNA-seq analysis, integrating quality control, normalization, dimensionality reduction, clustering, and automated cell type annotation into a streamlined workflow.
+## CellPilot is an open-source, end-to-end workflow featuring a user-friendly graphical interface for comprehensive single-cell RNA-seq analysis. It streamlines essential steps such as quality control, preprocessing, dimensionality reduction (PCA and UMAP), Leiden clustering, and cell-type annotation using reference databases like CellMarker and PanglaoDB. Designed for performance and accessibility, CellPilot allows researchers to transition efficiently from raw data to high-quality visualizations with minimal manual input.
+
+In addition to these core steps, CellPilot performs cell–cell communication profiling powered by <b>CellPhoneDB</b>, revealing signalling networks between cell populations.  The platform also supports tumor prediction and drug-response analysis: leveraging <b>scDrug</b>, it predicts drug sensitivity from single-cell expression (IC50) to highlight potential therapies, while <b>inferCNV</b> infers copy-number variation and tumour behaviour—together forming a robust downstream drug-screening and therapeutic-discovery toolkit.
 
 ## Prerequisites
 
