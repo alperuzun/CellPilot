@@ -1156,22 +1156,22 @@ class SingleTabGUI(QMainWindow):
         about_lbl.setTextFormat(Qt.RichText)
         about_lbl.setText("""
         <h2>CellPilot</h2>
-        <p><b>CellPilot</b> is an open-source, end-to-end workflow featuring a user-friendly graphical
-        interface for comprehensive single-cell RNA-seq analysis. It streamlines essential
-        steps such as quality control, preprocessing, dimensionality reduction (PCA and UMAP),
-        Leiden clustering, and cell-type annotation using reference databases like
-        <b>CellMarker</b> and <b>PanglaoDB</b>. Designed for performance and accessibility,
-        CellPilot allows researchers to transition efficiently from raw data to high-quality
+        <p><b>CellPilot</b> is an open-source, end-to-end workflow featuring a user-friendly
+        graphical interface for comprehensive single-cell RNA-seq analysis. It streamlines
+        essential steps such as quality control, preprocessing, dimensionality reduction
+        (PCA and UMAP), Leiden clustering, and cell-type annotation using reference databases
+        like CellMarker and PanglaoDB. Designed for performance and accessibility, CellPilot
+        allows researchers to transition efficiently from raw data to high-quality
         visualizations with minimal manual input.</p>
 
-        <p>Beyond the essentials, CellPilot quantifies cell–cell communication through
-        <b>CellPhoneDB</b>, letting users explore ligand–receptor signalling landscapes.
-        It further supports tumor prediction and drug-response analysis: leveraging
-        <b>scDrug</b>, it predicts drug sensitivity from single-cell IC50 profiles to pinpoint
-        candidate therapies, and integrates <b>inferCNV</b> to infer copy-number variation and
-        functional behaviour of tumour cells—together forming a robust downstream
-        drug-screening and therapeutic-discovery platform.</p>
-
+        <p>In addition to these core steps, CellPilot performs cell–cell communication
+        profiling powered by <b>CellPhoneDB</b>, revealing signalling networks between cell
+        populations. The platform also supports tumor prediction and drug-response analysis:
+        leveraging <b>scDrug</b>, it predicts drug sensitivity from single-cell expression
+        (IC50) to highlight potential therapies, while <b>inferCNV</b> infers copy-number
+        variation and tumour behaviour—together forming a robust downstream drug-screening
+        and therapeutic-discovery toolkit.</p>
+                          
         <p>This work is developed and maintained by the <b>Uzun Lab</b>, <b>Brown University</b>.</p>
 
         <p>GitHub repository: <a href="https://github.com/alperuzun/CellPilot">github.com/alperuzun/CellPilot</a></p>
