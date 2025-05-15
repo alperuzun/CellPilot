@@ -47,7 +47,7 @@ conda activate CellPilot-dev
 
 3. **Run the GUI** from the new environment:
 ```bash
-python gui_main.py
+./launch_cellpilot.sh
 
 # That's it—this will launch the PyQt GUI.
 ```
