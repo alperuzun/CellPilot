@@ -45,13 +45,7 @@ conda env create -f environment.yml
 conda activate CellPilot-dev
 ```
 
-3. Install frontend dependencies if not done before:
-```bash
-cd my-app
-npm install
-```
-
-4. **Run the GUI** from the new environment:
+3. **Run the GUI** from the new environment:
 ```bash
 ./launch_cellpilot.sh
 
