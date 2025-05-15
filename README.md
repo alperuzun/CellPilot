@@ -45,14 +45,18 @@ conda env create -f environment.yml
 conda activate CellPilot-dev
 ```
 
-3. **Run the GUI** from the new environment:
+3. Install frontend dependencies if not done before:
+```bash
+cd my-app
+npm install
+```
+
+4. **Run the GUI** from the new environment:
 ```bash
 ./launch_cellpilot.sh
 
 # That's it—this will launch the PyQt GUI.
 ```
-
-You now have a functional environment created from `environment.yml`.
 
 ## Pipeline Overview
 
