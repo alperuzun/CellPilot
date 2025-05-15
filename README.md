@@ -45,11 +45,14 @@ conda env create -f environment.yml
 conda activate CellPilot-dev
 ```
 
-3. **Run the GUI** from the new environment:
+3. Make the launch script executable:
+```bash
+chmod +x launch_cellpilot.sh
+```
+
+4. **Run the GUI** from the new environment:
 ```bash
 ./launch_cellpilot.sh
-
-# That's it—this will launch the PyQt GUI.
 ```
 
 ## Pipeline Overview
