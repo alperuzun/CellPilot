@@ -4,16 +4,18 @@ from typing import Any, Dict, List, Union
 import anndata as ad
 import pandas as pd
 
-def summarize_h5ad(path: Union[str, Path]) -> Dict[str, Any]:
-    """
-    Read only the header of an .h5ad file and return a lightweight summary.
-    Works in ≈ milliseconds even for large datasets because X is not loaded.
-    """
-    path = Path(path).expanduser().resolve()
-    if not path.exists():
-        raise FileNotFoundError(path)
+def summarize_h5ad(path: Union[str, Path] = None, adata: ad.AnnData = None) -> Dict[str, Any]:
+    if path is None and adata is None:
+        raise ValueError("Either path or adata must be provided")
+    if path is not None:
+        path = Path(path).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(path)
 
-    A = ad.read_h5ad(path, backed="r")   # BackedAnnData
+    if adata is None:
+        A = ad.read_h5ad(path, backed="r")   # BackedAnnData
+    else:
+        A = adata
     try:
         obs_preview = (
             A.obs.reset_index()
@@ -27,7 +29,8 @@ def summarize_h5ad(path: Union[str, Path]) -> Dict[str, Any]:
         )
         if "leiden" in A.obs.columns:
             clusters = A.obs["leiden"].value_counts().to_dict()
-        label_columns = ["cell_type", "cellmarker", "panglao_db", "cancer_sea"]
+            clusters = [{"cluster": k, "count": v} for k, v in clusters.items()]
+        label_columns = ["cellmarker", "panglaodb", "cancersea"]
         label_counts = {}
         for l in label_columns:
             if l in A.obs.columns:

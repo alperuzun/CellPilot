@@ -43,7 +43,7 @@ async def annotate_api(params: AnnotationParams):
     returns exactly the structure required by the shared `Response` model.
     """
     try:
-        data = await run_in_threadpool(
+        data, pre_params = await run_in_threadpool(
             annotate,
             params.name,
             params.input_path,
@@ -60,7 +60,8 @@ async def annotate_api(params: AnnotationParams):
             input_path=params.input_path,
             output_dir=params.output_dir,
             data=data['data'],
-            timestamp=data['timestamp']
+            timestamp=data['timestamp'],
+            params=pre_params
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

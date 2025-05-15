@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { Box, Card, CardContent, Paper, Tabs, Tab, Typography, Switch, FormControlLabel } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Box, Card, CardContent, Paper, Tabs, Tab, Typography, Switch, FormControlLabel, FormControl, InputLabel, Select, MenuItem, Button, Chip } from '@mui/material';
 import { Insights, Source, Share, Science } from '@mui/icons-material';
 import AnnotationOptions from '../forms/AnnotationOptions';
 import CellInteractionOptions from '../forms/CellInteractionOptions';
 import TumorPredictionOptions from '../forms/TumorPredictionOptions';
 import AdataSummaryPreview from '../components/AdataSummaryPreview';
 import AnnotationResultsDashBoard from '../components/AnnotationResultsDashBoard';
+import { Upload, Output } from '../layouts/PrimaryLayout';
 /* --------------------------- helper: tab panel -------------------------- */
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -26,9 +27,15 @@ function TabPanel({ children, value, index, ...other }: TabPanelProps) {
 }
 
 /* ------------------------------ main page ------------------------------ */
-export default function GettingStarted({ summary, output, outputs, setOutput, setOutputs, viewInput, setViewInput,  }: { summary: Record<string, any> | null, output: Record<string, any> | null, outputs: Record<string, any>[], setOutput: (output: Record<string, any>) => void, setOutputs: (outputs: Record<string, any>[]) => void, viewInput: boolean, setViewInput: (viewInput: boolean) => void }) {
+export default function GettingStarted({ upload, output, outputs, setOutput, setOutputs, viewInput, setViewInput, uploads, setUploads, setUpload }: { upload: Upload | null, output: Output | null, outputs: Output[], setOutput: (output: Output) => void, setOutputs: (outputs: Output[]) => void, viewInput: boolean, setViewInput: (viewInput: boolean) => void, uploads: Upload[], setUploads: (uploads: Upload[]) => void, setUpload: (upload: Upload) => void }) {
   const [tab, setTab] = useState(0);
-  const [previewH, setPreviewH] = useState(300);          // px
+  const [previewH, setPreviewH] = useState(0.55 * window.innerHeight);    
+  const summary = upload?.summary;
+
+  // reset the chosen result whenever we re-enter "input view" or pick another file
+  useEffect(() => {
+    if (viewInput) setOutput(null);   // nothing selected
+  }, [upload, viewInput]);
 
   return (
     <Box
@@ -63,8 +70,32 @@ export default function GettingStarted({ summary, output, outputs, setOutput, se
               position: 'relative'
             }}
           >
-            <FormControlLabel sx={{ position: 'absolute', top: 20, right: 20, zIndex: 1000 }} control={<Switch defaultChecked checked={viewInput}
-                onChange={() => setViewInput(!viewInput)}/>} label="View Input" />
+            {/* ── output selector ─────────────────────────────────────────*/}
+            {viewInput && upload?.outputs?.length ? (
+              <FormControl size="small" sx={{ position: 'absolute', top: 20, right: 20, zIndex: 1000, minWidth: 160 }}>
+                <InputLabel id="output-select-label" sx={{ fontSize: '0.875rem' }}>View Outputs</InputLabel>
+                <Select
+                  labelId="output-select-label"
+                  label="Output"
+                  value={
+                    output && upload.outputs.some((o: Output) => o.id === output.id) ? output.id : ''
+                  }
+                  onChange={(e) => {
+                    const id = Number(e.target.value);
+                    const sel = upload.outputs.find((o: Output) => o.id === id);
+                    if (sel) {
+                      setOutput(sel);
+                      setViewInput(false);
+                    }
+                  }}
+                >
+                  {upload.outputs.map((o: Output) => (
+                    <MenuItem key={o.id} sx={{ fontSize: '0.875rem' }} value={o.id}>{o.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            ) : null}
+
             {viewInput ? (
               summary ? (
                 <AdataSummaryPreview summary={summary} />   
@@ -74,7 +105,7 @@ export default function GettingStarted({ summary, output, outputs, setOutput, se
                 </Typography>
               )
             ) : (
-              <AnnotationResultsDashBoard output={output} />
+              <AnnotationResultsDashBoard output={output} viewInput={viewInput} setViewInput={setViewInput} setUpload={setUpload} uploads={uploads} />
             )}
           </Box>
         </CardContent>
@@ -114,13 +145,13 @@ export default function GettingStarted({ summary, output, outputs, setOutput, se
             }}
           >
             <TabPanel value={tab} index={0}>
-              <AnnotationOptions key={summary?.path ?? 'ann'} summary={summary} onComplete={setOutput} setOutputs={setOutputs} outputs={outputs} viewInput={viewInput} setViewInput={setViewInput} />
+              <AnnotationOptions key={summary?.path ?? 'ann'} upload={upload} setUpload={setUpload} onComplete={setOutput} setOutputs={setOutputs} outputs={outputs} viewInput={viewInput} setViewInput={setViewInput} setUploads={setUploads} uploads={uploads} />
             </TabPanel>
             <TabPanel value={tab} index={1}>
-              <CellInteractionOptions key={summary?.path ?? 'ci'} summary={summary} onComplete={setOutput} outputs={outputs} setOutputs={setOutputs} viewInput={viewInput} setViewInput={setViewInput} />
+              <CellInteractionOptions key={summary?.path ?? 'ci'} upload={upload} setUpload={setUpload} onComplete={setOutput} outputs={outputs} setOutputs={setOutputs} viewInput={viewInput} setViewInput={setViewInput} setUploads={setUploads} uploads={uploads} />
             </TabPanel>
             <TabPanel value={tab} index={2}>
-              <TumorPredictionOptions key={summary?.path ?? 'tp'} summary={summary} onComplete={setOutput} outputs={outputs} setOutputs={setOutputs} viewInput={viewInput} setViewInput={setViewInput} />
+              <TumorPredictionOptions key={summary?.path ?? 'tp'} upload={upload} setUpload={setUpload} onComplete={setOutput} outputs={outputs} setOutputs={setOutputs} viewInput={viewInput} setViewInput={setViewInput} setUploads={setUploads} uploads={uploads} />
             </TabPanel>
           </Box>
 

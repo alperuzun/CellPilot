@@ -47,3 +47,4 @@ class Response(BaseModel):
     data: Dict[str, Any]
     timestamp: str
     type: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
