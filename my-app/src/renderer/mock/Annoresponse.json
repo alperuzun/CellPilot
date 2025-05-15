@@ -1,0 +1,423 @@
+{
+    "name": "loe",
+    "input_path": "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/preprocessed_test_20250429_2353.h5ad",
+    "output_dir": "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run",
+    "data": {
+      "figs": [
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_cellmarker_scsa_annotation_20250511_1730.png",
+          "cellmarker Clusters"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/dotplot_loe_cellmarker_20250511_1730.png",
+          "cellmarker Marker Gene Expression"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_panglaodb_scsa_annotation_20250511_1731.png",
+          "panglaodb Clusters"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/dotplot_loe_panglaodb_20250511_1731.png",
+          "panglaodb Marker Gene Expression"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_cancersea_scsa_annotation_20250511_1731.png",
+          "cancersea Clusters"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/dotplot_loe_cancersea_20250511_1731.png",
+          "cancersea Marker Gene Expression"
+        ]
+      ],
+      "files": [
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_cellmarker_annotation_details_20250511_1730.txt",
+          "cellmarker Clusters"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_marker_dict_20250511_1730.txt",
+          "cellmarker Marker Gene Expression"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_cellmarker_marker_gene_expression_counts_20250511_1730.csv",
+          "cellmarker Marker Gene Expression"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_panglaodb_annotation_details_20250511_1731.txt",
+          "panglaodb Clusters"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_marker_dict_20250511_1731.txt",
+          "panglaodb Marker Gene Expression"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_panglaodb_marker_gene_expression_counts_20250511_1731.csv",
+          "panglaodb Marker Gene Expression"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_cancersea_annotation_details_20250511_1731.txt",
+          "cancersea Clusters"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_marker_dict_20250511_1731.txt",
+          "cancersea Marker Gene Expression"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/loe_cancersea_marker_gene_expression_counts_20250511_1731.csv",
+          "cancersea Marker Gene Expression"
+        ]
+      ],
+      "adata": {
+        "path": "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/annotated_loe_20250511_1730.h5ad",
+        "n_obs": 1953,
+        "n_vars": 2000,
+        "obs_columns": [
+          "nUMIs",
+          "mito_perc",
+          "detected_genes",
+          "cell_complexity",
+          "doublet_score",
+          "predicted_doublet",
+          "passing_mt",
+          "passing_nUMIs",
+          "passing_ngenes",
+          "n_genes",
+          "leiden",
+          "cellmarker",
+          "cellmarker_cnt",
+          "panglaodb",
+          "panglaodb_cnt",
+          "cancersea",
+          "cancersea_cnt",
+          "cell_type"
+        ],
+        "var_columns": [
+          "gene_ids",
+          "feature_types",
+          "genome",
+          "mt",
+          "n_cells",
+          "percent_cells",
+          "robust",
+          "means",
+          "variances",
+          "residual_variances",
+          "highly_variable_rank",
+          "highly_variable_features"
+        ],
+        "preprocessed": true,
+        "obs_preview": [
+          {
+            "index": "AAACCTGGTGGCAAAC-1",
+            "nUMIs": 2526,
+            "mito_perc": 0.02929532900452614,
+            "detected_genes": 1341,
+            "cell_complexity": 0.5308788598574822,
+            "doublet_score": 0.011152416356877323,
+            "predicted_doublet": false,
+            "passing_mt": true,
+            "passing_nUMIs": true,
+            "passing_ngenes": true,
+            "n_genes": 1340,
+            "leiden": "2",
+            "cellmarker": "T cell",
+            "cellmarker_cnt": "T cell (n=890)",
+            "panglaodb": "T Cells",
+            "panglaodb_cnt": "T Cells (n=576)",
+            "cancersea": "Stemness",
+            "cancersea_cnt": "Stemness (n=333)",
+            "cell_type": "T cell"
+          },
+          {
+            "index": "AAACCTGTCGCATGGC-1",
+            "nUMIs": 3122,
+            "mito_perc": 0.03619474545121193,
+            "detected_genes": 1190,
+            "cell_complexity": 0.3811659192825112,
+            "doublet_score": 0.06487695749440714,
+            "predicted_doublet": false,
+            "passing_mt": true,
+            "passing_nUMIs": true,
+            "passing_ngenes": true,
+            "n_genes": 1190,
+            "leiden": "3",
+            "cellmarker": "T cell",
+            "cellmarker_cnt": "T cell (n=890)",
+            "panglaodb": "T Cells",
+            "panglaodb_cnt": "T Cells (n=576)",
+            "cancersea": "Differentiation",
+            "cancersea_cnt": "Differentiation (n=693)",
+            "cell_type": "T cell"
+          },
+          {
+            "index": "AAACCTGTCGTACCGG-1",
+            "nUMIs": 36370,
+            "mito_perc": 0.025680506601929665,
+            "detected_genes": 4857,
+            "cell_complexity": 0.13354412977728897,
+            "doublet_score": 0.0731707317073171,
+            "predicted_doublet": false,
+            "passing_mt": true,
+            "passing_nUMIs": true,
+            "passing_ngenes": true,
+            "n_genes": 4854,
+            "leiden": "1",
+            "cellmarker": "Macrophage",
+            "cellmarker_cnt": "Macrophage (n=228)",
+            "panglaodb": "Macrophages",
+            "panglaodb_cnt": "Macrophages (n=376)",
+            "cancersea": "Metastasis",
+            "cancersea_cnt": "Metastasis (n=394)",
+            "cell_type": "Macrophage"
+          },
+          {
+            "index": "AAACGGGCACTAAGTC-1",
+            "nUMIs": 7899,
+            "mito_perc": 0.02810482308268547,
+            "detected_genes": 2648,
+            "cell_complexity": 0.3352323078870743,
+            "doublet_score": 0.025641025641025644,
+            "predicted_doublet": false,
+            "passing_mt": true,
+            "passing_nUMIs": true,
+            "passing_ngenes": true,
+            "n_genes": 2645,
+            "leiden": "2",
+            "cellmarker": "T cell",
+            "cellmarker_cnt": "T cell (n=890)",
+            "panglaodb": "T Cells",
+            "panglaodb_cnt": "T Cells (n=576)",
+            "cancersea": "Stemness",
+            "cancersea_cnt": "Stemness (n=333)",
+            "cell_type": "T cell"
+          },
+          {
+            "index": "AAACGGGCACTAGTAC-1",
+            "nUMIs": 16721,
+            "mito_perc": 0.03193588927388191,
+            "detected_genes": 4035,
+            "cell_complexity": 0.24131331858142455,
+            "doublet_score": 0.17191283292978196,
+            "predicted_doublet": false,
+            "passing_mt": true,
+            "passing_nUMIs": true,
+            "passing_ngenes": true,
+            "n_genes": 4030,
+            "leiden": "1",
+            "cellmarker": "Macrophage",
+            "cellmarker_cnt": "Macrophage (n=228)",
+            "panglaodb": "Macrophages",
+            "panglaodb_cnt": "Macrophages (n=376)",
+            "cancersea": "Metastasis",
+            "cancersea_cnt": "Metastasis (n=394)",
+            "cell_type": "Macrophage"
+          }
+        ],
+        "var_preview": [
+          {
+            "index": "HES4",
+            "gene_ids": "ENSG00000188290",
+            "feature_types": "Gene Expression",
+            "genome": "GRCh38",
+            "mt": false,
+            "n_cells": 492,
+            "percent_cells": 25.19201228878648,
+            "robust": true,
+            "means": 1.0450588837685613,
+            "variances": 8.00104242737109,
+            "residual_variances": 6.4880299816550355,
+            "highly_variable_rank": 412,
+            "highly_variable_features": true
+          },
+          {
+            "index": "ISG15",
+            "gene_ids": "ENSG00000187608",
+            "feature_types": "Gene Expression",
+            "genome": "GRCh38",
+            "mt": false,
+            "n_cells": 798,
+            "percent_cells": 40.86021505376344,
+            "robust": true,
+            "means": 1.390168970814132,
+            "variances": 14.313878711188337,
+            "residual_variances": 11.06526171731959,
+            "highly_variable_rank": 156,
+            "highly_variable_features": true
+          },
+          {
+            "index": "TNFRSF18",
+            "gene_ids": "ENSG00000186891",
+            "feature_types": "Gene Expression",
+            "genome": "GRCh38",
+            "mt": false,
+            "n_cells": 328,
+            "percent_cells": 16.794674859190987,
+            "robust": true,
+            "means": 0.3789042498719918,
+            "variances": 1.7743908069132817,
+            "residual_variances": 5.312134631629235,
+            "highly_variable_rank": 540,
+            "highly_variable_features": true
+          },
+          {
+            "index": "TNFRSF4",
+            "gene_ids": "ENSG00000186827",
+            "feature_types": "Gene Expression",
+            "genome": "GRCh38",
+            "mt": false,
+            "n_cells": 297,
+            "percent_cells": 15.207373271889402,
+            "robust": true,
+            "means": 0.4644137224782386,
+            "variances": 3.8718118615329082,
+            "residual_variances": 9.611680156108473,
+            "highly_variable_rank": 203,
+            "highly_variable_features": true
+          },
+          {
+            "index": "MXRA8",
+            "gene_ids": "ENSG00000162576",
+            "feature_types": "Gene Expression",
+            "genome": "GRCh38",
+            "mt": false,
+            "n_cells": 16,
+            "percent_cells": 0.819252432155658,
+            "robust": true,
+            "means": 0.051203277009728626,
+            "variances": 0.5690981927761409,
+            "residual_variances": 3.2956573627595893,
+            "highly_variable_rank": 1227,
+            "highly_variable_features": true
+          }
+        ],
+        "clusters": [
+          {
+            "cluster": "0",
+            "count": 236
+          },
+          {
+            "cluster": "1",
+            "count": 228
+          },
+          {
+            "cluster": "2",
+            "count": 177
+          },
+          {
+            "cluster": "3",
+            "count": 173
+          },
+          {
+            "cluster": "4",
+            "count": 158
+          },
+          {
+            "cluster": "5",
+            "count": 156
+          },
+          {
+            "cluster": "6",
+            "count": 156
+          },
+          {
+            "cluster": "7",
+            "count": 148
+          },
+          {
+            "cluster": "8",
+            "count": 80
+          },
+          {
+            "cluster": "9",
+            "count": 75
+          },
+          {
+            "cluster": "10",
+            "count": 70
+          },
+          {
+            "cluster": "11",
+            "count": 55
+          },
+          {
+            "cluster": "12",
+            "count": 49
+          },
+          {
+            "cluster": "13",
+            "count": 47
+          },
+          {
+            "cluster": "14",
+            "count": 44
+          },
+          {
+            "cluster": "15",
+            "count": 37
+          },
+          {
+            "cluster": "16",
+            "count": 28
+          },
+          {
+            "cluster": "17",
+            "count": 27
+          },
+          {
+            "cluster": "18",
+            "count": 9
+          }
+        ],
+        "label_counts": {
+          "cellmarker": {
+            "T cell": 890,
+            "B cell": 326,
+            "Macrophage": 228,
+            "Epithelial cell": 157,
+            "Monocyte": 148,
+            "Endothelial cell": 80,
+            "Natural killer cell": 49,
+            "Mast cell": 47,
+            "Dendritic cell": 28
+          },
+          "panglaodb": {
+            "T Cells": 576,
+            "Macrophages": 376,
+            "NK Cells": 363,
+            "B Cells": 236,
+            "Endothelial Cells": 80,
+            "Basal Cells": 75,
+            "Epithelial Cells": 55,
+            "Plasma Cells": 53,
+            "Mast Cells": 47,
+            "B Cells Naive": 37,
+            "Dendritic Cells": 28,
+            "Pulmonary Alveolar Type II Cells": 27
+          },
+          "cancersea": {
+            "Differentiation": 693,
+            "Metastasis": 394,
+            "Inflammation": 383,
+            "Stemness": 333,
+            "EMT": 80,
+            "Quiescence": 70
+          }
+        }
+      },
+      "used_annotators": [
+        "cellmarker",
+        "panglaodb",
+        "cancersea"
+      ],
+      "adata_output_file": "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/annotated_loe_20250511_1730.h5ad"
+    },
+    "timestamp": "20250511_1730",
+    "params": {
+        "min_counts": 500,
+        "n_hvgs": 2000,
+        "n_pcs": 50,
+        "n_neighbors": 15,
+        "resolution": 0.8
+    },
+    "type": "annotate"
+  }

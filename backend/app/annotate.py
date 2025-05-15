@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use("Agg")          # headless backend – no windows created
 import scanpy as sc
 import pandas as pd
 import numpy as np
@@ -13,6 +15,7 @@ import sys
 import os
 import numpy as np
 import omicverse as ov
+from .utils import summarize_h5ad
 print(f'omicverse version: {ov.__version__}')
 print(f'scanpy version: {sc.__version__}')
 
@@ -28,7 +31,7 @@ def default_params():
         'resolution': 0.8
     }
 
-def run_preprocessing(adata, output_dir, params, timestamp, name):
+def run_preprocessing(adata, output_dir, params, timestamp, name, data={}):
     """
     Run the single-cell analysis pipeline without the Qt signal/slot mechanism.
     
@@ -91,14 +94,26 @@ def run_preprocessing(adata, output_dir, params, timestamp, name):
     adata.obsm["X_mde"] = ov.utils.mde(adata.obsm["scaled|original|X_pca"])
     print("Generating UMAP...")
     sc.tl.umap(adata)
-    print("Generating plots...")
-    sc.pl.umap(adata, color='leiden', save=f'{name}_{timestamp}_clusters.png')
+    print("Generating cluster UMAP with counts...")
+    cluster_key = "leiden"
+    counts = adata.obs[cluster_key].value_counts().to_dict()
+    new_cats = {cat: f"{cat} (n={counts[cat]})" for cat in adata.obs[cluster_key].cat.categories}
+    annot_col = f"{cluster_key}_cnt"
+    adata.obs[annot_col] = adata.obs[cluster_key].cat.rename_categories(new_cats)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sc.pl.umap(adata, color=annot_col, legend_loc="right margin", ax=ax, show=False)
+    umap_path = os.path.join(output_dir, f"{name}_clusters_umap_{timestamp}.png")
+    fig.savefig(umap_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Cluster UMAP saved to {umap_path}")
+    data['umap_path'] = umap_path
     print("Saving results...")
     output_file = os.path.join(output_dir, f"preprocessed_{name}_{timestamp}.h5ad")
     adata.write(output_file)
     
     print("Pipeline completed successfully!")
-    return adata
+    return adata, final_params
 
 def annotate(
     name,
@@ -106,12 +121,9 @@ def annotate(
     output_dir,
     preprocessed=False,
     preprocessing_params={},
-    species="human",
-    use_celltypist=False,
     use_cellmarker=True,
     use_panglao=False,
     use_cancer_single_cell_atlas=False,
-    celltypist_model=None
 ):
     """
     Analyze clusters and annotate cell types
@@ -157,28 +169,31 @@ def annotate(
     else:
         raise ValueError(f"Unsupported file format: {input_file}")
     
+    outputs = {}
+    data = {'figs': [], 'files': []}
+    
     os.makedirs(output_dir, exist_ok=True)
     sc.settings.verbosity = 1
     sc.settings.figdir = output_dir
     sc.settings.autoshow = False
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
-
+    params = {}
     if not preprocessed:
-        adata = run_preprocessing(adata, output_dir, preprocessing_params, timestamp, name)
+        adata, params = run_preprocessing(adata, output_dir, preprocessing_params, timestamp, name, data=data)
     used_annotators = []
     if use_cellmarker:
         print("Running cellmarker annotation...")
-        adata = annotate_with_scsa(adata, output_dir, cell_type=('normal'),db_type=('cellmarker'), name=name)
+        adata = annotate_with_scsa(adata, output_dir, cell_type=('normal'),db_type=('cellmarker'), name=name, data=data)
         used_annotators.append('cellmarker')
 
     if use_panglao:
         print("Running Panglao annotation...")
-        adata = annotate_with_scsa(adata, output_dir, cell_type='normal',db_type='panglaodb', name=name)
+        adata = annotate_with_scsa(adata, output_dir, cell_type='normal',db_type='panglaodb', name=name, data=data)
         used_annotators.append('panglaodb')
 
     if use_cancer_single_cell_atlas:
         print("Running Cancer Single Cell Atlas annotation...")
-        adata = annotate_with_scsa(adata, output_dir, cell_type='cancer',db_type='cancersea', name=name)
+        adata = annotate_with_scsa(adata, output_dir, cell_type='cancer',db_type='cancersea', name=name, data=data)
         used_annotators.append('cancersea')
 
     for annotator in used_annotators:
@@ -198,12 +213,24 @@ def annotate(
     # Save annotated data
     output_file = os.path.join(output_dir, f"annotated_{name}_{timestamp}.h5ad")
     print(f"Saving annotated data to {output_file}")
+
+    # 1) Persist to disk first so downstream steps can access the file
     adata.write(output_file)
+
+    # 2) Then build a lightweight summary for the response payload
+    data['adata']           = summarize_h5ad(output_file)
+    data['used_annotators'] = used_annotators
+    data['adata_output_file'] = output_file
+    outputs['name'] = name
+    outputs['input_file'] = input_file
+    outputs['output_dir'] = output_dir
+    outputs['timestamp'] = timestamp
+    outputs['data'] = data
     
     print("Cell type analysis complete!")
-    return adata
+    return outputs, params
 
-def annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarker', name=''):
+def annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarker', name='', data={}):
     """Annotate clusters using OmicVerse"""
     print("Running OmicVerse annotation...")
     ov.ov_plot_set()
@@ -224,79 +251,51 @@ def annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarke
     import sys
     from contextlib import redirect_stdout
     annotation_output_file = os.path.join(output_dir, f'{name}_{db_type}_annotation_details_{timestamp}.txt')
+    data['files'].append((annotation_output_file, f'{db_type} Clusters'))
     with open(annotation_output_file, 'w') as f:
         with redirect_stdout(f):
             scsa.cell_anno_print()
     scsa.cell_anno_print()
     print(f"Annotation details saved to: {annotation_output_file}")
 
-    fig, ax = ov.utils.plot_embedding(adata,
-                   basis='X_mde',
-                   color=db_type, 
-                   legend_loc='on data', 
-                   frameon='small',
-                   legend_fontoutline=2,
-                   palette=ov.utils.palette()[14:],
-                   title=f'{db_type} annotation'
-                  )
+    # Build a counts-aware categorical column for nicer legend labels
+    counts = adata.obs[db_type].value_counts().to_dict()
+    new_cats = {cat: f"{cat} (n={counts[cat]})" for cat in adata.obs[db_type].astype('category').cat.categories}
+    annot_col = f"{db_type}_cnt"
+    adata.obs[annot_col] = adata.obs[db_type].astype('category').cat.rename_categories(new_cats)
+
+    fig, ax = ov.utils.plot_embedding(
+        adata,
+        basis='X_mde',
+        color=annot_col,
+        legend_loc='on data',
+        frameon='small',
+        legend_fontoutline=2,
+        palette=ov.utils.palette()[14:],
+        title=f'{db_type} annotation'
+    )
     fig.savefig(os.path.join(output_dir, f'{name}_{db_type}_scsa_annotation_{timestamp}.png'), dpi=300)
-    save_celltype_counts(adata, output_dir, db_type, timestamp, name)
-    marker_dict=save_marker_gene_expression(adata, output_dir, name, db_type, timestamp)
+    data['figs'].append((os.path.join(output_dir, f'{name}_{db_type}_scsa_annotation_{timestamp}.png'), f'{db_type} Clusters'))
+    path_marker_dict, marker_dict = save_marker_gene_expression(adata, output_dir, name, db_type, timestamp, data)
+    data['files'].append((path_marker_dict, f'{db_type} Marker Gene Expression'))
     sc.settings.figdir = output_dir
-    sc.pl.dotplot(adata, marker_dict, groupby=db_type, standard_scale="var", save=f'{name}_{db_type}_dotplot_{timestamp}.png')
-    count_marker_gene_expression(adata, marker_dict, annotation_column=db_type, min_expression=0.1, output_dir=output_dir, name=name)
+    sc.pl.dotplot(adata, marker_dict, groupby=db_type, standard_scale="var", save=f'{name}_{db_type}_{timestamp}.png')
+    data['figs'].append((os.path.join(output_dir, f'dotplot_{name}_{db_type}_{timestamp}.png'), f'{db_type} Marker Gene Expression'))
+    path_marker_gene_expression_counts = count_marker_gene_expression(adata, marker_dict, timestamp, annotation_column=db_type, min_expression=0.1, output_dir=output_dir, name=name)
+    data['files'].append((path_marker_gene_expression_counts, f'{db_type} Marker Gene Expression'))
     return adata
 
-def save_marker_gene_expression(adata, output_dir, name, cluster_column, timestamp):
+def save_marker_gene_expression(adata, output_dir, name, cluster_column, timestamp, data={}):
     marker_dict=ov.single.get_celltype_marker(adata,clustertype=cluster_column)
     #save marker_dict to file
-    with open(f'{output_dir}/{name}_marker_dict_{timestamp}.txt', 'w') as f:
+    filename = f'{name}_marker_dict_{timestamp}.txt'
+    with open(f'{output_dir}/{filename}', 'w') as f:
         for cell_type, genes in marker_dict.items():
             f.write(f"{cell_type}: {genes}\n")
     print(f"Marker gene expression saved to {output_dir}/{name}_marker_dict_{timestamp}.txt")
-    return marker_dict
+    return f'{output_dir}/{filename}', marker_dict
 
-def save_celltype_counts(adata, output_dir, db_type, timestamp, name=None):
-    """
-    Save cell type counts to a CSV file.
-    
-    Parameters:
-    -----------
-    adata : AnnData
-        Annotated AnnData object
-    output_dir : str
-        Directory to save the CSV file
-    db_type : str
-        Database type used for annotation (e.g., 'cellmarker', 'panglaodb', 'cancersea')
-    name : str, optional
-        Optional name to include in the filename
-    
-    Returns:
-    --------
-    str
-        Path to the saved CSV file
-    """
-    import pandas as pd
-    import os
-    from datetime import datetime
-    
-    celltype_column = db_type
-    counts = adata.obs[celltype_column].value_counts().reset_index()
-    counts.columns = ['Cell Type', 'Count']
-    total_cells = counts['Count'].sum()
-    counts['Percentage'] = (counts['Count'] / total_cells * 100).round(2)
-    counts = counts.sort_values('Count', ascending=False)
-    if name:
-        filename = f"{name}_{db_type}_celltype_counts_{timestamp}.csv"
-    else:
-        filename = f"{db_type}_celltype_counts_{timestamp}.csv"
-    output_path = os.path.join(output_dir, filename)
-    counts.to_csv(output_path, index=False)
-    print(f"Cell type counts saved to: {output_path}")
-    
-    return output_path
-
-def count_marker_gene_expression(adata, marker_dict, annotation_column='cellmarker', min_expression=0.1, output_dir='', name=''):
+def count_marker_gene_expression(adata, marker_dict, timestamp, annotation_column='cellmarker', min_expression=0.1, output_dir='', name=''):
     """
     Count cells expressing each marker gene across different cell types.
     
@@ -367,9 +366,10 @@ def count_marker_gene_expression(adata, marker_dict, annotation_column='cellmark
     
     # Convert to DataFrame
     results_df = pd.DataFrame(results)
-    results_df.to_csv(f'{output_dir}/{name}_{annotation_column}_marker_gene_expression_counts.csv', index=False)
+    filename = f'{name}_{annotation_column}_marker_gene_expression_counts_{timestamp}.csv'
+    results_df.to_csv(f'{output_dir}/{filename}', index=False)
     
-    return results_df
+    return f'{output_dir}/{filename}'
 
 def test_pipeline():
     input_file = "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/preprocessed_test_20250402_2109.h5ad"

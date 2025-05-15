@@ -1,0 +1,66 @@
+{
+    "name": "fren",
+    "input_path": "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/annotated_loe_20250510_2017.h5ad",
+    "output_dir": "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run",
+    "data": {
+      "figs": [
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_heatmap_20250511_1733.png",
+          "Interaction Heatmap"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_dotplot_T cell_20250511_1733.png",
+          "Detailed Dot Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_dotplot_Macrophage_20250511_1733.png",
+          "Detailed Dot Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_dotplot_B cell_20250511_1733.png",
+          "Detailed Dot Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_dotplot_Monocyte_20250511_1733.png",
+          "Detailed Dot Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_dotplot_Natural killer cell_20250511_1733.png",
+          "Detailed Dot Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_dotplot_Endothelial cell_20250511_1733.png",
+          "Detailed Dot Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_dotplot_Dendritic cell_20250511_1733.png",
+          "Detailed Dot Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_dotplot_Epithelial cell_20250511_1733.png",
+          "Detailed Dot Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_dotplot_Mast cell_20250511_1733.png",
+          "Detailed Dot Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_network_20250511_1733.png",
+          "Network Plots"
+        ],
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_detailed_network_20250511_1733.png",
+          "Network Plots"
+        ]
+      ],
+      "files": [
+        [
+          "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/fren_cpdb_results.pkl",
+          "CellPhoneDB Results"
+        ]
+      ],
+      "timestamp": "20250511_1733"
+    },
+    "timestamp": "20250511_1733",
+    "type": "cellphonedb"
+  }
