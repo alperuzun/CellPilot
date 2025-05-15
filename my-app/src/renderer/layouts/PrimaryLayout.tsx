@@ -7,19 +7,21 @@ import {
   import { useState } from 'react';
   import logo from '../../assets/cellpilot_logo_github.jpg';
 import GettingStarted from '../pages/GettingStarted';
-import mock from '../mock/Annoresponse.json';
-  
+import mock_annotation from '../mock/Annoresponse.json';
+import mock_inferCNV from '../mock/Infercnresponse.json';
+import mock_cell_interaction from '../mock/cellphonedbresponse.json';
+import mock_input from '../mock/mock_input.json';
   const drawerWidth = 180;
 
-  interface Upload { id: number, name: string, summary: Record<string, any> }
-  interface Output { id: number, name: string, data: Record<string, any> }
+  interface Upload { id: number, name: string, summary: Record<string, any>, outputs: Output[] }
+  interface Output { id: number, name: string, data: Record<string, any>, input: string }
   
   export default function PrimaryLayout() {
     const [mobileOpen, setMobileOpen] = useState(false);
-    const [uploads, setUploads] = useState<Upload[]>([]);
-    const [outputs, setOutputs] = useState<Output[]>([{id: 1, name: 'mock', data: mock}]);
-    const [summary, setSummary] = useState<Record<string, any> | null>(null);
-    const [output, setOutput] = useState<Record<string, any> | null>(null);
+    const [uploads, setUploads] = useState<Upload[]>([{id: 1, name: 'mock_input', summary: mock_input, outputs: [{id: 1, name: 'mock_annotation', data: mock_annotation, input: mock_input.path}, {id: 2, name: 'mock_inferCNV', data: mock_inferCNV, input: mock_input.path}, {id: 3, name: 'mock_cell_interaction', data: mock_cell_interaction, input: mock_input.path}]}]);
+    const [outputs, setOutputs] = useState<Output[]>([{id: 1, name: 'mock_annotation', data: mock_annotation, input: mock_input.path}, {id: 2, name: 'mock_inferCNV', data: mock_inferCNV, input: mock_input.path}, {id: 3, name: 'mock_cell_interaction', data: mock_cell_interaction, input: mock_input.path}]);
+    const [upload, setUpload] = useState<Upload | null>(null);
+    const [output, setOutput] = useState<Output | null>(null);
     const [viewInput, setViewInput] = useState(true);
 
   
@@ -42,9 +44,9 @@ import mock from '../mock/Annoresponse.json';
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.detail ?? 'Upload failed');
-  
-        setUploads(prev => [{ id: Date.now(), name: fileName, summary: data.summary }, ...prev]);
-        setSummary(data.summary);
+        const newUpload = { id: Math.random(), name: fileName, summary: data.summary, outputs: [] };
+        setUploads(prev => [newUpload, ...prev]);
+        setUpload(newUpload);
       } catch (err:any) {
         console.error(err);
         alert(err.message);
@@ -60,21 +62,21 @@ import mock from '../mock/Annoresponse.json';
             <ListItemText primary="Uploads" />
           </ListItemButton>
           {/* ── scrollable Upload names ─────────────────────────────── */}
-          <Box sx={{ overflowX: 'auto' }}>
-            <List dense disablePadding sx={{ width: 'max-content' }}>
+          <Box sx={{ maxHeight: 200, overflowY: 'auto', overflowX: 'auto' }}>
+            <List dense disablePadding sx={{ width: '100%' }}>
               {uploads.length > 0 ? uploads.map((u) => (
                 <ListItemButton
                   key={u.id}
-                  sx={{ pl: 4, minWidth: 'max-content' }}   /* keep full name */
+                  sx={{ pl: 4, minWidth: '100%'}} 
+                  onClick={() => {
+                    setUpload(u);
+                    setOutput(null);
+                    setViewInput(true);
+                  }}
                 >
                   <ListItemText
                     primary={u.name}
-                    sx={{ whiteSpace: 'nowrap', pr: 2 }}
-                    onClick={() => {
-                      setSummary(u.summary);
-                      setOutput(null);
-                      setViewInput(true);
-                    }}
+                    sx={{ whiteSpace: 'nowrap', pl: 4 }}
                   />
                 </ListItemButton>
               )) : (
@@ -91,21 +93,22 @@ import mock from '../mock/Annoresponse.json';
                 <ListItemText primary="Outputs" />
             </ListItemButton>
             {/* ── scrollable Output names ─────────────────────────────── */}
-            <Box sx={{ overflowX: 'auto' }}>
+            <Box sx={{ maxHeight: 200, overflowY: 'auto', overflowX: 'auto' }}>
               <List dense disablePadding sx={{ width: '100%' }}>
 
                 {outputs.length > 0 ? outputs.map((o) => (
                   <ListItemButton
                     key={o.id}
-                    sx={{ pl: 4, minWidth: 'max-content' }}
+                    sx={{ pl: 4, minWidth: '100%' }}
+                    onClick={() => {
+                        setOutput(o);
+                        setUpload(uploads.find(u => u.summary.path === o.input) ?? null);
+                        setViewInput(false);
+                      }}
                   >
                     <ListItemText
                       primary={o.name}
-                      sx={{ whiteSpace: 'nowrap', pl: 4}}
-                      onClick={() => {
-                        setOutput(o.data);
-                        setViewInput(false);
-                      }}
+                      sx={{ whiteSpace: 'nowrap', pl: 4 }}
                     />
                   </ListItemButton>
                 )) : (
@@ -196,7 +199,7 @@ import mock from '../mock/Annoresponse.json';
             minHeight: 0        /* allow children to shrink / scroll */
           }}
         >
-            <GettingStarted summary={summary} output={output} outputs={outputs} setOutput={setOutput} setOutputs={setOutputs} viewInput={viewInput} setViewInput={setViewInput} />
+            <GettingStarted upload={upload} output={output} outputs={outputs} setOutput={setOutput} setOutputs={setOutputs} viewInput={viewInput} setViewInput={setViewInput} uploads={uploads} setUploads={setUploads} setUpload={setUpload} />
         </Box>
       </Box>
     );

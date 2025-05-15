@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, Dispatch, SetStateAction } from 'react';
 import {
   Box, Paper, Typography, TextField, Button, Divider,
   Checkbox, FormControlLabel, FormControl, InputLabel, Select, MenuItem,
@@ -8,19 +8,51 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import Grid from "@mui/material/Grid";
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 
-interface Props {
-  summary: any;
+export interface Props {
+  upload: any;
+  setUpload: (upload: any) => void;
   onComplete?: (output: any) => void;
-  setOutputs?: (outputs: any[]) => void;
+  setOutputs?: Dispatch<SetStateAction<any[]>>;
   outputs?: any[];
   viewInput?: boolean;
   setViewInput?: (v: boolean) => void;
+  setUploads?: Dispatch<SetStateAction<any[]>>;
+  uploads?: any[];
 }
 
-export default function AnnotationOptions({ summary, onComplete, setOutputs, outputs = [], viewInput, setViewInput }: Props) {
+export const handleUploadClick = async (uploads: any[], setViewInput: (v: boolean) => void, setUploads: Dispatch<SetStateAction<any[]>>, setUpload: (upload: any) => void, set: (state: any) => void, state: any) => {
+    const fullPath = await window.backend.openAdataFile();   // single dialog
+    if (!fullPath) return;                                   // user cancelled
+
+    set({...state, input: fullPath});
+    const fileName = fullPath.split('/').pop();
+    if (uploads.some(u => u.name === fileName)) {
+      setUpload(uploads.find(u => u.name === fileName));
+      setViewInput?.(true);
+      return;
+    }
+
+    try {
+      const r = await fetch('http://127.0.0.1:8000/adata_upload', {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify({ input_path: fullPath, name: fileName })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail ?? 'Upload failed');
+      const newUpload = { id: Math.random(), name: fileName, summary: data.summary, outputs: [] };
+      setUploads(prev => [newUpload, ...prev]);
+      setUpload(newUpload);
+    } catch (err:any) {
+      console.error(err);
+      alert(err.message);
+    }
+  };
+
+export default function AnnotationOptions({ upload, setUpload, onComplete, setOutputs, outputs = [], viewInput, setViewInput, setUploads, uploads }: Props) {
   const [loading, setLoading] = useState(false);
   const [state, set] = useState({
-    input: summary ? summary['path'] : '',
+    input: upload ? upload.summary.path : '',
     output: '',
     name: '',
     preprocessed: false,
@@ -36,6 +68,7 @@ export default function AnnotationOptions({ summary, onComplete, setOutputs, out
     pl: false,
     sca: false
   });
+  const summary = upload?.summary;
   const on = (k: keyof typeof state) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | any) =>
       set({ ...state, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
@@ -73,9 +106,15 @@ export default function AnnotationOptions({ summary, onComplete, setOutputs, out
       const data = await r.json();
       if (!r.ok) throw new Error(data.detail || 'Annotation failed');
 
-      if (onComplete) onComplete(data);
       alert('Annotation completed successfully');
-      if (setOutputs) setOutputs([...outputs, { id: Date.now(), name: state.name, data }]);
+      console.log(data);
+      const newOutput = { id: Date.now(), name: state.name, data: data, input: summary.path };
+      if (setOutputs) setOutputs(prev => [...prev, newOutput]);
+      if (onComplete) onComplete(newOutput);
+      const enrichedUpload = { ...upload, outputs: [...upload.outputs, newOutput] };
+      if (setUploads) setUploads(prev =>
+        prev.map((u) => (u.id === enrichedUpload.id ? enrichedUpload : u))
+      );
       if (setViewInput) setViewInput(false);
     } catch (err:any) {
       console.error(err);
@@ -95,10 +134,19 @@ export default function AnnotationOptions({ summary, onComplete, setOutputs, out
     <Paper variant="outlined" sx={{ p: 1, height: 'auto', minHeight: 'min-content', display: 'flex', flexDirection: 'column' }}>
       <Typography variant="subtitle1" gutterBottom>Input / Output</Typography>
       <Grid container spacing={1}>
-        <Grid size={{xs:12, md:6}}>
-          <TextField label="Input file" value={state.input} onChange={on('input')} fullWidth size="small" />
+        <Grid item xs={12} md={6}>
+          <TextField label="Input file" value={state.input} onChange={on('input')} fullWidth size="small" InputProps={{
+              readOnly: true,
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton onClick={() => handleUploadClick(uploads, setViewInput, setUploads, setUpload, set, state)} edge="end">
+                    <FolderOpenIcon />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}/>
         </Grid>
-        <Grid size={{xs:12, md:6}}>
+        <Grid item xs={12} md={6}>
           <TextField
             label="Output directory"
             value={state.output}
@@ -116,7 +164,7 @@ export default function AnnotationOptions({ summary, onComplete, setOutputs, out
             }}
           />
         </Grid>
-        <Grid size={{xs:12, md:4}}>
+        <Grid item xs={12} md={4}>
           <TextField label="Run name" value={state.name} onChange={on('name')} fullWidth size="small" />
         </Grid>
       </Grid>
@@ -130,20 +178,20 @@ export default function AnnotationOptions({ summary, onComplete, setOutputs, out
         <>
           <Typography variant="subtitle1" sx={{ mt: 2 }}>Pre-processing</Typography>
           <Grid container spacing={1}>
-            <Grid size={{xs:4, md:2}}><TextField label="Mito thr." type="number" size="small" value={state.mito}   onChange={on('mito')}  fullWidth /></Grid>
-            <Grid size={{xs:4, md:2}}><TextField label="Min genes" type="number" size="small" value={state.minGenes} onChange={on('minGenes')} fullWidth /></Grid>
-            <Grid size={{xs:4, md:2}}><TextField label="Min counts" type="number" size="small" value={state.minCounts} onChange={on('minCounts')} fullWidth /></Grid>
-            <Grid size={{xs:4, md:2}}><TextField label="# HVGs"    type="number" size="small" value={state.hvgs}     onChange={on('hvgs')} fullWidth /></Grid>
-            <Grid size={{xs:4, md:2}}><TextField label="# PCs"     type="number" size="small" value={state.pcs}      onChange={on('pcs')} fullWidth /></Grid>
-            <Grid size={{xs:4, md:2}}><TextField label="# Neighbours" type="number" size="small" value={state.neigh} onChange={on('neigh')} fullWidth /></Grid>
-            <Grid size={{xs:4, md:2}}><TextField label="Resolution"  type="number" size="small" value={state.res}   onChange={on('res')}  fullWidth /></Grid>
+            <Grid item xs={4} md={2}><TextField label="Mito thr." type="number" size="small" value={state.mito}   onChange={on('mito')}  fullWidth /></Grid>
+            <Grid item xs={4} md={2}><TextField label="Min genes" type="number" size="small" value={state.minGenes} onChange={on('minGenes')} fullWidth /></Grid>
+            <Grid item xs={4} md={2}><TextField label="Min counts" type="number" size="small" value={state.minCounts} onChange={on('minCounts')} fullWidth /></Grid>
+            <Grid item xs={4} md={2}><TextField label="# HVGs"    type="number" size="small" value={state.hvgs}     onChange={on('hvgs')} fullWidth /></Grid>
+            <Grid item xs={4} md={2}><TextField label="# PCs"     type="number" size="small" value={state.pcs}      onChange={on('pcs')} fullWidth /></Grid>
+            <Grid item xs={4} md={2}><TextField label="# Neighbours" type="number" size="small" value={state.neigh} onChange={on('neigh')} fullWidth /></Grid>
+            <Grid item xs={4} md={2}><TextField label="Resolution"  type="number" size="small" value={state.res}   onChange={on('res')}  fullWidth /></Grid>
           </Grid>
         </>
       )}
 
       <Typography variant="subtitle1">Annotation settings</Typography>
       <Grid container spacing={2} alignItems="center">
-        <Grid size={{xs:12, md:4}}>
+        <Grid item xs={12} md={4}>
           <FormControl fullWidth size="small">
             <InputLabel>Species</InputLabel>
             <Select label="Species" value={state.species} onChange={on('species')}>
@@ -152,7 +200,7 @@ export default function AnnotationOptions({ summary, onComplete, setOutputs, out
             </Select>
           </FormControl>
         </Grid>
-        <Grid size={{xs:12, md:8}}>
+        <Grid item xs={12} md={8}>
           <FormControlLabel control={<Checkbox checked={state.cm} onChange={on('cm')} />}  label="CellMarker" />
           <FormControlLabel control={<Checkbox checked={state.pl} onChange={on('pl')} />}  label="PanglaoDB"  />
           <FormControlLabel control={<Checkbox checked={state.sca} onChange={on('sca')} />} label="Cancer SCA" />

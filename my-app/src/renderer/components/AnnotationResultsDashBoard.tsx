@@ -2,36 +2,79 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   Box, Typography, Chip, ImageList, ImageListItem, List, ListItemButton,
   ListItemIcon, ListItemText, Paper, Divider, Table, TableBody, TableCell,
-  TableRow, TableHead,
+  TableRow, TableHead, Button
 } from '@mui/material';
-import ImageIcon from '@mui/icons-material/Image';
-import DescriptionIcon from '@mui/icons-material/Description';
-import mock from '../mock/Annoresponse.json';
 import AdataSummaryPreview from './AdataSummaryPreview';
 
 
-interface Props { output?: Record<string, any> }
+interface Props { output?: Record<string, any>, viewInput: boolean, setViewInput: (viewInput: boolean) => void, setUpload: (upload: any) => void, uploads: any[] }
 const HEADER = 64;
-export default function AnnotationResultsDashBoard({ output }: Props) {
-  /* ------------ flatten artefacts ------------------------------------- */
-  const artefacts: string[] = useMemo(() => {
-    const arr: string[] = [];
-    if (!output?.data) return arr;
-    Object.values(output.data).forEach((v: any) => {
-      if (Array.isArray(v)) arr.push(...v as string[]);
+export default function AnnotationResultsDashBoard({ output, viewInput, setViewInput, setUpload, uploads }: Props) {
+  /*
+    `artefacts` is an array of tuples:  [absolutePath, categoryLabel]
+    We gather them from every array stored in `output.data` and remove duplicate
+    *paths* (not reference-equal tuples).
+  */
+  const artefacts: [string, string][] = useMemo(() => {
+    if (!output?.data.data) return [];
+    const tuples: [string, string][] = [];
+    Object.values(output.data.data).forEach((v: any) => {
+      if (Array.isArray(v)) {
+        v.forEach((elem: any) => {
+          if (Array.isArray(elem) && elem.length === 2 && typeof elem[0] === 'string') {
+            tuples.push(elem as [string, string]);
+          }
+        });
+      }
     });
-    return arr;
+    // De-duplicate by absolute path
+    const seen = new Set<string>();
+    const uniq: [string, string][] = [];
+    tuples.forEach(([p, lbl]) => {
+      if (!seen.has(p)) {
+        seen.add(p);
+        uniq.push([p, lbl]);
+      }
+    });
+    return uniq;
   }, [output]);
 
   /* ------------ categorise ------------------------------------------- */
-  const imgs = artefacts.filter(p => /\.png$/i.test(p));
-  const csvs = artefacts.filter(p => /\.csv$/i.test(p));
-  const txts = artefacts.filter(p => /\.txt$/i.test(p));
-  const pkls = artefacts.filter(p => /\.pkl$/i.test(p));
-  const summary = output?.data?.adata;
-  const [selected, setSelected] = useState<string | null>(imgs[0] ?? null);
+  const categories = useMemo(() => {
+    console.log(artefacts);
+    const acc: Record<string, string[]> = {};
+    artefacts.forEach(([path, label]) => {
+      acc[label] = acc[label] || [];
+      acc[label].push(path);
+    });
+    return acc;   // { label: [paths] }
+  }, [artefacts]);
+
+  // Convenience flat list of paths for extension-based filtering
+  const allPaths = artefacts.map(([p]) => p);
+  const imgs = allPaths.filter(p => /\.png$/i.test(p));
+
+  console.log(output?.data?.data?.adata);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  // When the whole output prop changes (user switched tab), reset selection & zoom
+  useEffect(() => {
+    setSelected(null);
+  }, [output]);
+
+  /* choose a sensible default whenever artefacts or summary change */
+  useEffect(() => {
+    if (selected) return;
+    if (output?.data?.data?.adata) {
+      setSelected('__SUMMARY__');
+    } else if (imgs.length > 0) {
+      setSelected(imgs[0]);
+    }
+  }, [output?.data?.data?.adata, imgs, selected]);
+
   const [textContent, setTextContent] = useState<string>('');
   const [zoom, setZoom] = useState<number>(1);
+  const [showParams, setShowParams] = useState(false); 
 
   /* -------- fetch text when CSV/TXT selected ------------------------- */
   useEffect(() => {
@@ -57,9 +100,10 @@ export default function AnnotationResultsDashBoard({ output }: Props) {
   const renderPreview = () => {
     if (!selected) return <Typography color="text.secondary">Select a file</Typography>;
 
-    if (selected === summary) {
-      return <AdataSummaryPreview summary={output?.data?.adata} />;
+    if (selected === '__SUMMARY__') {
+      return <AdataSummaryPreview summary={output?.data?.data?.adata} />;
     }
+
     if (/\.png$/i.test(selected)) {
       return (
         <Box sx={{ 
@@ -87,9 +131,8 @@ export default function AnnotationResultsDashBoard({ output }: Props) {
       );
     }
 
-    // CSV preview – show first 20 rows crude split
     if (/\.csv$/i.test(selected)) {
-      const rows = textContent.split(/\r?\n/).slice(0, 20).map(r => r.split(','));
+      const rows = textContent.split(/\r?\n/).slice(0, 100).map(r => r.split(','));
       const headers = rows[0] || [];
       const body   = rows.slice(1);
       return (
@@ -144,68 +187,49 @@ export default function AnnotationResultsDashBoard({ output }: Props) {
           px: 2,
         }}
       >
-        <Typography sx={{ p: 1 }} variant="h6">{output?.name} Results</Typography>
+        <Typography sx={{ p: 1 }} variant="h6">{output?.name}</Typography>
+            { !viewInput ? (
+            <Button sx={{ position: 'absolute', right: 20, zIndex: 1000, minWidth: 160 }} onClick={() => {
+              if (output?.input) {
+                    setUpload(uploads.find(u => u.summary.path === output.input));
+                    setViewInput(true);
+                  } else {
+                     alert('No input file for this output');
+                  }
+              }}>View Input</Button>
+            ) : null}
       </Box>
       <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Left rail - simplified to just file names */}
-        <Paper variant="outlined" sx={{ width: 200, overflow: 'auto', bgcolor:'grey.50', resize:'horizontal', minWidth:100, maxWidth:200 }}>
-          {/* left rail  – summary only when present */}
-          {summary && (
-            <ListItemButton onClick={() => select(summary)}
-                           selected={summary === selected} sx={{ py: 0.5 }}>
-              <ListItemText primary={summary.split('/').pop()}
+        <Paper variant="outlined" sx={{ width: 200, height: '100%', overflowY: 'auto', bgcolor:'grey.50', resize:'horizontal', overflowX:'auto', minWidth:100, maxWidth:200, pt:1 }}>
+          {/* summary shortcut */}
+          {output?.data?.data?.adata && (
+            <ListItemButton onClick={() => select('__SUMMARY__')}
+                           selected={selected === '__SUMMARY__'} sx={{ py: 0.5 }}>
+              <ListItemText primary={
+                typeof output?.data?.data?.adata.path === 'string' && output?.data?.data?.adata.path !== 'None'
+                  ? output?.data?.data?.adata.path.split(/[\\/]/).pop()
+                  : `${output?.name ?? 'adata'}_summary`
+              }
                             primaryTypographyProps={{ noWrap: true, fontSize: '0.875rem' }}/>
             </ListItemButton>
           )}
-          {imgs.map((p) => (
-            <ListItemButton
-              key={p}
-              onClick={() => select(p)}
-              selected={selected === p}
-              sx={{ py: 0.5 }}
-            >
-              <ListItemIcon sx={{ minWidth: 36 }}>
-                <ImageIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText 
-                primary={p.split('/').pop()} 
-                primaryTypographyProps={{ noWrap: true, fontSize: '0.875rem' }}
-              />
-            </ListItemButton>
-          ))}
-          <List dense>
-            {[...csvs, ...txts].map(p => (
-              <ListItemButton key={p} onClick={() => select(p)} selected={p===selected} sx={{ py: 0.5 }}>
-                <ListItemIcon sx={{ minWidth: 36 }}>
-                  <DescriptionIcon fontSize="small" />
-                </ListItemIcon>
-                <ListItemText 
-                  primary={p.split('/').pop()} 
-                  primaryTypographyProps={{ noWrap: true, fontSize: '0.875rem' }}
-                />
+
+          {/* Grouped artefacts by category */}
+          {Object.entries(categories).map(([label, paths]) => (
+            <React.Fragment key={label}>
+              <ListItemButton disabled sx={{ py: 0.5 }}>
+                <ListItemText primary={label} primaryTypographyProps={{ fontWeight:'bold', fontSize:'0.75rem' }}/>
               </ListItemButton>
-            ))}
-          </List>
-          {pkls.length > 0 && (
-            <>
-              <Divider />
-              <Typography sx={{ p: 1, fontWeight:'bold' }} variant="subtitle1">
-                Other ({pkls.length})
-              </Typography>
-              <List dense>
-                {pkls.map(p => (
-                  <ListItemButton key={p} onClick={() => select(p)}
-                                  selected={p===selected} sx={{ py: 0.5 }}>
-                    <ListItemIcon sx={{ minWidth: 36 }}>
-                      <DescriptionIcon fontSize="small" />
-                    </ListItemIcon>
-                    <ListItemText primary={p.split('/').pop()}
-                                  primaryTypographyProps={{ noWrap: true, fontSize: '0.875rem' }}/>
+              <List dense disablePadding sx={{ width:'max-content' }}>
+                {paths.map(p => (
+                  <ListItemButton key={p} onClick={() => select(p)} selected={selected===p} sx={{ pl: 4, minWidth:'max-content', py:0.5 }}>
+                    <ListItemText primary={p.split('/').pop()} primaryTypographyProps={{ noWrap:true, fontSize:'0.8rem' }}/>
                   </ListItemButton>
                 ))}
               </List>
-            </>
-          )}
+            </React.Fragment>
+          ))}
         </Paper>
 
         {/* Preview area with zoom controls directly in the content area */}
@@ -232,6 +256,16 @@ export default function AnnotationResultsDashBoard({ output }: Props) {
                 </Typography>
                 <Chip label="+" size="small" clickable onClick={()=>setZoom(z=>Math.min(z+0.25,4))} />
                 <Chip label="-" size="small" clickable onClick={()=>setZoom(z=>Math.max(z-0.25,0.25))} />
+              </Box>
+            )}
+
+            {!/\.txt$/i.test(selected) && !/\.csv$/i.test(selected) && output?.data?.params && (
+              <Box sx={{position: 'absolute', display:'flex', bottom: 20, right: 20, flexDirection:'column', gap: 1, bgcolor: 'rgba(255, 255, 255, 0.7)', overflowX: 'auto', borderRadius: 1}}>
+                {!showParams && <Button variant="text" onClick={()=>setShowParams(true)} sx={{ mr: 1, alignSelf: 'center' }}>PARAMS</Button>}
+                {showParams && Object.entries(output.data.params).map(([key, value]) => (
+                  <Typography variant="caption" key={key}>{key}: {String(value)}</Typography>
+                ))}
+                {showParams && <Chip sx={{alignSelf: 'right', width: '30px'}} label="-" size="small" clickable onClick={()=>setShowParams(false)} />}
               </Box>
             )}
           </Box>

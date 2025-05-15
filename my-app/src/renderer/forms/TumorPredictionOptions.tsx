@@ -7,24 +7,24 @@ import {
 } from '@mui/material';
 import ScienceIcon from '@mui/icons-material/Science';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import { Props as AnnotationOptionsProps, handleUploadClick } from './AnnotationOptions';
 
-type Props = { summary: any, onComplete: (output: any) => void, outputs: any[], setOutputs: (outputs: any[]) => void, viewInput: boolean, setViewInput: (viewInput: boolean) => void };      // summary.label_counts is assumed
 
-export default function TumorPredictionOptions({ summary, onComplete, outputs, setOutputs, viewInput, setViewInput }: Props) {
+export default function TumorPredictionOptions({ upload, onComplete, setUploads, setUpload, viewInput, setViewInput, uploads }: AnnotationOptionsProps) {
   /* ─────────── summary-driven helpers ─────────── */
   const refKeys: string[] = useMemo(
-    () => summary?.label_counts ? Object.keys(summary.label_counts) : [],
-    [summary]
+    () => upload?.summary?.label_counts ? Object.keys(upload.summary.label_counts) : [],
+    [upload]
   );
 
   const categoriesForKey = (key: string) =>
-    key && summary?.label_counts?.[key]
-      ? Object.keys(summary.label_counts[key])
+    key && upload?.summary?.label_counts?.[key]
+      ? Object.keys(upload.summary.label_counts[key])
       : [];
 
   /* ─────────── form state ─────────── */
   const [st, set] = useState({
-    input_path : summary?.path ?? '',
+    input_path : upload ? upload.summary.path : '',
     output_dir: '',
     name  : '',
     reference_key: '',
@@ -46,10 +46,15 @@ export default function TumorPredictionOptions({ summary, onComplete, outputs, s
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.detail || 'Tumor Prediction failed');
-      if (onComplete) onComplete(data);
-      setOutputs([...outputs, { id: Date.now(), name: st.name, data }]);
-      setViewInput(false);
       alert('Tumor Prediction completed successfully');
+      const newOutput = { id: Date.now(), name: st.name, data: data, input: upload?.summary.path };
+      const enrichedUpload = { ...upload, outputs: [...upload.outputs, newOutput] };
+      if (setUploads) setUploads(prev =>
+        prev.map((u: any) => (u.id === enrichedUpload.id ? enrichedUpload : u))
+      );
+      setUpload(enrichedUpload);
+      if (onComplete) onComplete(newOutput);
+      setViewInput?.(false);
     } catch (err: any) {
       console.error(err);
       alert(err.message || 'Tumor Prediction failed');
@@ -86,8 +91,16 @@ export default function TumorPredictionOptions({ summary, onComplete, outputs, s
             label="Input .h5ad"
             value={st.input_path}
             onChange={e => on('input_path')(e.target.value)}
-            fullWidth size="small"
-          />
+            fullWidth size="small" InputProps={{
+              readOnly: true,
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton onClick={() => handleUploadClick(uploads, setViewInput, setUploads, setUpload, set, st)} edge="end">
+                    <FolderOpenIcon />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}/>
         </Grid>
         <Grid item xs={12} md={6}>
           <TextField

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, Dispatch, SetStateAction } from 'react';
 import {
   Paper, Typography, Grid, TextField, Box, Button, MenuItem,
   FormControl, Select, InputLabel, ListItemText, List, IconButton,
@@ -8,17 +8,15 @@ import ConnectWithoutContactIcon from '@mui/icons-material/ConnectWithoutContact
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { Props as AnnotationOptionsProps, handleUploadClick } from './AnnotationOptions';
 
 export default function CellInteractionOptions({
-  summary, onComplete, setOutputs, outputs, viewInput, setViewInput,
-}: {
-  summary: any; onComplete: (output: any) => void;
-  setOutputs: (outputs: any[]) => void; outputs: any[]; viewInput: boolean; setViewInput: (v: boolean) => void;
-}) {
+  upload, setUpload, setUploads, onComplete, setOutputs, outputs, viewInput, setViewInput, uploads
+}: AnnotationOptionsProps) {
 
   /* ----------------------- form state --------------------------------- */
   const [st, set] = useState({
-    input:   summary ? summary['path'] : '',
+    input:   upload ? upload.summary.path : '',
     output:  '',
     column:  'cell_type',
     db:      'db/cellphonedb.zip',
@@ -64,7 +62,15 @@ export default function CellInteractionOptions({
       onComplete?.(data);
       alert('CellPhoneDB completed successfully');
       setViewInput?.(false);
-      setOutputs([...outputs, { id: Date.now(), name: body.name, data }]);
+      const newOutput = { id: Date.now(), name: body.name, data: data, input: upload?.summary.path };
+      if (setOutputs) setOutputs([...outputs, newOutput]);
+      const enrichedUpload = { ...upload, outputs: [...upload.outputs, newOutput] };
+      if (setUploads) setUploads(prev =>
+        prev.map((u: any) => (u.id === enrichedUpload.id ? enrichedUpload : u))
+      );
+      setUpload(enrichedUpload);
+      onComplete?.(newOutput);
+      setViewInput?.(false);
     } catch (err: any) {
       console.error(err);
       alert(err.message || 'CellPhoneDB failed');
@@ -82,7 +88,16 @@ export default function CellInteractionOptions({
 
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
-          <TextField label="Input .h5ad" value={st.input} onChange={on('input')} fullWidth size="small" />
+          <TextField label="Input file" value={st.input} onChange={on('input')} fullWidth size="small" InputProps={{
+              readOnly: true,
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton onClick={() => handleUploadClick(uploads, setViewInput, setUploads, setUpload, set, st)} edge="end">
+                    <FolderOpenIcon />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}/>
         </Grid>
 
         <Grid item xs={12} md={6}>
@@ -126,7 +141,7 @@ export default function CellInteractionOptions({
         {/* detailed plot selector */}
         <Grid item xs={6} md={9}>
           <DetailedPlotsDropdown
-            summary={summary}
+            summary={upload?.summary}
             selectedCellTypes={selectedCellTypes}
             setSelectedCellTypes={setSelectedCellTypes}
           />

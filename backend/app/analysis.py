@@ -8,7 +8,8 @@ from cellphonedb.src.core.methods import cpdb_statistical_analysis_method
 from datetime import datetime
 import infercnvpy as cnv
 import platform, multiprocessing as mp
-
+import sys, pathlib
+from .utils import summarize_h5ad
 # macOS: avoid "The process has fork … YOU MUST exec()" spam
 if platform.system() == "Darwin":
     import os, sys
@@ -117,7 +118,7 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
     # Save results
     results_path = os.path.join(output_dir, f'{name}_cpdb_results.pkl')
     ov.utils.save(cpdb_results, results_path)
-    data['files'].append(results_path)
+    data['files'].append((results_path, 'CellPhoneDB Results'))
     print(f"CellPhoneDB results saved to {results_path}")
     
     # Calculate network
@@ -137,7 +138,7 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
 
     p = kpy.plot_cpdb_heatmap(pvals=pvalues, figsize=(5, 5), title="Sum of significant interactions")
     p.savefig(os.path.join(output_dir, f'{name}_heatmap_{timestamp}.png'), dpi=300, bbox_inches='tight')
-    data['figs'].append(os.path.join(output_dir, f'{name}_heatmap_{timestamp}.png'))
+    data['figs'].append((os.path.join(output_dir, f'{name}_heatmap_{timestamp}.png'), 'Interaction Heatmap'))
     print(f"Heatmap saved to {os.path.join(output_dir, f'{name}_heatmap_{timestamp}.png')}")
     plot_column_names = [str(x).strip() for x in plot_column_names if str(x).strip()]
 
@@ -166,7 +167,7 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
         )
 
         p.save(os.path.join(output_dir, f'{name}_dotplot_{cell_type1}_{timestamp}.png'))
-        data['figs'].append(os.path.join(output_dir, f'{name}_dotplot_{cell_type1}_{timestamp}.png'))
+        data['figs'].append((os.path.join(output_dir, f'{name}_dotplot_{cell_type1}_{timestamp}.png'), 'Detailed Dot Plots'))
         print(f"Dot plot saved to {os.path.join(output_dir, f'{name}_dotplot_{cell_type1}_{timestamp}.png')}")
     print("Generating network plot...")
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -181,7 +182,7 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
     network_path = os.path.join(output_dir, f'{name}_network_{timestamp}.png')
     plt.savefig(network_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    data['figs'].append(os.path.join(output_dir, f'{name}_network_{timestamp}.png'))
+    data['figs'].append((os.path.join(output_dir, f'{name}_network_{timestamp}.png'), 'Network Plots'))
     print(f"Network plot saved to {network_path}")
     print("Generating detailed network plot...")
     try:
@@ -202,7 +203,7 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
         )
         fig = ax.figure
         detailed_network_path = os.path.join(output_dir, f'{name}_detailed_network_{timestamp}.png')
-        data['figs'].append(os.path.join(output_dir, f'{name}_detailed_network_{timestamp}.png'))
+        data['figs'].append((os.path.join(output_dir, f'{name}_detailed_network_{timestamp}.png'), 'Network Plots'))
         fig.savefig(detailed_network_path, dpi=300, bbox_inches='tight')
         plt.close(fig)
         print(f"Detailed network plot saved to {detailed_network_path}")
@@ -254,7 +255,7 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
     fig.savefig(os.path.join(output_dir, f'{name}_cnv_umap_{timestamp}.png'), dpi=300, bbox_inches='tight')
     plt.close(fig)  # Close the figure to prevent blank subsequent plots
     print(f"UMAP plot saved to {name}_cnv_umap_{timestamp}.png")
-    data['figs'].append(os.path.join(output_dir, f'{name}_cnv_umap_{timestamp}.png'))
+    data['figs'].append((os.path.join(output_dir, f'{name}_cnv_umap_{timestamp}.png'), 'CNV Umaps'))
     adata.obs["cnv_status"] = "normal"
     adata.obs.loc[
         adata.obs["cnv_score"]>cnv_threshold, "cnv_status"
@@ -264,7 +265,7 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
     fig.savefig(os.path.join(output_dir, f'{name}_cnv_umap_status_{timestamp}.png'), dpi=300, bbox_inches='tight')
     plt.close(fig)
     print(f"UMAP plot saved to {name}_cnv_umap_status_{timestamp}.png")
-    data['figs'].append(os.path.join(output_dir, f'{name}_cnv_umap_status_{timestamp}.png'))
+    data['figs'].append((os.path.join(output_dir, f'{name}_cnv_umap_status_{timestamp}.png'), 'CNV Umaps'))
     tumor=adata[adata.obs['cnv_status']=='tumor']
     adata=tumor
     print('Preprocessing...')
@@ -285,17 +286,36 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
     sc.tl.umap(adata)
     ov.utils.download_GDSC_data()
     ov.utils.download_CaDRReS_model()
+    print('at running')
     adata, res,plot_df = ov.single.autoResolution(adata,cpus=cores)
     job=ov.single.Drug_Response(adata,scriptpath='CaDRReS-Sc',
                                     modelpath='models/',
                                     output=output_dir)
+    data['adata'] = summarize_h5ad(adata=adata)
     for file in os.listdir(output_dir):
-        if file.endswith('.png'):
-            data['figs'].append(os.path.join(output_dir, file))
-        elif file.endswith('.txt') or file.endswith('.csv'):
-            data['files'].append(os.path.join(output_dir, file))
+        if file in ['IC50_prediction.csv','drug_kill_prediction.csv', 'predicted cell death.png', 'GDSC prediction.png']:
+            data['files'].append((os.path.join(output_dir, file), 'Drug Response'))
+    cluster_key = "louvain"  # use pre-computed clusters
+    if cluster_key not in adata.obs.columns:
+        raise ValueError(
+            f"'{cluster_key}' column not found in adata.obs. Provide AnnData with pre-computed clusters.")
+
+    counts = adata.obs[cluster_key].value_counts().to_dict()
+    new_cats = {cat: f"{cat} (n={counts[cat]})" for cat in adata.obs[cluster_key].cat.categories}
+    annot_col = f"{cluster_key}_cnt"
+    adata.obs[annot_col] = adata.obs[cluster_key].cat.rename_categories(new_cats)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sc.pl.umap(adata, color=annot_col, legend_loc="right margin", ax=ax, show=False)
+    cluster_fig_path = os.path.join(output_dir, f"{name}_tumor_umap_{cluster_key}_{timestamp}.png")
+    fig.savefig(cluster_fig_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Tumor UMAP with clusters saved to {cluster_fig_path}")
+    data['figs'].append((cluster_fig_path, 'Tumor UMAP'))
+    # ---------------------------------------------------------------------------
     data['timestamp'] = timestamp
     return data
+
 if __name__ == "__main__":
 
     # run_inferncnv(input_file='output/test_run/annotated_test_20250429_2353.h5ad',

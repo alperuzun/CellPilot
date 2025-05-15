@@ -45,12 +45,20 @@ function renderTable(rows: Row[]) {
 
 const HEADER = 56;      // or 56 for regular toolbar
 
-export default function AdataSummaryPreview({ summary }: { summary: Row }) {
+export default function AdataSummaryPreview({ summary }: { summary?: Row }) {
+  console.log(summary);
+  if (!summary) {
+    return (
+      <Box sx={{ p: 2 }}>
+        <Typography color="text.secondary">No summary available</Typography>
+      </Box>
+    );
+  }
+
   const {
     path, n_obs, n_vars, preprocessed,
     obs_preview       = [] as Row[],
     var_preview       = [] as Row[],
-    clusters          = [] as Row[],
     label_counts      = {} as any,
   } = summary;
 
@@ -96,7 +104,7 @@ export default function AdataSummaryPreview({ summary }: { summary: Row }) {
         }}
       >
         <Typography variant="h6" sx={{ flexShrink: 0 }}>
-          {path?.split(/[\\/]/).pop()}
+          {typeof path === 'string' && path !== 'None' ? path.split(/[\\/]/).pop() : 'adata_summary'}
         </Typography>
         <Chip label={`${n_obs} cells`} color="primary" />
         <Chip label={`${n_vars} genes`} color="secondary" />
@@ -128,15 +136,6 @@ export default function AdataSummaryPreview({ summary }: { summary: Row }) {
           
           ))
         )}
-
-        {/* ─── clusters table ──────────────────────────────── */}
-        {clusters.length > 0 && sortedLabelCountsArray.length == 0 && (
-          <>
-            <Typography variant="subtitle1" gutterBottom>Clusters</Typography>
-            {renderTable(clusters)}
-          </>
-        )}
-
         <Typography variant="subtitle1" gutterBottom>Cells (obs) – first 5 rows</Typography>
         {renderTable(obs_preview)}
 
