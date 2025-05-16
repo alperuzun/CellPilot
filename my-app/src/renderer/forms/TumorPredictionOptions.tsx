@@ -83,7 +83,7 @@ export default function TumorPredictionOptions({ upload, onComplete, setUploads,
   /* ─────────── ui ─────────── */
   return (
     <Paper variant="outlined" sx={{ p: 3 }}>
-      <Typography variant="h6" gutterBottom>Tumor Prediction</Typography>
+      <Typography variant="h6" gutterBottom>Tumor Prediction & Drug Response</Typography>
 
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}>
