@@ -171,7 +171,7 @@ export default function GettingStarted({ upload, output, outputs, setOutput, set
           >
             <Tab icon={<Source />}  iconPosition="start" label="Annotation" />
             <Tab icon={<Share />}   iconPosition="start" label="Cell Interaction" />
-            <Tab icon={<Insights />} iconPosition="start" label="Tumor Prediction" />
+            <Tab icon={<Insights />} iconPosition="start" label="Tumor Prediction & Drug Response" />
           </Tabs>
         </Box>
       </Paper>
