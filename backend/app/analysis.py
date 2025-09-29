@@ -87,6 +87,16 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
     # Run CellPhoneDB analysis
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
     print("Running CellPhoneDB statistical analysis...")
+    print(f"Using CellPhoneDB file path: {cpdb_file_path}")
+    print(f"File exists: {os.path.exists(cpdb_file_path)}")
+    #make cpdb_path an absolute path, it's passed in as a relative 'db/cellphonedb.zip'
+    if not os.path.isabs(cpdb_file_path):
+        # Convert relative path to absolute path from project root (one level up from backend)
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cpdb_file_path = os.path.join(backend_dir, cpdb_file_path)
+    print(f"Resolved CellPhoneDB file path: {cpdb_file_path}")
+    if not os.path.exists(cpdb_file_path):
+        raise FileNotFoundError(f"CellPhoneDB file not found at {cpdb_file_path}")
     try:
         cpdb_results = cpdb_statistical_analysis_method.call(
             cpdb_file_path=cpdb_file_path,
@@ -328,4 +338,4 @@ if __name__ == "__main__":
                   output_dir='output/test_run/cellphonedb4',
                   name='test',
                   column_name='cell_type',
-                  cpdb_file_path='db/cellphonedb.zip')
+                  cpdb_file_path='/Users/colinpascual/SingleCell/db/cellphonedb.zip')

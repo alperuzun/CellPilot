@@ -249,7 +249,7 @@ def annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarke
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
     print("annotation...")
     import os
-    script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     db_path = os.path.join(script_dir, 'db', 'pySCSA_2024_v1_plus.db')
     print(f"Using pySCSA database at: {db_path}")
 

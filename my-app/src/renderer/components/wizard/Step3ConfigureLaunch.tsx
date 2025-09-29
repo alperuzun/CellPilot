@@ -177,14 +177,13 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
 
     try {
       // Create output directory path
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const outputDir = `output/${uploadData.datasetName}_${timestamp}`;
+      const outputDir = `output/${uploadData.datasetName}`;
 
       // Start the analysis job
       const response = await api.startAnalysis({
         name: uploadData.datasetName,
         input_path: uploadData.filePath,
-        output_dir: outputDir,
+        output_dir: `/Users/colinpascual/SingleCell/${outputDir}`,
         qc_params: {
           // Map frontend parameters to backend parameter names
           mito_prefix: config.mitoPrefix,

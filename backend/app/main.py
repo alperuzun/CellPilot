@@ -19,7 +19,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",  # Vite dev server
+        "http://localhost:5174",  # Vite dev server (alternative port)
         "http://127.0.0.1:5173",  # Vite dev server alternative
+        "http://127.0.0.1:5174",  # Vite dev server alternative port
         "http://localhost:3000",  # Alternative port
         "file://*",               # Electron app
         "*"                       # Fallback for development
@@ -94,6 +96,7 @@ async def cellphonedb_api(params: CellPhoneDBParams):
             params.column_name,         # column_name in obs
             params.cpdb_file_path,      # database zip
             params.name,                # run name / prefix
+            params.counts_min,           # counts_min (now properly in the model)
         )
         return Response(
             name=params.name,
@@ -153,13 +156,9 @@ async def get_analysis_files(h5ad_path: str):
         if not h5ad_file.exists():
             raise HTTPException(status_code=404, detail=f"Dataset file not found: {h5ad_path}")
 
-        # Look for analysis outputs in the same directory and parent directories
+        # Look for analysis outputs in the same directory as the H5AD file
         analysis_files = []
         search_dirs = [h5ad_file.parent]
-
-        # Also search parent directory if we're in annotation/ subfolder
-        if h5ad_file.parent.name == "annotation":
-            search_dirs.append(h5ad_file.parent.parent)
 
         def classify_file_type(file_path: Path) -> str:
             """Classify file type based on name and extension"""
@@ -308,7 +307,7 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
             annotation_params = AnnotationParams(
                 name=request.name,
                 input_path=processed_path,
-                output_dir=str(output_dir / "annotation"),
+                output_dir=str(output_dir),
                 preprocessed=False,  # Let it run preprocessing
                 preprocessing_params={},
                 use_cellmarker=True,
@@ -349,13 +348,17 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
         if request.analysis_params.get('runCellPhone', False):
             job_manager.update_job(job_id, progress=0.6, current_step="Analyzing cell-cell communication...")
 
+            # Extract CellPhoneDB parameters from the request
+            cellphone_user_params = request.analysis_params.get('cellPhoneDBParams', {})
+
             cellphone_params = CellPhoneDBParams(
                 input_path=processed_path,
                 name=request.name,
-                output_dir=str(output_dir / "cellphonedb"),
-                plot_column_names=["cell_type"],
-                column_name="cell_type",
-                cpdb_file_path="db/cellphonedb.zip"
+                output_dir=str(output_dir),
+                plot_column_names=cellphone_user_params.get('plot_column_names', ["cell_type"]),
+                column_name=cellphone_user_params.get('column_name', "cell_type"),
+                cpdb_file_path=cellphone_user_params.get('cpdb_file_path', "db/cellphonedb.zip"),
+                counts_min=cellphone_user_params.get('counts_min', 10)
             )
 
             cellphone_result = await run_in_threadpool(
@@ -365,7 +368,8 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
                 cellphone_params.plot_column_names,
                 cellphone_params.column_name,
                 cellphone_params.cpdb_file_path,
-                cellphone_params.name
+                cellphone_params.name,
+                cellphone_params.counts_min
             )
             results['cellphonedb'] = cellphone_result
 
@@ -376,7 +380,7 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
             infercnv_params = InferCNVParams(
                 input_path=processed_path,
                 name=request.name,
-                output_dir=str(output_dir / "infercnv"),
+                output_dir=str(output_dir),
                 reference_key="cell_type",
                 gtf_path="db/gencode.v47.annotation.gtf.gz",
                 reference_cat=["T cell", "B cell"],  # Default reference cell types
@@ -539,6 +543,82 @@ async def get_available_datasets():
         datasets.sort(key=lambda x: x["date"], reverse=True)
 
         return {"datasets": datasets}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/get_obs_columns")
+async def get_obs_columns(request: AdataRequest):
+    """Get available observation columns from an h5ad or h5 file with categorization"""
+    try:
+        import scanpy as sc
+        import anndata as ad
+
+        # Load the file using the same logic as other endpoints
+        path_str = str(request.input_path).lower()
+        if path_str.endswith('.h5') and not path_str.endswith('.h5ad'):
+            # This is likely a 10X H5 file
+            print(f"Reading as 10X H5 file: {request.input_path}")
+            adata = await run_in_threadpool(sc.read_10x_h5, request.input_path)
+        else:
+            # This is an H5AD file
+            print(f"Reading as H5AD file: {request.input_path}")
+            adata = await run_in_threadpool(ad.read_h5ad, request.input_path)
+
+        # Get all columns from obs
+        all_columns = list(adata.obs.columns)
+
+        # Categorize columns
+        cell_type_keywords = ['cell', 'type', 'annotation', 'cellmarker', 'panglao', 'cancersea', 'celltype', 'cell_type']
+        cluster_keywords = ['leiden', 'louvain', 'cluster', 'kmeans', 'spectral']
+
+        cell_type_columns = []
+        cluster_columns = []
+        other_columns = []
+
+        for col in all_columns:
+            col_lower = col.lower()
+
+            # Check if it's likely a cell type column
+            if any(keyword in col_lower for keyword in cell_type_keywords):
+                # Check number of unique values (cell types should be reasonable)
+                n_unique = adata.obs[col].nunique()
+                if n_unique <= 100:  # Reasonable limit for cell types
+                    cell_type_columns.append({
+                        "name": col,
+                        "unique_values": int(n_unique),
+                        "sample_values": list(adata.obs[col].value_counts().head(5).index.astype(str))
+                    })
+                else:
+                    other_columns.append({
+                        "name": col,
+                        "unique_values": int(n_unique),
+                        "warning": "Too many unique values for cell type analysis"
+                    })
+            # Check if it's a cluster column
+            elif any(keyword in col_lower for keyword in cluster_keywords):
+                n_unique = adata.obs[col].nunique()
+                cluster_columns.append({
+                    "name": col,
+                    "unique_values": int(n_unique),
+                    "sample_values": list(adata.obs[col].value_counts().head(5).index.astype(str))
+                })
+            # Everything else
+            else:
+                n_unique = adata.obs[col].nunique()
+                if n_unique <= 100:  # Could be useful
+                    other_columns.append({
+                        "name": col,
+                        "unique_values": int(n_unique),
+                        "sample_values": list(adata.obs[col].value_counts().head(5).index.astype(str)) if n_unique <= 20 else None
+                    })
+
+        return {
+            "cell_type_columns": cell_type_columns,
+            "cluster_columns": cluster_columns,
+            "other_columns": other_columns,
+            "total_columns": len(all_columns)
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

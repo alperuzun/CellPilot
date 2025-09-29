@@ -76,15 +76,16 @@ export interface CellPhoneDBParams {
   plot_column_names: string[];
   column_name: string;
   cpdb_file_path: string;
+  counts_min: number;
 }
 
 export interface InferCNVParams {
   input_path: string;
   name: string;
   output_dir: string;
-  reference_key: string;
+  reference_key?: string;
   gtf_path: string;
-  reference_cat: string[];
+  reference_cat?: string[];
   cnv_threshold: number;
 }
 
@@ -199,6 +200,20 @@ export interface AnnotationDetail {
 
 export interface AnnotationDetailsResponse {
   annotations: AnnotationDetail[];
+}
+
+export interface ObsColumnInfo {
+  name: string;
+  unique_values: number;
+  sample_values?: string[];
+  warning?: string;
+}
+
+export interface ObsColumnsResponse {
+  cell_type_columns: ObsColumnInfo[];
+  cluster_columns: ObsColumnInfo[];
+  other_columns: ObsColumnInfo[];
+  total_columns: number;
 }
 
 class APIError extends Error {
@@ -360,6 +375,13 @@ export const api = {
 
   async getAnnotationDetails(filePath: string): Promise<AnnotationDetailsResponse> {
     return apiRequest(`/annotation_details?file_path=${encodeURIComponent(filePath)}`);
+  },
+
+  async getObsColumns(filePath: string): Promise<ObsColumnsResponse> {
+    return apiRequest('/get_obs_columns', {
+      method: 'POST',
+      body: JSON.stringify({ input_path: filePath, name: 'temp' }),
+    });
   },
 };
 

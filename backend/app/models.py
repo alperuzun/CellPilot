@@ -32,6 +32,7 @@ class CellPhoneDBParams(BaseModel):
     plot_column_names: List[str]
     column_name: str
     cpdb_file_path: str
+    counts_min: int = 10  # Minimum number of interactions to display in network plots
 
 class InferCNVParams(BaseModel):
     input_path: str

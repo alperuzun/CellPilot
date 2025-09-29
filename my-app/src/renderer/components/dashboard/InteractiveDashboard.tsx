@@ -28,10 +28,13 @@ import {
 } from '@mui/icons-material';
 import { UploadData } from '../wizard/Step1UploadDefine';
 import { AnalysisData } from '../wizard/Step3ConfigureLaunch';
+import { CellPhoneDBAnalysisData } from '../wizard/Step3CellPhoneDBConfig';
+import { InferCNVAnalysisData } from '../wizard/Step3InferCNVConfig';
+import VisualizationDashboard from '../visualization/VisualizationDashboard';
 
 interface DashboardProps {
   uploadData: UploadData;
-  analysisData: AnalysisData;
+  analysisData: AnalysisData | CellPhoneDBAnalysisData | InferCNVAnalysisData;
   onNewAnalysis: () => void;
 }
 
@@ -77,6 +80,22 @@ export default function InteractiveDashboard({ uploadData, analysisData, onNewAn
     'B cell': true,
     'Epithelial': true
   });
+
+  // Get analysis type from upload data
+  const analysisType = uploadData.analysisType;
+
+  // Get the output path from analysis data for visualization dashboard
+  const getOutputPath = () => {
+    if ('outputPath' in analysisData && analysisData.outputPath) {
+      return analysisData.outputPath;
+    }
+    if ('annotatedDatasetPath' in analysisData && analysisData.annotatedDatasetPath) {
+      return analysisData.annotatedDatasetPath;
+    }
+    return null;
+  };
+
+  const outputPath = getOutputPath();
 
   useEffect(() => {
     // Mock data loading
@@ -140,159 +159,247 @@ export default function InteractiveDashboard({ uploadData, analysisData, onNewAn
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {/* Navigation Tabs */}
           <Tabs value={currentTab} onChange={(_, v) => setCurrentTab(v)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-            <Tab icon={<ScatterPlot />} iconPosition="start" label="UMAP" />
-            <Tab icon={<BarChart />} iconPosition="start" label="Gene Expression" />
-            <Tab icon={<Share />} iconPosition="start" label="Cell Communication" />
-            <Tab icon={<TableChart />} iconPosition="start" label="Drug Response" />
+            {analysisType === 'annotation' && <Tab icon={<ScatterPlot />} iconPosition="start" label="UMAP" />}
+            {analysisType === 'annotation' && <Tab icon={<BarChart />} iconPosition="start" label="Gene Expression" />}
+            {analysisType === 'cellphonedb' && <Tab icon={<Share />} iconPosition="start" label="Cell Communication" />}
+            {analysisType === 'infercnv' && <Tab icon={<TableChart />} iconPosition="start" label="Drug Response" />}
+            <Tab icon={<Visibility />} iconPosition="start" label="Analysis Results" />
           </Tabs>
 
           {/* Tab Content */}
           <Box sx={{ flex: 1, minHeight: 0 }}>
-            <TabPanel value={currentTab} index={0}>
-              {/* UMAP View */}
-              <Box sx={{ height: '100%', p: 2 }}>
-                <Card sx={{ height: '100%' }}>
-                  <CardContent sx={{ height: '100%', p: 0, '&:last-child': { pb: 0 } }}>
-                    <Box sx={{
-                      height: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      bgcolor: 'grey.50',
-                      border: '1px solid',
-                      borderColor: 'grey.200'
-                    }}>
-                      <Box sx={{ textAlign: 'center' }}>
-                        <ScatterPlot sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                        <Typography variant="h6" gutterBottom>
-                          Interactive UMAP Plot
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" gutterBottom>
-                          {plotData?.metadata.cellCount.toLocaleString()} cells • {plotData?.metadata.clusters} clusters
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Click and drag to select cells • Selected: {selectedCells.length}
-                        </Typography>
-                        <Box sx={{ mt: 2 }}>
-                          <Typography variant="caption" color="text.secondary">
-                            Colored by: {colorBy}
-                          </Typography>
+            {analysisType === 'annotation' && (
+              <>
+                <TabPanel value={currentTab} index={0}>
+                  {/* UMAP View */}
+                  <Box sx={{ height: '100%', p: 2 }}>
+                    <Card sx={{ height: '100%' }}>
+                      <CardContent sx={{ height: '100%', p: 0, '&:last-child': { pb: 0 } }}>
+                        <Box sx={{
+                          height: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          bgcolor: 'grey.50',
+                          border: '1px solid',
+                          borderColor: 'grey.200'
+                        }}>
+                          <Box sx={{ textAlign: 'center' }}>
+                            <ScatterPlot sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                            <Typography variant="h6" gutterBottom>
+                              Interactive UMAP Plot
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" gutterBottom>
+                              {plotData?.metadata.cellCount.toLocaleString()} cells • {plotData?.metadata.clusters} clusters
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Click and drag to select cells • Selected: {selectedCells.length}
+                            </Typography>
+                            <Box sx={{ mt: 2 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                Colored by: {colorBy}
+                              </Typography>
+                            </Box>
+                          </Box>
                         </Box>
+                      </CardContent>
+                    </Card>
+                  </Box>
+                </TabPanel>
+
+                <TabPanel value={currentTab} index={1}>
+                  {/* Gene Expression View */}
+                  <Box sx={{ height: '100%', p: 2 }}>
+                    <Grid container spacing={2} sx={{ height: '100%' }}>
+                      <Grid item xs={6}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Box sx={{ textAlign: 'center' }}>
+                              <BarChart sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+                              <Typography variant="h6">Gene Expression Heatmap</Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Top marker genes by cell type
+                              </Typography>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Box sx={{ textAlign: 'center' }}>
+                              <ScatterPlot sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+                              <Typography variant="h6">Violin Plots</Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Gene expression distribution
+                              </Typography>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    </Grid>
+                  </Box>
+                </TabPanel>
+
+                <TabPanel value={currentTab} index={2}>
+                  {/* Analysis Results for Annotation */}
+                  <Box sx={{ height: '100%' }}>
+                    {outputPath ? (
+                      <VisualizationDashboard h5adPath={outputPath} autoLoad={true} />
+                    ) : (
+                      <Box sx={{ height: '100%', p: 2 }}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Box sx={{ textAlign: 'center' }}>
+                              <Visibility sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                              <Typography variant="h6" gutterBottom>
+                                Cell Type Annotation Results
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Analysis output path not available
+                              </Typography>
+                            </Box>
+                          </CardContent>
+                        </Card>
                       </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Box>
-            </TabPanel>
+                    )}
+                  </Box>
+                </TabPanel>
+              </>
+            )}
 
-            <TabPanel value={currentTab} index={1}>
-              {/* Gene Expression View */}
-              <Box sx={{ height: '100%', p: 2 }}>
-                <Grid container spacing={2} sx={{ height: '100%' }}>
-                  <Grid item xs={6}>
-                    <Card sx={{ height: '100%' }}>
-                      <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <BarChart sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-                          <Typography variant="h6">Gene Expression Heatmap</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Top marker genes by cell type
-                          </Typography>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Card sx={{ height: '100%' }}>
-                      <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <ScatterPlot sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-                          <Typography variant="h6">Violin Plots</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Gene expression distribution
-                          </Typography>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-              </Box>
-            </TabPanel>
+            {analysisType === 'cellphonedb' && (
+              <>
+                <TabPanel value={currentTab} index={0}>
+                  {/* Cell Communication View */}
+                  <Box sx={{ height: '100%', p: 2 }}>
+                    <Grid container spacing={2} sx={{ height: '100%' }}>
+                      <Grid item xs={8}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Box sx={{ textAlign: 'center' }}>
+                              <Share sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                              <Typography variant="h6">Cell-Cell Communication Network</Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Ligand-receptor interactions between cell types
+                              </Typography>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                      <Grid item xs={4}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent>
+                            <Typography variant="h6" gutterBottom>
+                              Top Interactions
+                            </Typography>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                              {['CXCL12-CXCR4', 'TNF-TNFRSF1A', 'IL1B-IL1R1', 'CCL5-CCR5'].map((interaction, index) => (
+                                <Chip
+                                  key={index}
+                                  label={interaction}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ justifyContent: 'flex-start' }}
+                                />
+                              ))}
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    </Grid>
+                  </Box>
+                </TabPanel>
 
-            <TabPanel value={currentTab} index={2}>
-              {/* Cell Communication View */}
-              <Box sx={{ height: '100%', p: 2 }}>
-                <Grid container spacing={2} sx={{ height: '100%' }}>
-                  <Grid item xs={8}>
-                    <Card sx={{ height: '100%' }}>
-                      <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <Share sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                          <Typography variant="h6">Cell-Cell Communication Network</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Ligand-receptor interactions between cell types
-                          </Typography>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={4}>
-                    <Card sx={{ height: '100%' }}>
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom>
-                          Top Interactions
-                        </Typography>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          {['CXCL12-CXCR4', 'TNF-TNFRSF1A', 'IL1B-IL1R1', 'CCL5-CCR5'].map((interaction, index) => (
-                            <Chip
-                              key={index}
-                              label={interaction}
-                              size="small"
-                              variant="outlined"
-                              sx={{ justifyContent: 'flex-start' }}
-                            />
-                          ))}
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-              </Box>
-            </TabPanel>
+                <TabPanel value={currentTab} index={1}>
+                  {/* Analysis Results for CellPhoneDB */}
+                  <Box sx={{ height: '100%' }}>
+                    {outputPath ? (
+                      <VisualizationDashboard h5adPath={outputPath} autoLoad={true} />
+                    ) : (
+                      <Box sx={{ height: '100%', p: 2 }}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Box sx={{ textAlign: 'center' }}>
+                              <Visibility sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                              <Typography variant="h6" gutterBottom>
+                                CellPhoneDB Analysis Results
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Analysis output path not available
+                              </Typography>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Box>
+                    )}
+                  </Box>
+                </TabPanel>
+              </>
+            )}
 
-            <TabPanel value={currentTab} index={3}>
-              {/* Drug Response View */}
-              <Box sx={{ height: '100%', p: 2 }}>
-                <Grid container spacing={2} sx={{ height: '100%' }}>
-                  <Grid item xs={6}>
-                    <Card sx={{ height: '100%' }}>
-                      <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <BarChart sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-                          <Typography variant="h6">Drug Sensitivity Scores</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Predicted response to therapeutic compounds
-                          </Typography>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Card sx={{ height: '100%' }}>
-                      <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <TableChart sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-                          <Typography variant="h6">CNV Analysis</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Copy number variation profiles
-                          </Typography>
-                        </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-              </Box>
-            </TabPanel>
+            {analysisType === 'infercnv' && (
+              <>
+                <TabPanel value={currentTab} index={0}>
+                  {/* Drug Response View */}
+                  <Box sx={{ height: '100%', p: 2 }}>
+                    <Grid container spacing={2} sx={{ height: '100%' }}>
+                      <Grid item xs={6}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Box sx={{ textAlign: 'center' }}>
+                              <BarChart sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+                              <Typography variant="h6">Drug Sensitivity Scores</Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Predicted response to therapeutic compounds
+                              </Typography>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Box sx={{ textAlign: 'center' }}>
+                              <TableChart sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+                              <Typography variant="h6">CNV Analysis</Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Copy number variation profiles
+                              </Typography>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    </Grid>
+                  </Box>
+                </TabPanel>
+
+                <TabPanel value={currentTab} index={1}>
+                  {/* Analysis Results for InferCNV */}
+                  <Box sx={{ height: '100%' }}>
+                    {outputPath ? (
+                      <VisualizationDashboard h5adPath={outputPath} autoLoad={true} />
+                    ) : (
+                      <Box sx={{ height: '100%', p: 2 }}>
+                        <Card sx={{ height: '100%' }}>
+                          <CardContent sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Box sx={{ textAlign: 'center' }}>
+                              <Visibility sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
+                              <Typography variant="h6" gutterBottom>
+                                InferCNV & Drug Response Results
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Analysis output path not available
+                              </Typography>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Box>
+                    )}
+                  </Box>
+                </TabPanel>
+              </>
+            )}
           </Box>
         </Box>
 

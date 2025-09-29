@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import AnalysisWizard from './components/wizard/AnalysisWizard';
 import VisualizationDashboard from './components/visualization/VisualizationDashboard';
 import OutputsPage from './components/outputs/OutputsPage';
+import cellpilotLogo from '../assets/cellpilot_logo.png';
 
 export default function App() {
   const [activeSection, setActiveSection] = useState('analysis');
@@ -35,9 +36,11 @@ export default function App() {
       {/* Header */}
       <header className="bg-slate-700 text-white px-6 py-4 flex items-center justify-between shadow-lg">
         <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-purple-500 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">C</span>
-          </div>
+          <img
+            src={cellpilotLogo}
+            alt="CellPilot"
+            className="w-8 h-8 object-contain"
+          />
           <h1 className="text-xl font-semibold">CellPilot</h1>
         </div>
         <div className="flex space-x-3">
