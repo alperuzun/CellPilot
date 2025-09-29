@@ -22,6 +22,8 @@ class AnnotationParams(BaseModel):
     use_cellmarker: bool
     use_panglao: bool
     use_cancer_single_cell_atlas: bool
+    use_manual_annotation: bool = False
+    manual_marker_file: Optional[str] = None
 
 class CellPhoneDBParams(BaseModel):
     input_path: str
@@ -48,3 +50,27 @@ class Response(BaseModel):
     timestamp: str
     type: Optional[str] = None
     params: Optional[Dict[str, Any]] = None
+class QCMetricsRequest(BaseModel):
+    input_path: str
+
+class QCMetricsResponse(BaseModel):
+    n_genes_by_counts: List[int]
+    total_counts: List[int]
+    pct_counts_mt: List[float]
+    cell_ids: List[str]
+    stats: Dict[str, float]
+
+class QCPreviewRequest(BaseModel):
+    input_path: str
+    min_genes: Optional[int] = None
+    max_genes: Optional[int] = None
+    min_counts: Optional[int] = None
+    max_counts: Optional[int] = None
+    max_mt_pct: Optional[float] = None
+
+class QCPreviewResponse(BaseModel):
+    cells_remaining: int
+    genes_remaining: int
+    cells_filtered: int
+    genes_filtered: int
+    filter_summary: Dict[str, int]

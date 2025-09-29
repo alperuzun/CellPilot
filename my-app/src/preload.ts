@@ -7,5 +7,7 @@ contextBridge.exposeInMainWorld('backend', {
   openAdataFile: () => ipcRenderer.invoke('dialog:openAdata'),
   /** Opens a directory picker – returns absolute path or undefined */
   openDir:      () => ipcRenderer.invoke('dialog:openDir'),
+  /** Opens a marker gene file picker – returns absolute path or undefined */
+  openMarkerFile: () => ipcRenderer.invoke('dialog:openMarkerFile'),
   imageDataURL: (path: string) => ipcRenderer.invoke('image-data-url', path),
 });

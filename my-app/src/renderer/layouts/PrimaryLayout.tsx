@@ -1,23 +1,25 @@
 import {
-    AppBar, Toolbar, Typography, IconButton, Drawer, List, ListItemButton,
-    ListItemIcon, ListItemText, Box, Button, Stack, TextField,
-    Divider
+    AppBar, Toolbar, Drawer, List, ListItemButton,
+    ListItemIcon, ListItemText, Box, Button, Stack,
+    Divider, Tabs, Tab
   } from '@mui/material';
-  import { UploadFile, Search, BarChart, TableRows, Share } from '@mui/icons-material';
+  import { UploadFile, BarChart, Info, MenuBook, Home } from '@mui/icons-material';
   import { useState } from 'react';
   import logo from '../../assets/cellpilot_logo_github.jpg';
 import GettingStarted from '../pages/GettingStarted';
+import About from '../pages/About';
+import Documentation from '../pages/Documentation';
 import mock_annotation from '../mock/Annoresponse.json';
 import mock_inferCNV from '../mock/Infercnresponse.json';
 import mock_cell_interaction from '../mock/cellphonedbresponse.json';
 import mock_input from '../mock/mock_input.json';
   const drawerWidth = 180;
 
-  interface Upload { id: number, name: string, summary: Record<string, any>, outputs: Output[] }
-  interface Output { id: number, name: string, data: Record<string, any>, input: string }
+  export interface Upload { id: number, name: string, summary: Record<string, any>, outputs: Output[] }
+  export interface Output { id: number, name: string, data: Record<string, any>, input: string }
   
   export default function PrimaryLayout() {
-    const [mobileOpen, setMobileOpen] = useState(false);
+    const [currentTab, setCurrentTab] = useState(0);
     const [uploads, setUploads] = useState<Upload[]>([{id: 1, name: 'mock_input', summary: mock_input, outputs: [{id: 1, name: 'mock_annotation', data: mock_annotation, input: mock_input.path}, {id: 2, name: 'mock_inferCNV', data: mock_inferCNV, input: mock_input.path}, {id: 3, name: 'mock_cell_interaction', data: mock_cell_interaction, input: mock_input.path}]}]);
     const [outputs, setOutputs] = useState<Output[]>([{id: 1, name: 'mock_annotation', data: mock_annotation, input: mock_input.path}, {id: 2, name: 'mock_inferCNV', data: mock_inferCNV, input: mock_input.path}, {id: 3, name: 'mock_cell_interaction', data: mock_cell_interaction, input: mock_input.path}]);
     const [upload, setUpload] = useState<Upload | null>(null);
@@ -31,6 +33,16 @@ import mock_input from '../mock/mock_input.json';
       if (!fullPath) return;                                   // user cancelled
   
       const fileName = fullPath.split('/').pop();
+      
+      // Check file extension
+      const supportedExtensions = ['.h5ad', '.h5', '.hdf5'];
+      const fileExtension = fileName?.toLowerCase().substring(fileName.lastIndexOf('.')) || '';
+      
+      if (!supportedExtensions.includes(fileExtension)) {
+        alert(`Unsupported file format. Please select a file with one of these extensions: ${supportedExtensions.join(', ')}`);
+        return;
+      }
+      
       if (uploads.some(u => u.name === fileName)) {
         alert('File already uploaded');
         return;
@@ -56,11 +68,52 @@ import mock_input from '../mock/mock_input.json';
     const drawer = (
       <div>
         <Toolbar />
-        <List dense>
-          <ListItemButton>
-            <ListItemIcon><UploadFile/></ListItemIcon>
-            <ListItemText primary="Uploads" />
-          </ListItemButton>
+        
+        {/* Navigation Tabs */}
+        <Box sx={{ px: 1, py: 1 }}>
+          <Tabs
+            orientation="vertical"
+            value={currentTab}
+            onChange={(e, newValue) => setCurrentTab(newValue)}
+            sx={{
+              '& .MuiTab-root': {
+                minHeight: 48,
+                alignItems: 'flex-start',
+                textAlign: 'left',
+                fontSize: '0.875rem'
+              }
+            }}
+          >
+            <Tab 
+              icon={<Home />} 
+              iconPosition="start" 
+              label="Analysis" 
+              sx={{ justifyContent: 'flex-start' }}
+            />
+            <Tab 
+              icon={<MenuBook />} 
+              iconPosition="start" 
+              label="Documentation" 
+              sx={{ justifyContent: 'flex-start' }}
+            />
+            <Tab 
+              icon={<Info />} 
+              iconPosition="start" 
+              label="About" 
+              sx={{ justifyContent: 'flex-start' }}
+            />
+          </Tabs>
+        </Box>
+        
+        <Divider sx={{ my: 1 }} />
+        
+        {/* File Management - Only show in Analysis tab */}
+        {currentTab === 0 && (
+          <List dense>
+            <ListItemButton>
+              <ListItemIcon><UploadFile/></ListItemIcon>
+              <ListItemText primary="Uploads" />
+            </ListItemButton>
           {/* ── scrollable Upload names ─────────────────────────────── */}
           <Box sx={{ maxHeight: 200, overflowY: 'auto', overflowX: 'auto' }}>
             <List dense disablePadding sx={{ width: '100%' }}>
@@ -119,7 +172,8 @@ import mock_input from '../mock/mock_input.json';
                 )}
               </List>
             </Box>
-        </List>
+          </List>
+        )}
       </div>
     );
   
@@ -155,17 +209,19 @@ import mock_input from '../mock/mock_input.json';
             >
               CellPilot
             </Typography>
-            {/* main action buttons */}
-            <Stack direction="row" spacing={1} sx={{ ml: 2 }}>
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<UploadFile />}
-                onClick={handleUploadClick}
-              >
-                Upload File
-              </Button>
-            </Stack>
+            {/* main action buttons - only show upload in analysis tab */}
+            {currentTab === 0 && (
+              <Stack direction="row" spacing={1} sx={{ ml: 2 }}>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<UploadFile />}
+                  onClick={handleUploadClick}
+                >
+                  Upload File
+                </Button>
+              </Stack>
+            )}
             {/* right-side empty grow */}
             <Box sx={{ flexGrow: 1 }} />
             {/* right cluster – avatars, settings, etc. */}
@@ -199,7 +255,23 @@ import mock_input from '../mock/mock_input.json';
             minHeight: 0        /* allow children to shrink / scroll */
           }}
         >
-            <GettingStarted upload={upload} output={output} outputs={outputs} setOutput={setOutput} setOutputs={setOutputs} viewInput={viewInput} setViewInput={setViewInput} uploads={uploads} setUploads={setUploads} setUpload={setUpload} />
+          {/* Render content based on current tab */}
+          {currentTab === 0 && (
+            <GettingStarted 
+              upload={upload} 
+              output={output} 
+              outputs={outputs} 
+              setOutput={setOutput} 
+              setOutputs={setOutputs} 
+              viewInput={viewInput} 
+              setViewInput={setViewInput} 
+              uploads={uploads} 
+              setUploads={setUploads} 
+              setUpload={setUpload} 
+            />
+          )}
+          {currentTab === 1 && <Documentation />}
+          {currentTab === 2 && <About />}
         </Box>
       </Box>
     );

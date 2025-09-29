@@ -1,8 +1,8 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .models import AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams, Response, QCMetricsRequest, QCMetricsResponse, QCPreviewRequest, QCPreviewResponse
+from .models import AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams, Response
 from .tasks import spawn_process
-from .utils import summarize_h5ad, get_qc_metrics, get_qc_preview
+from .utils import summarize_h5ad
 from .analysis import run_cell_phone_db, run_inferncnv
 from .annotate import annotate
 from fastapi.concurrency import run_in_threadpool
@@ -35,25 +35,6 @@ def adata_upload(adata_request: AdataRequest):
         summary=summary
     )
 
-# --------------------------- Quality Control ---------------------------
-@app.post("/qc_metrics")
-async def qc_metrics_api(request: QCMetricsRequest):
-    """Get quality control metrics for uploaded data"""
-    try:
-        metrics = await run_in_threadpool(get_qc_metrics, request.input_path)
-        return QCMetricsResponse(**metrics)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/qc_preview")
-async def qc_preview_api(request: QCPreviewRequest):
-    """Preview filtered data based on QC parameters"""
-    try:
-        preview = await run_in_threadpool(get_qc_preview, request.input_path, request.dict(exclude={'input_path'}))
-        return QCPreviewResponse(**preview)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 # --------------------------- Annotation ---------------------------
 @app.post("/annotate")
 async def annotate_api(params: AnnotationParams):
@@ -71,9 +52,7 @@ async def annotate_api(params: AnnotationParams):
             params.preprocessing_params,
             params.use_cellmarker,
             params.use_panglao,
-            params.use_cancer_single_cell_atlas,
-            params.use_manual_annotation,
-            params.manual_marker_file
+            params.use_cancer_single_cell_atlas
         )
         return Response(
             name=params.name,

@@ -81,12 +81,12 @@ export default function CellInteractionOptions({
 
   /* ----------------------- ui ---------------------------------------- */
   return (
-    <Paper variant="outlined" sx={{ p: 3 }}>
-      <Typography variant="h6" gutterBottom>
+    <Paper variant="outlined" sx={{ p: 1.5 }}>
+      <Typography variant="body1" sx={{ fontWeight: 'medium', mb: 1 }}>
         CellPhoneDB / Cell-interaction
       </Typography>
 
-      <Grid container spacing={2}>
+      <Grid container spacing={1}>
         <Grid item xs={12} md={6}>
           <TextField label="Input file" value={st.input} onChange={on('input')} fullWidth size="small" InputProps={{
               readOnly: true,
@@ -122,22 +122,19 @@ export default function CellInteractionOptions({
           />
         </Grid>
 
-        <Grid item xs={12} md={4}>
+        <Grid item xs={6} md={4}>
           <TextField label="Label column" value={st.column} onChange={on('column')} fullWidth size="small" />
         </Grid>
-
+        <Grid item xs={6} md={4}>
+          <TextField label="Run name" value={st.name} onChange={on('name')} fullWidth size="small" />
+        </Grid>
         <Grid item xs={12} md={4}>
           <TextField label="DB (zip)" value={st.db} onChange={on('db')} fullWidth size="small" />
-        </Grid>
-
-        <Grid item xs={12} md={4}>
-          <TextField label="Run name" value={st.name} onChange={on('name')} fullWidth size="small" />
         </Grid>
 
         <Grid item xs={6} md={3}>
           <TextField label="Counts ≥" type="number" value={st.counts} onChange={on('counts')} fullWidth size="small" />
         </Grid>
-
         {/* detailed plot selector */}
         <Grid item xs={6} md={9}>
           <DetailedPlotsDropdown
@@ -149,7 +146,7 @@ export default function CellInteractionOptions({
       </Grid>
 
       {/* run button */}
-      <Box sx={{ mt: 3 }}>
+      <Box sx={{ mt: 2 }}>
         <Button
           variant="contained"
           disabled={loading}

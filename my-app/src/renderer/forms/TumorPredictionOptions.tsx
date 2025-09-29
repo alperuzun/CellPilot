@@ -82,10 +82,10 @@ export default function TumorPredictionOptions({ upload, onComplete, setUploads,
 
   /* ─────────── ui ─────────── */
   return (
-    <Paper variant="outlined" sx={{ p: 3 }}>
-      <Typography variant="h6" gutterBottom>Tumor Prediction & Drug Response</Typography>
+    <Paper variant="outlined" sx={{ p: 1.5 }}>
+      <Typography variant="body1" sx={{ fontWeight: 'medium', mb: 1 }}>Tumor Prediction & Drug Response</Typography>
 
-      <Grid container spacing={2}>
+      <Grid container spacing={1}>
         <Grid item xs={12} md={6}>
           <TextField
             label="Input .h5ad"
@@ -170,19 +170,11 @@ export default function TumorPredictionOptions({ upload, onComplete, setUploads,
         </Grid>
 
         {/* any other fields that were already there */}
-        <Grid item xs={12} md={4}>
+        <Grid item xs={6} md={4}>
           <TextField
             label="Run name"
             value={st.name}
             onChange={e => on('name')(e.target.value)}
-            fullWidth size="small"
-          />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <TextField
-            label="GTF path"
-            value={st.gtf_path}
-            onChange={e => on('gtf_path')(e.target.value)}
             fullWidth size="small"
           />
         </Grid>
@@ -192,6 +184,14 @@ export default function TumorPredictionOptions({ upload, onComplete, setUploads,
             type="number"
             value={st.cnv_threshold}
             onChange={e => on('cnv_threshold')(Number(e.target.value))}
+            fullWidth size="small"
+          />
+        </Grid>
+        <Grid item xs={12} md={5}>
+          <TextField
+            label="GTF path"
+            value={st.gtf_path}
+            onChange={e => on('gtf_path')(e.target.value)}
             fullWidth size="small"
           />
         </Grid>
@@ -206,7 +206,7 @@ export default function TumorPredictionOptions({ upload, onComplete, setUploads,
         </Grid>
       </Grid>
 
-      <Box sx={{ mt: 3 }}>
+      <Box sx={{ mt: 2 }}>
         <Button
           variant="contained"
           disabled={loading}

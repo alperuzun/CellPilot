@@ -38,7 +38,11 @@ app.on('ready', createWindow);
 ipcMain.handle('dialog:openAdata', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     properties: ['openFile'],
-    filters: [{ name: 'AnnData file', extensions: ['h5ad'] }],
+    filters: [
+      { name: 'AnnData files', extensions: ['h5ad'] },
+      { name: 'HDF5 files', extensions: ['h5', 'hdf5'] },
+      { name: 'All supported formats', extensions: ['h5ad', 'h5', 'hdf5'] }
+    ],
   });
   return canceled ? undefined : filePaths[0];
 });
@@ -46,6 +50,19 @@ ipcMain.handle('dialog:openAdata', async () => {
 ipcMain.handle('dialog:openDir', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     properties: ['openDirectory', 'createDirectory']
+  });
+  return canceled ? undefined : filePaths[0];
+});
+
+ipcMain.handle('dialog:openMarkerFile', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [
+      { name: 'Marker gene files', extensions: ['csv', 'tsv', 'txt'] },
+      { name: 'CSV files', extensions: ['csv'] },
+      { name: 'TSV files', extensions: ['tsv', 'txt'] },
+      { name: 'All supported formats', extensions: ['csv', 'tsv', 'txt'] }
+    ],
   });
   return canceled ? undefined : filePaths[0];
 });

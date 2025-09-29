@@ -2,11 +2,12 @@ import React, { useState, Dispatch, SetStateAction } from 'react';
 import {
   Box, Paper, Typography, TextField, Button, Divider,
   Checkbox, FormControlLabel, FormControl, InputLabel, Select, MenuItem,
-  IconButton, InputAdornment
+  IconButton, InputAdornment, Collapse
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import Grid from "@mui/material/Grid";
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import ManualAnnotationUpload from '../components/ManualAnnotationUpload';
 
 export interface Props {
   upload: any;
@@ -66,7 +67,9 @@ export default function AnnotationOptions({ upload, setUpload, onComplete, setOu
     species: 'human',
     cm: true,
     pl: false,
-    sca: false
+    sca: false,
+    useManualAnnotation: false,
+    manualMarkerFile: null as string | null
   });
   const summary = upload?.summary;
   const on = (k: keyof typeof state) =>
@@ -80,7 +83,7 @@ export default function AnnotationOptions({ upload, setUpload, onComplete, setOu
       const body = {
         name:           state.name || 'run_'+Date.now(),
         input_path:     state.input,
-        output_dir:     state.output || `${window.process?.cwd?.() ?? ''}/output` ,
+        output_dir:     state.output || `/Users/colinpascual/Desktop/Desktop - Colin's MacBook Pro/Coding/SharedVM/lab/SingleCell/output`,
         preprocessed:   state.preprocessed,
         preprocessing_params: {
           mito_prefix:     'MT-',
@@ -94,7 +97,9 @@ export default function AnnotationOptions({ upload, setUpload, onComplete, setOu
         },
         use_cellmarker: state.cm,
         use_panglao:    state.pl,
-        use_cancer_single_cell_atlas: state.sca
+        use_cancer_single_cell_atlas: state.sca,
+        use_manual_annotation: state.useManualAnnotation,
+        manual_marker_file: state.manualMarkerFile
       };
 
       const r = await fetch('http://127.0.0.1:8000/annotate', {
@@ -118,7 +123,18 @@ export default function AnnotationOptions({ upload, setUpload, onComplete, setOu
       if (setViewInput) setViewInput(false);
     } catch (err:any) {
       console.error(err);
-      alert(err.message || 'Annotation failed');
+      // Show more detailed error information
+      let errorMessage = 'Annotation failed';
+      if (err.message) {
+        if (err.message.includes('No such file or directory')) {
+          errorMessage = 'File not found. Please check the input file path and try again.';
+        } else if (err.message.includes('FileNotFoundError')) {
+          errorMessage = 'Input file could not be found. Please re-upload your data file.';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      alert(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -131,8 +147,8 @@ export default function AnnotationOptions({ upload, setUpload, onComplete, setOu
   };
 
   return (
-    <Paper variant="outlined" sx={{ p: 1, height: 'auto', minHeight: 'min-content', display: 'flex', flexDirection: 'column' }}>
-      <Typography variant="subtitle1" gutterBottom>Input / Output</Typography>
+    <Paper variant="outlined" sx={{ p: 1.5, height: 'auto', minHeight: 'min-content', display: 'flex', flexDirection: 'column' }}>
+      <Typography variant="body1" sx={{ fontWeight: 'medium', mb: 1 }}>Input / Output</Typography>
       <Grid container spacing={1}>
         <Grid item xs={12} md={6}>
           <TextField label="Input file" value={state.input} onChange={on('input')} fullWidth size="small" InputProps={{
@@ -176,7 +192,7 @@ export default function AnnotationOptions({ upload, setUpload, onComplete, setOu
 
       {!state.preprocessed && (
         <>
-          <Typography variant="subtitle1" sx={{ mt: 2 }}>Pre-processing</Typography>
+          <Typography variant="body1" sx={{ fontWeight: 'medium', mt: 1.5, mb: 1 }}>Pre-processing</Typography>
           <Grid container spacing={1}>
             <Grid item xs={4} md={2}><TextField label="Mito thr." type="number" size="small" value={state.mito}   onChange={on('mito')}  fullWidth /></Grid>
             <Grid item xs={4} md={2}><TextField label="Min genes" type="number" size="small" value={state.minGenes} onChange={on('minGenes')} fullWidth /></Grid>
@@ -189,8 +205,8 @@ export default function AnnotationOptions({ upload, setUpload, onComplete, setOu
         </>
       )}
 
-      <Typography variant="subtitle1">Annotation settings</Typography>
-      <Grid container spacing={2} alignItems="center">
+      <Typography variant="body1" sx={{ fontWeight: 'medium', mb: 1, mt: 1.5 }}>Annotation settings</Typography>
+      <Grid container spacing={1} alignItems="center">
         <Grid item xs={12} md={4}>
           <FormControl fullWidth size="small">
             <InputLabel>Species</InputLabel>
@@ -200,14 +216,37 @@ export default function AnnotationOptions({ upload, setUpload, onComplete, setOu
             </Select>
           </FormControl>
         </Grid>
-        <Grid item xs={12} md={8}>
-          <FormControlLabel control={<Checkbox checked={state.cm} onChange={on('cm')} />}  label="CellMarker" />
-          <FormControlLabel control={<Checkbox checked={state.pl} onChange={on('pl')} />}  label="PanglaoDB"  />
-          <FormControlLabel control={<Checkbox checked={state.sca} onChange={on('sca')} />} label="Cancer SCA" />
+        <Grid item xs={12}>
+          <Typography variant="body2" sx={{ fontWeight: 'medium', mb: 0.5 }}>Reference Databases:</Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            <FormControlLabel control={<Checkbox checked={state.cm} onChange={on('cm')} />}  label="CellMarker" />
+            <FormControlLabel control={<Checkbox checked={state.pl} onChange={on('pl')} />}  label="PanglaoDB"  />
+            <FormControlLabel control={<Checkbox checked={state.sca} onChange={on('sca')} />} label="Cancer SCA" />
+          </Box>
+        </Grid>
+        <Grid item xs={12}>
+          <FormControlLabel 
+            control={
+              <Checkbox 
+                checked={state.useManualAnnotation} 
+                onChange={on('useManualAnnotation')} 
+              />
+            } 
+            label="Use Manual Annotation with Custom Marker Genes" 
+          />
         </Grid>
       </Grid>
 
-      <Box sx={{ mt: 3}}>
+      {/* Manual Annotation Section */}
+      <Collapse in={state.useManualAnnotation}>
+        <ManualAnnotationUpload
+          onFileSelect={(filePath) => set({ ...state, manualMarkerFile: filePath })}
+          selectedFile={state.manualMarkerFile}
+          onClearFile={() => set({ ...state, manualMarkerFile: null })}
+        />
+      </Collapse>
+
+      <Box sx={{ mt: 2}}>
         <Button variant="contained" startIcon={<UploadFileIcon />} disabled={loading} onClick={runAnnotation}>
           {loading? 'Running…':'Run Annotation'}
         </Button>

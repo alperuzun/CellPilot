@@ -5,6 +5,7 @@ declare global {
     backend: {
       openAdataFile(): Promise<string | undefined>;
       openDir(): Promise<string | undefined>;
+      openMarkerFile(): Promise<string | undefined>;
       imageDataURL: (p: string) => Promise<string>;
     };
   }
