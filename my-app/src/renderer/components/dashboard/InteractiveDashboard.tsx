@@ -27,12 +27,10 @@ import {
   Visibility
 } from '@mui/icons-material';
 import { UploadData } from '../wizard/Step1UploadDefine';
-import { QCData } from '../wizard/Step2QualityControl';
 import { AnalysisData } from '../wizard/Step3ConfigureLaunch';
 
 interface DashboardProps {
   uploadData: UploadData;
-  qcData: QCData;
   analysisData: AnalysisData;
   onNewAnalysis: () => void;
 }
@@ -59,7 +57,7 @@ function TabPanel({ children, value, index }: TabPanelProps) {
   );
 }
 
-export default function InteractiveDashboard({ uploadData, qcData, analysisData, onNewAnalysis }: DashboardProps) {
+export default function InteractiveDashboard({ uploadData, analysisData, onNewAnalysis }: DashboardProps) {
   const [currentTab, setCurrentTab] = useState(0);
   const [plotData, setPlotData] = useState<PlotData | null>(null);
   const [selectedCells, setSelectedCells] = useState<number[]>([]);
@@ -84,20 +82,20 @@ export default function InteractiveDashboard({ uploadData, qcData, analysisData,
     // Mock data loading
     const mockPlotData: PlotData = {
       umap: {
-        x: Array.from({ length: qcData.filteredCellCount }, () => Math.random() * 100 - 50),
-        y: Array.from({ length: qcData.filteredCellCount }, () => Math.random() * 100 - 50)
+        x: Array.from({ length: uploadData.summary?.n_obs || 1000 }, () => Math.random() * 100 - 50),
+        y: Array.from({ length: uploadData.summary?.n_obs || 1000 }, () => Math.random() * 100 - 50)
       },
       cellTypes: ['T cell', 'Macrophage', 'Natural killer cell', 'Monocyte', 'Mast cell', 'B cell', 'Epithelial'],
       genes: ['CD3D', 'CD8A', 'CD4', 'FOXP3', 'IL2RA', 'GZMB', 'PRF1', 'CD19', 'MS4A1', 'CD14'],
-      clusters: Array.from({ length: qcData.filteredCellCount }, () => Math.floor(Math.random() * 8)),
+      clusters: Array.from({ length: uploadData.summary?.n_obs || 1000 }, () => Math.floor(Math.random() * 8)),
       metadata: {
-        cellCount: qcData.filteredCellCount,
+        cellCount: uploadData.summary?.n_obs || 0,
         geneCount: 2000,
         clusters: 8
       }
     };
     setPlotData(mockPlotData);
-  }, [qcData.filteredCellCount]);
+  }, [uploadData.summary?.n_obs]);
 
   const colorByOptions = [
     'Cell Type (cellmarker)',

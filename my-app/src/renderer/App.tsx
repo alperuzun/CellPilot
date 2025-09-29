@@ -1,14 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import AnalysisWizard from './components/wizard/AnalysisWizard';
+import VisualizationDashboard from './components/visualization/VisualizationDashboard';
+import OutputsPage from './components/outputs/OutputsPage';
 
 export default function App() {
   const [activeSection, setActiveSection] = useState('analysis');
+  const [visualizationDataset, setVisualizationDataset] = useState<string>('');
+
+  useEffect(() => {
+    // Listen for custom event to switch to visualizations
+    const handleSwitchToVisualizations = (event: CustomEvent) => {
+      const { datasetPath } = event.detail;
+      setVisualizationDataset(datasetPath);
+      setActiveSection('visualizations');
+    };
+
+    window.addEventListener('switchToVisualizations', handleSwitchToVisualizations as EventListener);
+
+    return () => {
+      window.removeEventListener('switchToVisualizations', handleSwitchToVisualizations as EventListener);
+    };
+  }, []);
 
   const sidebarItems = [
-    { id: 'analysis', label: 'ANALYSIS', icon: '🧬' },
-    { id: 'about', label: 'ABOUT', icon: '❓' },
-    { id: 'uploads', label: 'Uploads', icon: '📁' },
-    { id: 'outputs', label: 'Outputs', icon: '📊' },
+    { id: 'analysis', label: 'ANALYSIS', icon: '' },
+    { id: 'visualizations', label: 'VISUALIZATIONS', icon: '' },
+    { id: 'about', label: 'ABOUT', icon: '' },
+    { id: 'uploads', label: 'Uploads', icon: '' },
+    { id: 'outputs', label: 'Outputs', icon: '' },
   ];
 
   return (
@@ -63,7 +82,20 @@ export default function App() {
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto">
-          {activeSection === 'analysis' && <AnalysisWizard />}
+          {activeSection === 'analysis' && (
+            <AnalysisWizard
+              onAnalysisComplete={(outputPath: string) => {
+                setVisualizationDataset(outputPath);
+                setActiveSection('visualizations');
+              }}
+            />
+          )}
+          {activeSection === 'visualizations' && (
+            <VisualizationDashboard
+              h5adPath={visualizationDataset}
+              autoLoad={!!visualizationDataset}
+            />
+          )}
           {activeSection === 'about' && (
             <div className="p-8">
               <h2 className="text-3xl font-bold text-gray-900 mb-4">About CellPilot</h2>
@@ -80,14 +112,7 @@ export default function App() {
               </p>
             </div>
           )}
-          {activeSection === 'outputs' && (
-            <div className="p-8">
-              <h2 className="text-3xl font-bold text-gray-900 mb-4">Analysis Outputs</h2>
-              <p className="text-gray-600">
-                View and download your analysis results and visualizations.
-              </p>
-            </div>
-          )}
+          {activeSection === 'outputs' && <OutputsPage />}
         </main>
       </div>
     </div>

@@ -74,3 +74,23 @@ class QCPreviewResponse(BaseModel):
     cells_filtered: int
     genes_filtered: int
     filter_summary: Dict[str, int]
+
+class AnalysisJobRequest(BaseModel):
+    name: str
+    input_path: str
+    output_dir: str
+    qc_params: Dict[str, Any]
+    analysis_params: Dict[str, Any]
+
+class AnalysisJobResponse(BaseModel):
+    job_id: str
+    status: str
+    message: str
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str  # 'pending', 'running', 'completed', 'failed'
+    progress: float  # 0.0 to 1.0
+    current_step: str
+    message: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None

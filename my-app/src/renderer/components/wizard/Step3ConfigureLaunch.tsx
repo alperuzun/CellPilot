@@ -1,17 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UploadData } from './Step1UploadDefine';
-import { QCData } from './Step2QualityControl';
+import { api, APIError, JobStatusResponse } from '../../services/api';
 
 interface Step3Props {
   uploadData: UploadData;
-  qcData: QCData;
   onComplete: (analysisData: AnalysisData) => void;
   onBack: () => void;
   analysisData?: AnalysisData;
 }
 
 export interface AnalysisData {
-  // Normalization & Scaling
+  // Quality Control - matching backend defaults
+  mitoPrefix: string;
+  mitoThreshold: number; // percentage (0.05 = 5%)
+  minGenes: number;
+  minCounts: number;
+  maxGenesPerCell: number; // frontend-only for doublet filtering
+
+  // Normalization & Scaling (these are handled by omicverse internally)
   normalizationMethod: string;
   scaleFactor: number;
   logTransform: boolean;
@@ -29,8 +35,13 @@ export interface AnalysisData {
   resolution: number;
   clusteringMethod: string;
 
-  // Analysis types
+  // Annotation Options - matching backend
   runAnnotation: boolean;
+  useCellmarker: boolean;
+  usePanglao: boolean;
+  useCancerSingleCellAtlas: boolean;
+
+  // Other Analysis types
   runCellPhone: boolean;
   runInferCNV: boolean;
 
@@ -39,10 +50,12 @@ export interface AnalysisData {
   status?: 'pending' | 'running' | 'completed' | 'failed';
   progress?: number;
   currentStep?: string;
+  annotatedDatasetPath?: string;
 }
 
 const NORMALIZATION_METHODS = [
-  { value: 'log1p', label: 'Log1p normalization (recommended)' },
+  { value: 'shiftlog|pearson', label: 'Shiftlog + Pearson (OmicVerse default)' },
+  { value: 'log1p', label: 'Log1p normalization' },
   { value: 'cpm', label: 'Counts per million (CPM)' },
   { value: 'tpm', label: 'Transcripts per million (TPM)' }
 ];
@@ -58,10 +71,17 @@ const CLUSTERING_METHODS = [
   { value: 'louvain', label: 'Louvain algorithm' }
 ];
 
-export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, onBack, analysisData }: Step3Props) {
+export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, analysisData }: Step3Props) {
   const [config, setConfig] = useState<AnalysisData>({
-    // Default values
-    normalizationMethod: analysisData?.normalizationMethod || 'log1p',
+    // QC defaults - matching backend default_params()
+    mitoPrefix: analysisData?.mitoPrefix || 'MT-',
+    mitoThreshold: analysisData?.mitoThreshold || 5, // 5% (backend uses 0.05)
+    minGenes: analysisData?.minGenes || 250,
+    minCounts: analysisData?.minCounts || 500,
+    maxGenesPerCell: analysisData?.maxGenesPerCell || 5000,
+
+    // Analysis defaults (omicverse handles these internally)
+    normalizationMethod: analysisData?.normalizationMethod || 'shiftlog|pearson',
     scaleFactor: analysisData?.scaleFactor || 10000,
     logTransform: analysisData?.logTransform ?? true,
     numHVGs: analysisData?.numHVGs || 2000,
@@ -69,9 +89,16 @@ export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, o
     numPCs: analysisData?.numPCs || 50,
     pcaMethod: analysisData?.pcaMethod || 'auto',
     numNeighbors: analysisData?.numNeighbors || 15,
-    resolution: analysisData?.resolution || 0.5,
+    resolution: analysisData?.resolution || 0.8, // backend default
     clusteringMethod: analysisData?.clusteringMethod || 'leiden',
+
+    // Annotation options - matching backend defaults
     runAnnotation: analysisData?.runAnnotation ?? true,
+    useCellmarker: analysisData?.useCellmarker ?? true,
+    usePanglao: analysisData?.usePanglao ?? false,
+    useCancerSingleCellAtlas: analysisData?.useCancerSingleCellAtlas ?? false,
+
+    // Other analysis types
     runCellPhone: analysisData?.runCellPhone ?? true,
     runInferCNV: analysisData?.runInferCNV ?? true,
     status: analysisData?.status || 'pending'
@@ -82,7 +109,8 @@ export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, o
   const [currentStep, setCurrentStep] = useState('');
 
   const [expandedSections, setExpandedSections] = useState({
-    normalization: true,
+    qc: true,
+    normalization: false,
     features: false,
     dimensionality: false,
     clustering: false,
@@ -96,55 +124,107 @@ export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, o
     }));
   };
 
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
+
+  // Poll job status when analysis is running
+  useEffect(() => {
+    if (!jobId || !running) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await api.getJobStatus(jobId);
+        setJobStatus(status);
+        setProgress(status.progress * 100);
+        setCurrentStep(status.current_step);
+
+        if (status.status === 'completed') {
+          // Extract annotated dataset path from results
+          let annotatedDatasetPath = '';
+          if (status.result?.annotation?.[0]?.data?.adata_output_file) {
+            annotatedDatasetPath = status.result.annotation[0].data.adata_output_file;
+          }
+
+          const completedAnalysis: AnalysisData = {
+            ...config,
+            analysisId: jobId,
+            status: 'completed',
+            progress: 100,
+            currentStep: 'Analysis Complete!',
+            annotatedDatasetPath: annotatedDatasetPath
+          };
+          onComplete(completedAnalysis, annotatedDatasetPath);
+          setRunning(false);
+          clearInterval(pollInterval);
+        } else if (status.status === 'failed') {
+          setCurrentStep(`Analysis failed: ${status.message || 'Unknown error'}`);
+          setConfig(prev => ({ ...prev, status: 'failed' }));
+          setRunning(false);
+          clearInterval(pollInterval);
+        }
+      } catch (error) {
+        console.error('Error polling job status:', error);
+      }
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [jobId, running, config, onComplete]);
+
   const handleStartAnalysis = async () => {
     setRunning(true);
     setProgress(0);
-    setCurrentStep('Initializing analysis...');
+    setCurrentStep('Starting analysis...');
 
     try {
-      // Step 1: Data preprocessing
-      setCurrentStep('Step 1 of 4: Preprocessing and quality control...');
-      setProgress(10);
+      // Create output directory path
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const outputDir = `output/${uploadData.datasetName}_${timestamp}`;
 
-      // Mock progress updates
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setProgress(25);
+      // Start the analysis job
+      const response = await api.startAnalysis({
+        name: uploadData.datasetName,
+        input_path: uploadData.filePath,
+        output_dir: outputDir,
+        qc_params: {
+          // Map frontend parameters to backend parameter names
+          mito_prefix: config.mitoPrefix,
+          mito_threshold: config.mitoThreshold / 100, // convert percentage to decimal
+          min_genes: config.minGenes,
+          min_counts: config.minCounts,
+          max_genes: config.maxGenesPerCell // frontend-only parameter
+        },
+        analysis_params: {
+          runAnnotation: config.runAnnotation,
+          runCellPhone: config.runCellPhone,
+          runInferCNV: config.runInferCNV,
+          // Annotation options
+          use_cellmarker: config.useCellmarker,
+          use_panglao: config.usePanglao,
+          use_cancer_single_cell_atlas: config.useCancerSingleCellAtlas,
+          // Preprocessing parameters (these match backend default_params)
+          n_hvgs: config.numHVGs,
+          n_pcs: config.numPCs,
+          n_neighbors: config.numNeighbors,
+          resolution: config.resolution,
+          // Additional frontend parameters
+          normalizationMethod: config.normalizationMethod,
+          scaleFactor: config.scaleFactor,
+          logTransform: config.logTransform,
+          hvgMethod: config.hvgMethod,
+          clusteringMethod: config.clusteringMethod
+        }
+      });
 
-      // Step 2: Normalization and feature selection
-      setCurrentStep('Step 2 of 4: Normalization and feature selection...');
-      setProgress(40);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      setProgress(55);
-
-      // Step 3: Dimensionality reduction and clustering
-      setCurrentStep('Step 3 of 4: PCA, UMAP, and clustering...');
-      setProgress(70);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setProgress(85);
-
-      // Step 4: Analysis tasks
-      setCurrentStep('Step 4 of 4: Running specialized analyses...');
-      setProgress(95);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Complete
-      setProgress(100);
-      setCurrentStep('Analysis completed successfully!');
-
-      const completedAnalysis: AnalysisData = {
-        ...config,
-        analysisId: `analysis_${Date.now()}`,
-        status: 'completed',
-        progress: 100,
-        currentStep: 'Completed'
-      };
-
-      onComplete(completedAnalysis);
+      setJobId(response.job_id);
+      setCurrentStep('Analysis job started. Monitoring progress...');
     } catch (error) {
-      console.error('Analysis failed:', error);
-      setCurrentStep('Analysis failed. Please try again.');
+      console.error('Failed to start analysis:', error);
+      if (error instanceof APIError) {
+        setCurrentStep(`Failed to start analysis: ${error.message}`);
+      } else {
+        setCurrentStep('Failed to start analysis. Please try again.');
+      }
       setConfig(prev => ({ ...prev, status: 'failed' }));
-    } finally {
       setRunning(false);
     }
   };
@@ -166,6 +246,11 @@ export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, o
                 <h2 className="text-lg font-medium text-gray-900">
                   Analyzing "{uploadData.datasetName}"
                 </h2>
+                {jobId && (
+                  <span className="ml-auto text-xs text-gray-500 font-mono">
+                    Job ID: {jobId.slice(0, 8)}
+                  </span>
+                )}
               </div>
 
               <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
@@ -177,9 +262,47 @@ export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, o
 
               <p className="text-gray-600 mb-6">{currentStep}</p>
 
+              {jobStatus && (
+                <div className="mb-4 p-3 bg-gray-50 rounded text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Status:</span>
+                    <span className={`font-medium ${
+                      jobStatus.status === 'running' ? 'text-blue-600' :
+                      jobStatus.status === 'completed' ? 'text-green-600' :
+                      jobStatus.status === 'failed' ? 'text-red-600' : 'text-gray-600'
+                    }`}>
+                      {jobStatus.status.charAt(0).toUpperCase() + jobStatus.status.slice(1)}
+                    </span>
+                  </div>
+                  {jobStatus.message && (
+                    <div className="mt-2 text-gray-600">
+                      Message: {jobStatus.message}
+                    </div>
+                  )}
+
+                  {/* Show View Visualizations button when completed */}
+                  {jobStatus.status === 'completed' && jobStatus.result?.annotation?.[0]?.data?.adata_output_file && (
+                    <div className="mt-4">
+                      <button
+                        onClick={() => {
+                          const datasetPath = jobStatus.result.annotation[0].data.adata_output_file;
+                          window.dispatchEvent(new CustomEvent('switchToVisualizations', {
+                            detail: { datasetPath }
+                          }));
+                        }}
+                        className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                      >
+                        <span>🎯</span>
+                        Analysis Complete - View Visualizations
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-2 flex-wrap">
                 <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">
-                  {qcData.filteredCellCount.toLocaleString()} cells
+                  Dataset: {uploadData.summary?.n_obs || 'Unknown'} cells
                 </span>
                 <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">
                   {config.numHVGs} HVGs
@@ -232,16 +355,93 @@ export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, o
                 Species: {uploadData.species}
               </span>
               <span className="px-3 py-1 bg-purple-100 text-purple-800 text-sm rounded-full">
-                {qcData.initialCellCount.toLocaleString()} → {qcData.filteredCellCount.toLocaleString()} cells
+                {uploadData.summary?.n_obs?.toLocaleString() || 'Unknown'} cells
               </span>
               <span className="px-3 py-1 bg-orange-100 text-orange-800 text-sm rounded-full">
-                {qcData.filteredOutPercent.toFixed(1)}% filtered out
+                QC filters: {config.minGenes}-{config.maxGenesPerCell} genes, &gt;{config.minCounts} counts, &lt;{config.mitoThreshold}% {config.mitoPrefix}
               </span>
             </div>
           </div>
 
           {/* Configuration Sections */}
           <div className="space-y-4 mb-8">
+            {/* Quality Control */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+              <button
+                onClick={() => toggleSection('qc')}
+                className="w-full px-6 py-4 text-left flex items-center justify-between hover:bg-gray-50"
+              >
+                <h3 className="text-lg font-medium text-gray-900">Quality Control</h3>
+                <svg
+                  className={`w-5 h-5 text-gray-500 transition-transform ${expandedSections.qc ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {expandedSections.qc && (
+                <div className="px-6 pb-6 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Mitochondrial Gene Prefix</label>
+                    <input
+                      type="text"
+                      value={config.mitoPrefix}
+                      onChange={(e) => updateConfig({ mitoPrefix: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <p className="text-sm text-gray-500 mt-1">Prefix for mitochondrial genes (MT- for human, mt- for mouse)</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Min Genes per Cell</label>
+                    <input
+                      type="number"
+                      value={config.minGenes}
+                      onChange={(e) => updateConfig({ minGenes: Number(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <p className="text-sm text-gray-500 mt-1">Minimum genes required per cell (backend default: 250)</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Min Counts per Cell</label>
+                    <input
+                      type="number"
+                      value={config.minCounts}
+                      onChange={(e) => updateConfig({ minCounts: Number(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <p className="text-sm text-gray-500 mt-1">Minimum UMI counts per cell (backend default: 500)</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Max Genes per Cell</label>
+                    <input
+                      type="number"
+                      value={config.maxGenesPerCell}
+                      onChange={(e) => updateConfig({ maxGenesPerCell: Number(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <p className="text-sm text-gray-500 mt-1">Maximum genes per cell to filter doublets (typically 5000-7500)</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Max Mitochondrial %</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={config.mitoThreshold}
+                      onChange={(e) => updateConfig({ mitoThreshold: Number(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <p className="text-sm text-gray-500 mt-1">Maximum mitochondrial gene percentage (backend default: 5%)</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Normalization & Scaling */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200">
               <button
@@ -457,20 +657,69 @@ export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, o
                 </svg>
               </button>
               {expandedSections.modules && (
-                <div className="px-6 pb-6 space-y-4">
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="runAnnotation"
-                      checked={config.runAnnotation}
-                      onChange={(e) => updateConfig({ runAnnotation: e.target.checked })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="runAnnotation" className="ml-2 text-sm text-gray-700">
-                      Cell Type Annotation
-                    </label>
+                <div className="px-6 pb-6 space-y-6">
+                  {/* Cell Type Annotation */}
+                  <div>
+                    <div className="flex items-center mb-3">
+                      <input
+                        type="checkbox"
+                        id="runAnnotation"
+                        checked={config.runAnnotation}
+                        onChange={(e) => updateConfig({ runAnnotation: e.target.checked })}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor="runAnnotation" className="ml-2 text-sm font-medium text-gray-700">
+                        Cell Type Annotation
+                      </label>
+                    </div>
+
+                    {config.runAnnotation && (
+                      <div className="ml-6 space-y-2 bg-gray-50 p-3 rounded-md">
+                        <p className="text-xs text-gray-600 mb-2">Select annotation databases (SCSA/OmicVerse):</p>
+
+                        <div className="flex items-center">
+                          <input
+                            type="checkbox"
+                            id="useCellmarker"
+                            checked={config.useCellmarker}
+                            onChange={(e) => updateConfig({ useCellmarker: e.target.checked })}
+                            className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <label htmlFor="useCellmarker" className="ml-2 text-xs text-gray-700">
+                            CellMarker (recommended for normal cells)
+                          </label>
+                        </div>
+
+                        <div className="flex items-center">
+                          <input
+                            type="checkbox"
+                            id="usePanglao"
+                            checked={config.usePanglao}
+                            onChange={(e) => updateConfig({ usePanglao: e.target.checked })}
+                            className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <label htmlFor="usePanglao" className="ml-2 text-xs text-gray-700">
+                            PanglaoDB (comprehensive cell type database)
+                          </label>
+                        </div>
+
+                        <div className="flex items-center">
+                          <input
+                            type="checkbox"
+                            id="useCancerSingleCellAtlas"
+                            checked={config.useCancerSingleCellAtlas}
+                            onChange={(e) => updateConfig({ useCancerSingleCellAtlas: e.target.checked })}
+                            className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                          />
+                          <label htmlFor="useCancerSingleCellAtlas" className="ml-2 text-xs text-gray-700">
+                            CancerSEA (specialized for cancer cells)
+                          </label>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
+                  {/* Cell Communication */}
                   <div className="flex items-center">
                     <input
                       type="checkbox"
@@ -480,10 +729,11 @@ export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, o
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
                     <label htmlFor="runCellPhone" className="ml-2 text-sm text-gray-700">
-                      Cell-Cell Communication Analysis
+                      Cell-Cell Communication Analysis (CellPhoneDB)
                     </label>
                   </div>
 
+                  {/* Tumor/Drug Response */}
                   <div className="flex items-center">
                     <input
                       type="checkbox"
@@ -493,7 +743,7 @@ export default function Step3ConfigureLaunch({ uploadData, qcData, onComplete, o
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
                     <label htmlFor="runInferCNV" className="ml-2 text-sm text-gray-700">
-                      Tumor Prediction & Drug Response
+                      Tumor Prediction & Drug Response (InferCNV + CaDRReS-Sc)
                     </label>
                   </div>
                 </div>

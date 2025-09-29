@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
+import { api, APIError } from '../../services/api';
 
 interface Step1Props {
   onNext: (data: UploadData) => void;
@@ -60,28 +61,35 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
     setUploading(true);
 
     try {
-      // For now, we'll simulate the upload process with mock data
-      console.log('Uploading file:', file.name);
-      
-      // Simulate upload delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      console.log('Processing file:', file.name);
+
+      // In Electron, we can access the file path directly
+      // Use the actual file from Downloads folder
+      const filePath = `/Users/colinpascual/Downloads/${file.name}`;
+
+      // Call backend to process the file
+      const response = await api.uploadAdata({
+        input_path: filePath,
+        name: file.name.replace(/\.[^/.]+$/, "")
+      });
 
       setFormData(prev => ({
         ...prev,
         fileName: file.name,
-        filePath: file.name,
+        filePath: response.input_path,
         fileSize: file.size,
-        datasetName: prev.datasetName || file.name.replace(/\.[^/.]+$/, ""),
-        summary: { 
-          cells: Math.floor(Math.random() * 5000) + 1000,
-          genes: Math.floor(Math.random() * 20000) + 10000 
-        }
+        datasetName: prev.datasetName || response.name,
+        summary: response.summary
       }));
 
       setUploadComplete(true);
     } catch (err: any) {
-      console.error(err);
-      setError('Upload failed. Please try again.');
+      console.error('Upload error:', err);
+      if (err instanceof APIError) {
+        setError(`Processing failed: ${err.message}`);
+      } else {
+        setError('Processing failed. Please try again.');
+      }
     } finally {
       setUploading(false);
     }
@@ -187,7 +195,7 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
                 <h3 className="text-lg font-medium text-gray-900 mb-2">Processing file...</h3>
                 <p className="text-gray-600">
-                  Analyzing your data and generating preview
+                  Processing file and extracting metadata
                 </p>
               </div>
             ) : (

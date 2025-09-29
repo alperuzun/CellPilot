@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 
 import Step1UploadDefine, { UploadData } from './Step1UploadDefine';
-import Step2QualityControl, { QCData } from './Step2QualityControl';
 import Step3ConfigureLaunch, { AnalysisData } from './Step3ConfigureLaunch';
 import InteractiveDashboard from '../dashboard/InteractiveDashboard';
 
 
-export default function AnalysisWizard() {
+interface AnalysisWizardProps {
+  onAnalysisComplete?: (outputPath: string) => void;
+}
+
+export default function AnalysisWizard({ onAnalysisComplete }: AnalysisWizardProps) {
   const [activeStep, setActiveStep] = useState(0);
   const [uploadData, setUploadData] = useState<UploadData | undefined>();
-  const [qcData, setQcData] = useState<QCData | undefined>();
   const [analysisData, setAnalysisData] = useState<AnalysisData | undefined>();
 
   const handleStep1Complete = (data: UploadData) => {
@@ -17,37 +19,29 @@ export default function AnalysisWizard() {
     setActiveStep(1);
   };
 
-  const handleStep2Complete = (data: QCData) => {
-    setQcData(data);
-    setActiveStep(2);
-  };
-
-  const handleStep3Complete = (data: AnalysisData) => {
+  const handleStep2Complete = (data: AnalysisData, outputPath?: string) => {
     setAnalysisData(data);
-    setActiveStep(3);
+    setActiveStep(2);
+    if (outputPath && onAnalysisComplete) {
+      onAnalysisComplete(outputPath);
+    }
   };
 
   const handleBackToStep1 = () => {
     setActiveStep(0);
   };
 
-  const handleBackToStep2 = () => {
-    setActiveStep(1);
-  };
-
   const handleNewAnalysis = () => {
     setActiveStep(0);
     setUploadData(undefined);
-    setQcData(undefined);
     setAnalysisData(undefined);
   };
 
   // If we're on the dashboard step, show full-screen dashboard
-  if (activeStep === 3 && uploadData && qcData && analysisData) {
+  if (activeStep === 2 && uploadData && analysisData) {
     return (
       <InteractiveDashboard
         uploadData={uploadData}
-        qcData={qcData}
         analysisData={analysisData}
         onNewAnalysis={handleNewAnalysis}
       />
@@ -66,20 +60,10 @@ export default function AnalysisWizard() {
         )}
 
         {activeStep === 1 && uploadData && (
-          <Step2QualityControl
-            uploadData={uploadData}
-            onNext={handleStep2Complete}
-            onBack={handleBackToStep1}
-            qcData={qcData}
-          />
-        )}
-
-        {activeStep === 2 && uploadData && qcData && (
           <Step3ConfigureLaunch
             uploadData={uploadData}
-            qcData={qcData}
-            onComplete={handleStep3Complete}
-            onBack={handleBackToStep2}
+            onComplete={handleStep2Complete}
+            onBack={handleBackToStep1}
             analysisData={analysisData}
           />
         )}
