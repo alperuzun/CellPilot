@@ -314,11 +314,6 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
         job_manager.start_job(job_id)
 
         # Ensure output directory exists
-        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Get to backend/
-        project_root = os.path.dirname(script_dir)  # Get to SingleCell/
-        output_dir = os.path.join(project_root, 'output', request.dir_name)
-        output_dir = str(output_dir)
-        os.makedirs(output_dir, exist_ok=True)
 
         results = {}
 
@@ -385,6 +380,11 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
 
             # Extract CellPhoneDB parameters from the request
             cellphone_user_params = request.analysis_params.get('cellPhoneDBParams', {})
+            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Get to backend/
+            project_root = os.path.dirname(script_dir)  # Get to SingleCell/
+            output_dir = os.path.join(project_root, 'output', request.dir_name)
+            output_dir = str(output_dir)
+            os.makedirs(output_dir, exist_ok=True)
 
             cellphone_params = CellPhoneDBParams(
                 input_path=processed_path,
@@ -411,7 +411,11 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
         # Step 4: InferCNV (if requested)
         if request.analysis_params.get('runInferCNV', False):
             job_manager.update_job(job_id, progress=0.8, current_step="Running tumor prediction and drug response...")
-
+            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Get to backend/
+            project_root = os.path.dirname(script_dir)  # Get to SingleCell/
+            output_dir = os.path.join(project_root, 'output', request.dir_name)
+            output_dir = str(output_dir)
+            os.makedirs(output_dir, exist_ok=True)
             # Extract InferCNV parameters from the request
             infercnv_user_params = request.analysis_params.get('inferCNVParams', {})
 

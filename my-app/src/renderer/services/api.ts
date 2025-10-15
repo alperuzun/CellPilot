@@ -59,7 +59,7 @@ export interface QCPreviewResponse {
 export interface AnnotationParams {
   name: string;
   input_path: string;
-  output_dir: string;
+  dir_name: string;
   preprocessed: boolean;
   preprocessing_params: any;
   use_cellmarker: boolean;
@@ -72,7 +72,7 @@ export interface AnnotationParams {
 export interface CellPhoneDBParams {
   input_path: string;
   name: string;
-  output_dir: string;
+  dir_name: string;
   plot_column_names: string[];
   column_name: string;
   cpdb_file_path: string;
