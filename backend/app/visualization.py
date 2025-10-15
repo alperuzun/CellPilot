@@ -6,6 +6,28 @@ from typing import Dict, Any, List, Optional
 import anndata as ad
 import omicverse as ov
 
+# Curated list of common cell marker genes for quick visualization
+COMMON_CELL_MARKERS = [
+    # T cells
+    'CD3D', 'CD3E', 'CD3G', 'CD4', 'CD8A', 'CD8B', 'CD28', 'IL7R', 'CCR7', 'FOXP3',
+    # B cells
+    'CD19', 'MS4A1', 'CD79A', 'CD79B', 'CD27', 'IGHM', 'IGHG1',
+    # Myeloid cells (Monocytes/Macrophages/DCs)
+    'CD14', 'FCGR3A', 'LYZ', 'CD68', 'S100A8', 'S100A9', 'ITGAX', 'CD1C',
+    # NK cells
+    'NKG7', 'GNLY', 'NCR1', 'KLRD1', 'KLRB1', 'NCAM1',
+    # Epithelial cells
+    'EPCAM', 'KRT8', 'KRT18', 'KRT19', 'CDH1',
+    # Endothelial cells
+    'PECAM1', 'VWF', 'CDH5', 'CD34',
+    # Fibroblasts
+    'VIM', 'COL1A1', 'COL1A2', 'DCN', 'LUM',
+    # Proliferation markers
+    'MKI67', 'TOP2A', 'PCNA',
+    # Common housekeeping/reference
+    'ACTB', 'GAPDH', 'B2M', 'PTPRC'
+]
+
 def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
     """
     Extract visualization data from h5ad file for interactive frontend plotting
@@ -81,11 +103,52 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
         if col in adata.obs.columns:
             qc_metrics[col] = adata.obs[col].tolist()
 
-    # Get simple set of genes for expression overlay (minimal approach)
+    # Get curated gene list combining common markers + dataset-specific genes
+    curated_genes = []
+
     if adata.var is not None:
-        # Just use first available genes - no expensive computations
-        top_genes = adata.var.index[:50].tolist()
-        print(f"DEBUG: Using first {len(top_genes)} genes from dataset")
+        # 1. Start with common cell markers that exist in this dataset
+        available_markers = [gene for gene in COMMON_CELL_MARKERS if gene in adata.var.index]
+        curated_genes.extend(available_markers)
+        print(f"DEBUG: Found {len(available_markers)} common cell markers in dataset")
+
+        # 2. Add highly variable genes if available
+        if 'highly_variable' in adata.var.columns:
+            hvg_genes = adata.var[adata.var['highly_variable']].index.tolist()
+            # Take top 30 HVGs not already in list
+            for gene in hvg_genes[:30]:
+                if gene not in curated_genes:
+                    curated_genes.append(gene)
+            print(f"DEBUG: Added {len([g for g in hvg_genes[:30] if g not in available_markers])} highly variable genes")
+
+        # 3. If we still don't have enough genes, add top marker genes from clustering
+        if len(curated_genes) < 50 and 'rank_genes_groups' in adata.uns:
+            try:
+                marker_dict = adata.uns['rank_genes_groups']
+                if 'names' in marker_dict:
+                    # Get top 3 genes from each cluster
+                    for group in marker_dict['names'].dtype.names[:10]:  # Max 10 clusters
+                        top_cluster_genes = marker_dict['names'][group][:3].tolist()
+                        for gene in top_cluster_genes:
+                            if gene not in curated_genes:
+                                curated_genes.append(gene)
+                    print(f"DEBUG: Added marker genes from clustering, total now: {len(curated_genes)}")
+            except Exception as e:
+                print(f"DEBUG: Could not extract marker genes: {e}")
+
+        # 4. If still need more, fill with first genes from dataset
+        if len(curated_genes) < 50:
+            remaining_needed = 50 - len(curated_genes)
+            for gene in adata.var.index[:remaining_needed * 2]:  # Check 2x to account for duplicates
+                if gene not in curated_genes:
+                    curated_genes.append(gene)
+                    if len(curated_genes) >= 50:
+                        break
+
+        # Sort alphabetically for easy searching
+        curated_genes.sort()
+        top_genes = curated_genes
+        print(f"DEBUG: Final curated gene list: {len(top_genes)} genes")
     else:
         top_genes = []
         print("DEBUG: No var data available")

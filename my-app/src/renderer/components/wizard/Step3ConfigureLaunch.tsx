@@ -98,9 +98,9 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     usePanglao: analysisData?.usePanglao ?? false,
     useCancerSingleCellAtlas: analysisData?.useCancerSingleCellAtlas ?? false,
 
-    // Other analysis types
-    runCellPhone: analysisData?.runCellPhone ?? true,
-    runInferCNV: analysisData?.runInferCNV ?? true,
+    // Other analysis types - disabled by default for annotation-only workflow
+    runCellPhone: analysisData?.runCellPhone ?? false,
+    runInferCNV: analysisData?.runInferCNV ?? false,
     status: analysisData?.status || 'pending'
   });
 
@@ -139,23 +139,52 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
         setCurrentStep(status.current_step);
 
         if (status.status === 'completed') {
-          // Extract annotated dataset path from results
-          let annotatedDatasetPath = '';
-          if (status.result?.annotation?.[0]?.data?.adata_output_file) {
-            annotatedDatasetPath = status.result.annotation[0].data.adata_output_file;
-          }
+          // Fetch the actual dataset list from backend to get the real path
+          try {
+            const datasetsResponse = await api.getAvailableDatasets();
+            console.log('[Step3ConfigureLaunch] Available datasets after completion:', datasetsResponse.datasets);
 
-          const completedAnalysis: AnalysisData = {
-            ...config,
-            analysisId: jobId,
-            status: 'completed',
-            progress: 100,
-            currentStep: 'Analysis Complete!',
-            annotatedDatasetPath: annotatedDatasetPath
-          };
-          onComplete(completedAnalysis, annotatedDatasetPath);
-          setRunning(false);
-          clearInterval(pollInterval);
+            // Find the annotation dataset that matches our analysis
+            // Look for the most recent annotation dataset
+            const annotationDatasets = datasetsResponse.datasets
+              .filter(d => d.analysis_type === 'annotation')
+              .sort((a, b) => b.date.localeCompare(a.date)); // Sort by date descending
+
+            const realDatasetPath = annotationDatasets.length > 0 ? annotationDatasets[0].path : '';
+
+            console.log('[Step3ConfigureLaunch] Using real dataset path:', realDatasetPath);
+
+            const completedAnalysis: AnalysisData = {
+              ...config,
+              analysisId: jobId,
+              status: 'completed',
+              progress: 100,
+              currentStep: 'Analysis Complete!',
+              annotatedDatasetPath: realDatasetPath
+            };
+            onComplete(completedAnalysis, realDatasetPath);
+            setRunning(false);
+            clearInterval(pollInterval);
+          } catch (error) {
+            console.error('[Step3ConfigureLaunch] Error fetching datasets:', error);
+            // Fallback to old behavior
+            let annotatedDatasetPath = '';
+            if (status.result?.annotation?.[0]?.data?.adata_output_file) {
+              annotatedDatasetPath = status.result.annotation[0].data.adata_output_file;
+            }
+
+            const completedAnalysis: AnalysisData = {
+              ...config,
+              analysisId: jobId,
+              status: 'completed',
+              progress: 100,
+              currentStep: 'Analysis Complete!',
+              annotatedDatasetPath: annotatedDatasetPath
+            };
+            onComplete(completedAnalysis, annotatedDatasetPath);
+            setRunning(false);
+            clearInterval(pollInterval);
+          }
         } else if (status.status === 'failed') {
           setCurrentStep(`Analysis failed: ${status.message || 'Unknown error'}`);
           setConfig(prev => ({ ...prev, status: 'failed' }));
@@ -177,7 +206,7 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
 
     try {
       // Create output directory path
-      const outputDir = `output/${uploadData.datasetName}`;
+      const outputDir = `output/annotation_${uploadData.datasetName}`;
 
       // Start the analysis job
       const response = await api.startAnalysis({
@@ -639,13 +668,13 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
               )}
             </div>
 
-            {/* Analysis Modules */}
+            {/* Annotation Models */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200">
               <button
                 onClick={() => toggleSection('modules')}
                 className="w-full px-6 py-4 text-left flex items-center justify-between hover:bg-gray-50"
               >
-                <h3 className="text-lg font-medium text-gray-900">Analysis Modules</h3>
+                <h3 className="text-lg font-medium text-gray-900">Annotation Models</h3>
                 <svg
                   className={`w-5 h-5 text-gray-500 transition-transform ${expandedSections.modules ? 'rotate-180' : ''}`}
                   fill="none"
@@ -656,94 +685,52 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
                 </svg>
               </button>
               {expandedSections.modules && (
-                <div className="px-6 pb-6 space-y-6">
-                  {/* Cell Type Annotation */}
-                  <div>
-                    <div className="flex items-center mb-3">
-                      <input
-                        type="checkbox"
-                        id="runAnnotation"
-                        checked={config.runAnnotation}
-                        onChange={(e) => updateConfig({ runAnnotation: e.target.checked })}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <label htmlFor="runAnnotation" className="ml-2 text-sm font-medium text-gray-700">
-                        Cell Type Annotation
-                      </label>
-                    </div>
+                <div className="px-6 pb-6 space-y-4">
+                  <p className="text-sm text-gray-600 mb-4">Select cell type annotation databases to use:</p>
 
-                    {config.runAnnotation && (
-                      <div className="ml-6 space-y-2 bg-gray-50 p-3 rounded-md">
-                        <p className="text-xs text-gray-600 mb-2">Select annotation databases (SCSA/OmicVerse):</p>
-
-                        <div className="flex items-center">
-                          <input
-                            type="checkbox"
-                            id="useCellmarker"
-                            checked={config.useCellmarker}
-                            onChange={(e) => updateConfig({ useCellmarker: e.target.checked })}
-                            className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                          />
-                          <label htmlFor="useCellmarker" className="ml-2 text-xs text-gray-700">
-                            CellMarker (recommended for normal cells)
-                          </label>
-                        </div>
-
-                        <div className="flex items-center">
-                          <input
-                            type="checkbox"
-                            id="usePanglao"
-                            checked={config.usePanglao}
-                            onChange={(e) => updateConfig({ usePanglao: e.target.checked })}
-                            className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                          />
-                          <label htmlFor="usePanglao" className="ml-2 text-xs text-gray-700">
-                            PanglaoDB (comprehensive cell type database)
-                          </label>
-                        </div>
-
-                        <div className="flex items-center">
-                          <input
-                            type="checkbox"
-                            id="useCancerSingleCellAtlas"
-                            checked={config.useCancerSingleCellAtlas}
-                            onChange={(e) => updateConfig({ useCancerSingleCellAtlas: e.target.checked })}
-                            className="h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                          />
-                          <label htmlFor="useCancerSingleCellAtlas" className="ml-2 text-xs text-gray-700">
-                            CancerSEA (specialized for cancer cells)
-                          </label>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Cell Communication */}
                   <div className="flex items-center">
                     <input
                       type="checkbox"
-                      id="runCellPhone"
-                      checked={config.runCellPhone}
-                      onChange={(e) => updateConfig({ runCellPhone: e.target.checked })}
+                      id="useCellmarker"
+                      checked={config.useCellmarker}
+                      onChange={(e) => updateConfig({ useCellmarker: e.target.checked })}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
-                    <label htmlFor="runCellPhone" className="ml-2 text-sm text-gray-700">
-                      Cell-Cell Communication Analysis (CellPhoneDB)
+                    <label htmlFor="useCellmarker" className="ml-2 text-sm text-gray-700">
+                      <span className="font-medium">CellMarker</span> - Recommended for normal cell types
                     </label>
                   </div>
 
-                  {/* Tumor/Drug Response */}
                   <div className="flex items-center">
                     <input
                       type="checkbox"
-                      id="runInferCNV"
-                      checked={config.runInferCNV}
-                      onChange={(e) => updateConfig({ runInferCNV: e.target.checked })}
+                      id="usePanglao"
+                      checked={config.usePanglao}
+                      onChange={(e) => updateConfig({ usePanglao: e.target.checked })}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
-                    <label htmlFor="runInferCNV" className="ml-2 text-sm text-gray-700">
-                      Tumor Prediction & Drug Response (InferCNV + CaDRReS-Sc)
+                    <label htmlFor="usePanglao" className="ml-2 text-sm text-gray-700">
+                      <span className="font-medium">PanglaoDB</span> - Comprehensive cell type database
                     </label>
+                  </div>
+
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="useCancerSingleCellAtlas"
+                      checked={config.useCancerSingleCellAtlas}
+                      onChange={(e) => updateConfig({ useCancerSingleCellAtlas: e.target.checked })}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="useCancerSingleCellAtlas" className="ml-2 text-sm text-gray-700">
+                      <span className="font-medium">CancerSEA</span> - Specialized for cancer cell types
+                    </label>
+                  </div>
+
+                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                    <p className="text-xs text-blue-800">
+                      <span className="font-medium">Note:</span> At least one annotation model must be selected. CellMarker is recommended for most datasets.
+                    </p>
                   </div>
                 </div>
               )}

@@ -173,6 +173,7 @@ export interface DatasetInfo {
   date: string;
   size_mb: number;
   directory: string;
+  analysis_type: 'annotation' | 'cellphonedb';
 }
 
 export interface AvailableDatasetsResponse {

@@ -43,9 +43,9 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({ h5adPath, data, onCellSelection }) 
   const [opacity, setOpacity] = useState<number>(0.7);
 
   // Get available embeddings (prioritize UMAP)
-  const availableEmbeddings = data.summary_stats.embeddings_available;
-  const currentEmbedding = availableEmbeddings.includes('umap') ? 'umap' : availableEmbeddings[0];
-  const coordinates = data.embeddings[currentEmbedding];
+  const availableEmbeddings = data.summary_stats?.embeddings_available || [];
+  const currentEmbedding = availableEmbeddings.includes('umap') ? 'umap' : availableEmbeddings[0] || 'umap';
+  const coordinates = data.embeddings?.[currentEmbedding];
 
   if (!coordinates) {
     return (

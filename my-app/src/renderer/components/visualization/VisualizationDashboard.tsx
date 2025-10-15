@@ -19,6 +19,7 @@ import {
   MenuItem,
   InputLabel,
   SelectChangeEvent,
+  Chip,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -28,6 +29,7 @@ import MarkerGenesHeatmap from './MarkerGenesHeatmap';
 import QCViolin from './QCViolin';
 import AnnotationResults from './AnnotationResults';
 import ClusterAnnotationTable from './ClusterAnnotationTable';
+import InteractiveImageViewer from './InteractiveImageViewer';
 
 interface VisualizationDashboardProps {
   h5adPath?: string;
@@ -77,6 +79,7 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
   const [analysisFiles, setAnalysisFiles] = useState<AnalysisFile[]>([]);
   const [annotationDetails, setAnnotationDetails] = useState<AnnotationDetail[]>([]);
   const [analysisLoading, setAnalysisLoading] = useState<boolean>(false);
+  const [currentAnalysisType, setCurrentAnalysisType] = useState<'annotation' | 'cellphonedb' | 'infercnv'>('annotation');
 
   // Load available datasets
   const loadAvailableDatasets = async () => {
@@ -87,9 +90,14 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
       // Auto-select the first dataset if none selected and no initial path
       if (!selectedDataset && response.datasets.length > 0) {
         setSelectedDataset(response.datasets[0].path);
+        setCurrentAnalysisType(response.datasets[0].analysis_type);
       }
+
+      // Return the datasets so callers can use them immediately
+      return response.datasets;
     } catch (err) {
       console.error('Error loading available datasets:', err);
+      return [];
     }
   };
 
@@ -143,19 +151,52 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
       return;
     }
 
+    // Determine analysis type from the dataset path if not already set
+    let analysisType = currentAnalysisType;
+    const datasetInfo = availableDatasets.find(d => d.path === pathToUse);
+    if (datasetInfo) {
+      analysisType = datasetInfo.analysis_type;
+      if (analysisType !== currentAnalysisType) {
+        console.log('[VisualizationDashboard] Correcting analysis type from', currentAnalysisType, 'to', analysisType);
+        setCurrentAnalysisType(analysisType);
+      }
+    }
+
     setLoading(true);
     setError(null);
 
     try {
-      console.log('Loading visualization data for:', pathToUse);
-      const vizData = await api.getVisualizationData(pathToUse);
-      console.log('Loaded visualization data:', vizData);
-      setData(vizData);
+      console.log('[VisualizationDashboard] Loading visualization data for:', {
+        path: pathToUse,
+        analysisType
+      });
 
-      // Also load analysis results
-      await loadAnalysisResults(pathToUse);
+      if (analysisType === 'cellphonedb' || analysisType === 'infercnv') {
+        // For CellPhoneDB and InferCNV, we don't need UMAP/clustering data, just analysis files
+        // Set a mock data object to enable the UI but skip visualization data loading
+        setData({
+          embeddings: {},
+          clusters: {},
+          cell_types: {},
+          qc_metrics: {},
+          available_genes: [],
+          summary_stats: { n_cells: 0, n_genes: 0, n_clusters: 0, embeddings_available: [], cell_types_available: [], qc_metrics_available: [] },
+          cell_ids: []
+        });
+
+        // Load analysis files only
+        await loadAnalysisResults(pathToUse);
+      } else {
+        // For annotation datasets, load full visualization data
+        const vizData = await api.getVisualizationData(pathToUse);
+        console.log('[VisualizationDashboard] Loaded visualization data:', vizData);
+        setData(vizData);
+
+        // Also load analysis results
+        await loadAnalysisResults(pathToUse);
+      }
     } catch (err) {
-      console.error('Error loading visualization data:', err);
+      console.error('[VisualizationDashboard] Error loading visualization data:', err);
       setError(err instanceof Error ? err.message : 'Failed to load visualization data');
     } finally {
       setLoading(false);
@@ -170,20 +211,90 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
   // Only auto-load when component first mounts with initial path
   useEffect(() => {
     if (initialH5adPath && autoLoad) {
-      loadVisualizationData(initialH5adPath);
+      console.log('[VisualizationDashboard] Initial autoload for path:', initialH5adPath);
+
+      // IMPORTANT: Wait for datasets to load first so we can determine analysis type
+      loadAvailableDatasets().then((datasets) => {
+        // Use the returned datasets directly (not stale state)
+        const datasetInfo = datasets.find(d => d.path === initialH5adPath);
+        if (datasetInfo) {
+          console.log('[VisualizationDashboard] Found dataset info on initial load:', datasetInfo.analysis_type);
+          setCurrentAnalysisType(datasetInfo.analysis_type);
+          setSelectedDataset(initialH5adPath);
+        } else {
+          console.warn('[VisualizationDashboard] Could not find dataset info for:', initialH5adPath);
+        }
+
+        // Give React a tick to update state, then load
+        setTimeout(() => {
+          loadVisualizationData(initialH5adPath);
+        }, 50);
+      });
     }
   }, []);
+
+  // Refresh datasets when initialH5adPath changes (new analysis completed)
+  useEffect(() => {
+    if (initialH5adPath) {
+      console.log('[VisualizationDashboard] initialH5adPath changed, refreshing datasets:', initialH5adPath);
+
+      // Refresh the dataset list first, then load the specific dataset
+      loadAvailableDatasets().then((datasets) => {
+        // Auto-select the new dataset if it exists
+        setSelectedDataset(initialH5adPath);
+
+        // Find and set the analysis type for this dataset using returned data
+        const datasetInfo = datasets.find(d => d.path === initialH5adPath);
+        if (datasetInfo) {
+          console.log('[VisualizationDashboard] Setting analysis type for redirected dataset:', datasetInfo.analysis_type);
+          setCurrentAnalysisType(datasetInfo.analysis_type);
+        } else {
+          console.warn('[VisualizationDashboard] Could not find dataset info for redirect:', initialH5adPath);
+        }
+
+        // Give React a tick to update state, then load
+        setTimeout(() => {
+          loadVisualizationData(initialH5adPath);
+        }, 50);
+      });
+    }
+  }, [initialH5adPath]);
 
   // Handle dataset selection
   const handleDatasetChange = (event: SelectChangeEvent) => {
     const newDataset = event.target.value;
-    setSelectedDataset(newDataset);
-    setData(null); // Clear current data
+
+    // Find the analysis type for the selected dataset FIRST
+    const selectedDatasetInfo = availableDatasets.find(d => d.path === newDataset);
+
+    console.log('[VisualizationDashboard] Dataset changed:', {
+      newDataset,
+      analysisType: selectedDatasetInfo?.analysis_type,
+      datasetInfo: selectedDatasetInfo
+    });
+
+    // Clear ALL state synchronously BEFORE setting new values
+    setData(null);
     setSelectedCells([]);
     setAnalysisFiles([]);
     setAnnotationDetails([]);
+    setActiveTab(0);
+    setError(null);
+
+    // Set analysis type BEFORE loading data
+    if (selectedDatasetInfo) {
+      setCurrentAnalysisType(selectedDatasetInfo.analysis_type);
+      console.log('[VisualizationDashboard] Analysis type set to:', selectedDatasetInfo.analysis_type);
+    }
+
+    // Now set the selected dataset and load
+    setSelectedDataset(newDataset);
+
     if (newDataset) {
-      loadVisualizationData(newDataset);
+      // Use setTimeout to ensure state updates have propagated
+      setTimeout(() => {
+        loadVisualizationData(newDataset);
+      }, 0);
     }
   };
 
@@ -267,10 +378,18 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
               >
                 {availableDatasets.map((dataset) => (
                   <MenuItem key={dataset.path} value={dataset.path}>
-                    <Box>
-                      <Typography variant="body2" fontWeight="bold">
-                        {dataset.name}
-                      </Typography>
+                    <Box sx={{ width: '100%' }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography variant="body2" fontWeight="bold">
+                          {dataset.name}
+                        </Typography>
+                        <Chip
+                          label={dataset.analysis_type}
+                          size="small"
+                          color={dataset.analysis_type === 'cellphonedb' ? 'secondary' : 'primary'}
+                          sx={{ ml: 1 }}
+                        />
+                      </Stack>
                       <Typography variant="caption" color="text.secondary">
                         {dataset.directory} • {dataset.date} • {dataset.size_mb} MB
                       </Typography>
@@ -322,62 +441,140 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
         {/* Tabs */}
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs value={activeTab} onChange={handleTabChange} aria-label="visualization tabs">
-            <Tab label="UMAP Embedding" {...a11yProps(0)} />
-            <Tab label="Marker Genes" {...a11yProps(1)} />
-            <Tab label="QC Metrics" {...a11yProps(2)} />
-            <Tab label="Analysis Results" {...a11yProps(3)} />
+            {currentAnalysisType === 'annotation' ? [
+              <Tab key="umap" label="UMAP Embedding" {...a11yProps(0)} />,
+              <Tab key="marker" label="Marker Genes" {...a11yProps(1)} />,
+              <Tab key="qc" label="QC Metrics" {...a11yProps(2)} />,
+              <Tab key="results" label="Analysis Results" {...a11yProps(3)} />
+            ] : currentAnalysisType === 'infercnv' ? [
+              <Tab key="cnv-score" label="CNV Score UMAP" {...a11yProps(0)} />,
+              <Tab key="tumor-status" label="Tumor Status" {...a11yProps(1)} />,
+              <Tab key="drug-response" label="Drug Response" {...a11yProps(2)} />
+            ] : [
+              <Tab key="heatmaps" label="Interaction Heatmaps" {...a11yProps(0)} />,
+              <Tab key="dotplots" label="Cell-Type Dotplots" {...a11yProps(1)} />,
+              <Tab key="networks" label="Network Plots" {...a11yProps(2)} />
+            ]}
           </Tabs>
         </Box>
 
         {/* Tab Panels */}
         {data ? (
           <>
-            <TabPanel value={activeTab} index={0}>
-              <UMAPPlot
-                h5adPath={selectedDataset}
-                data={data}
-                onCellSelection={handleCellSelection}
-              />
-            </TabPanel>
+            {currentAnalysisType === 'annotation' ? (
+              // Annotation Tab Panels
+              <>
+                <TabPanel value={activeTab} index={0}>
+                  <UMAPPlot
+                    h5adPath={selectedDataset}
+                    data={data}
+                    onCellSelection={handleCellSelection}
+                  />
+                </TabPanel>
 
-            <TabPanel value={activeTab} index={1}>
-              <MarkerGenesHeatmap
-                h5adPath={selectedDataset}
-                data={data}
-                selectedCells={selectedCells}
-              />
-            </TabPanel>
+                <TabPanel value={activeTab} index={1}>
+                  <MarkerGenesHeatmap
+                    h5adPath={selectedDataset}
+                    data={data}
+                    selectedCells={selectedCells}
+                  />
+                </TabPanel>
 
-            <TabPanel value={activeTab} index={2}>
-              <QCViolin
-                data={data}
-                selectedCells={selectedCells}
-              />
-            </TabPanel>
+                <TabPanel value={activeTab} index={2}>
+                  <QCViolin
+                    data={data}
+                    selectedCells={selectedCells}
+                  />
+                </TabPanel>
 
-            <TabPanel value={activeTab} index={3}>
-              {analysisLoading ? (
-                <Box display="flex" justifyContent="center" alignItems="center" minHeight={300}>
-                  <Stack alignItems="center" spacing={2}>
-                    <CircularProgress />
-                    <Typography>Loading analysis results...</Typography>
-                  </Stack>
-                </Box>
-              ) : (
-                <Stack spacing={4}>
-                  {/* Annotation Results Images */}
-                  <AnnotationResults analysisFiles={analysisFiles} />
+                <TabPanel value={activeTab} index={3}>
+                  {analysisLoading ? (
+                    <Box display="flex" justifyContent="center" alignItems="center" minHeight={300}>
+                      <Stack alignItems="center" spacing={2}>
+                        <CircularProgress />
+                        <Typography>Loading analysis results...</Typography>
+                      </Stack>
+                    </Box>
+                  ) : (
+                    <Stack spacing={4}>
+                      {/* Annotation Results Images */}
+                      <AnnotationResults analysisFiles={analysisFiles} />
 
-                  {/* Cluster Annotation Details Table */}
-                  {annotationDetails.length > 0 && (
-                    <ClusterAnnotationTable
-                      annotations={annotationDetails}
-                      title="Cluster-to-Cell Type Annotations"
-                    />
+                      {/* Cluster Annotation Details Table */}
+                      {annotationDetails.length > 0 && (
+                        <ClusterAnnotationTable
+                          annotations={annotationDetails}
+                          title="Cluster-to-Cell Type Annotations"
+                        />
+                      )}
+                    </Stack>
                   )}
-                </Stack>
-              )}
-            </TabPanel>
+                </TabPanel>
+              </>
+            ) : currentAnalysisType === 'infercnv' ? (
+              // InferCNV Tab Panels
+              <>
+                <TabPanel value={activeTab} index={0}>
+                  <InteractiveImageViewer
+                    images={analysisFiles.filter(file =>
+                      file.name.includes('cnv_umap') && !file.name.includes('status')
+                    )}
+                    title="CNV Score UMAP"
+                    category="cnv-score"
+                  />
+                </TabPanel>
+
+                <TabPanel value={activeTab} index={1}>
+                  <InteractiveImageViewer
+                    images={analysisFiles.filter(file =>
+                      file.name.includes('cnv_umap_status') || file.name.includes('tumor_umap')
+                    )}
+                    title="Tumor Status Visualization"
+                    category="tumor-status"
+                  />
+                </TabPanel>
+
+                <TabPanel value={activeTab} index={2}>
+                  <InteractiveImageViewer
+                    images={analysisFiles.filter(file =>
+                      file.name.includes('drug') ||
+                      file.name.includes('IC50') ||
+                      file.name.includes('GDSC') ||
+                      file.name.includes('death')
+                    )}
+                    title="Drug Response Predictions"
+                    category="drug-response"
+                  />
+                </TabPanel>
+              </>
+            ) : (
+              // CellPhoneDB Tab Panels
+              <>
+                <TabPanel value={activeTab} index={0}>
+                  <InteractiveImageViewer
+                    images={analysisFiles.filter(file => file.type === 'heatmap')}
+                    title="Interaction Heatmaps"
+                    category="heatmap"
+                  />
+                </TabPanel>
+
+                <TabPanel value={activeTab} index={1}>
+                  <InteractiveImageViewer
+                    images={analysisFiles.filter(file => file.type === 'dotplot')}
+                    title="Cell-Type Specific Dotplots"
+                    category="dotplot"
+                  />
+                </TabPanel>
+
+                <TabPanel value={activeTab} index={2}>
+                  <InteractiveImageViewer
+                    images={analysisFiles.filter(file => file.type === 'network_plot')}
+                    title="Network Visualizations"
+                    category="network"
+                  />
+                </TabPanel>
+              </>
+            )}
           </>
         ) : (
           <Card>

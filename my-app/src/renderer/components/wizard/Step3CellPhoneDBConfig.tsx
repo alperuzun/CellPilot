@@ -112,14 +112,41 @@ export default function Step3CellPhoneDBConfig({ uploadData, onComplete, onBack,
           }));
 
           if (status.status === 'completed') {
-            setIsRunning(false);
-            clearInterval(pollInterval);
-            onComplete({
-              ...config,
-              status: 'completed',
-              progress: 1.0,
-              outputPath: status.result?.output_path,
-            });
+            // Fetch the actual dataset list from backend to get the real path
+            try {
+              const datasetsResponse = await api.getAvailableDatasets();
+              console.log('[Step3CellPhoneDBConfig] Available datasets after completion:', datasetsResponse.datasets);
+
+              // Find the CellPhoneDB dataset that matches our analysis
+              // Look for the most recent cellphonedb dataset
+              const cpdbDatasets = datasetsResponse.datasets
+                .filter(d => d.analysis_type === 'cellphonedb')
+                .sort((a, b) => b.date.localeCompare(a.date)); // Sort by date descending
+
+              const realDatasetPath = cpdbDatasets.length > 0 ? cpdbDatasets[0].path : '';
+
+              console.log('[Step3CellPhoneDBConfig] Using real dataset path:', realDatasetPath);
+
+              setIsRunning(false);
+              clearInterval(pollInterval);
+              onComplete({
+                ...config,
+                status: 'completed',
+                progress: 1.0,
+                outputPath: realDatasetPath,
+              });
+            } catch (error) {
+              console.error('[Step3CellPhoneDBConfig] Error fetching datasets:', error);
+              // Fallback to old behavior
+              setIsRunning(false);
+              clearInterval(pollInterval);
+              onComplete({
+                ...config,
+                status: 'completed',
+                progress: 1.0,
+                outputPath: status.result?.outputPath,
+              });
+            }
           } else if (status.status === 'failed') {
             setIsRunning(false);
             clearInterval(pollInterval);
@@ -147,7 +174,7 @@ export default function Step3CellPhoneDBConfig({ uploadData, onComplete, onBack,
       const response = await api.startAnalysis({
         name: uploadData.datasetName,
         input_path: uploadData.filePath,
-        output_dir: `/Users/colinpascual/SingleCell/output/${uploadData.datasetName}`,
+        output_dir: `/Users/colinpascual/SingleCell/output/cpdb_${uploadData.datasetName}`,
         qc_params: {},
         analysis_params: {
           runCellPhone: true,

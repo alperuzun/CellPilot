@@ -9,7 +9,7 @@ from datetime import datetime
 import infercnvpy as cnv
 import platform, multiprocessing as mp
 import sys, pathlib
-from .utils import summarize_h5ad
+from .utils import summarize_h5ad, validate_file_exists, validate_directory_exists
 # macOS: avoid "The process has fork … YOU MUST exec()" spam
 if platform.system() == "Darwin":
     import os, sys
@@ -87,16 +87,23 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
     # Run CellPhoneDB analysis
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
     print("Running CellPhoneDB statistical analysis...")
-    print(f"Using CellPhoneDB file path: {cpdb_file_path}")
-    print(f"File exists: {os.path.exists(cpdb_file_path)}")
-    #make cpdb_path an absolute path, it's passed in as a relative 'db/cellphonedb.zip'
+
+    # Validate CellPhoneDB database exists
+    validate_file_exists(
+        cpdb_file_path,
+        description="CellPhoneDB Database",
+        instructions=(
+            "1. Download the CellPhoneDB database from:\n"
+            "   https://github.com/ventolab/CellphoneDB-data\n"
+            "2. Place cellphonedb.zip in the 'db/' directory at the project root\n"
+            "3. Ensure the file is named 'cellphonedb.zip'"
+        )
+    )
+
+    # Convert to absolute path if needed (validate_file_exists handles this internally)
     if not os.path.isabs(cpdb_file_path):
-        # Convert relative path to absolute path from project root (one level up from backend)
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cpdb_file_path = os.path.join(backend_dir, cpdb_file_path)
-    print(f"Resolved CellPhoneDB file path: {cpdb_file_path}")
-    if not os.path.exists(cpdb_file_path):
-        raise FileNotFoundError(f"CellPhoneDB file not found at {cpdb_file_path}")
     try:
         cpdb_results = cpdb_statistical_analysis_method.call(
             cpdb_file_path=cpdb_file_path,
@@ -108,7 +115,7 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
             score_interactions=True,
             iterations=1000,
             threshold=0.1,
-            threads=10,
+            threads=4,  # Reduced from 10 to avoid broken pipe errors in FastAPI async context
             debug_seed=42,
             result_precision=3,
             pvalue=0.05,
@@ -220,6 +227,12 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
     except Exception as e:
         print(f"Error generating detailed network plot: {str(e)}")
     
+    # Save the original input h5ad file to output directory for dataset discovery
+    output_h5ad_path = os.path.join(output_dir, f'{name}_cellphonedb.h5ad')
+    adata.write_h5ad(output_h5ad_path, compression='gzip')
+    data['output_h5ad_path'] = output_h5ad_path
+    print(f"CellPhoneDB h5ad saved to {output_h5ad_path}")
+
     print(f"CellPhoneDB analysis for {name} completed successfully!")
     data['timestamp'] = timestamp
     return data
@@ -231,6 +244,20 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
     if reference_cat == "": reference_cat = None
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+
+    # Validate GTF file exists
+    validate_file_exists(
+        gtf_path,
+        description="Gene Annotation GTF File",
+        instructions=(
+            "1. Download the GENCODE gene annotation file from:\n"
+            "   https://www.gencodegenes.org/human/\n"
+            "2. For human: Download 'Comprehensive gene annotation' GTF file\n"
+            "3. Place the file in the 'db/' directory as 'gencode.v47.annotation.gtf.gz'\n"
+            "   (or update the gtf_path parameter to point to your GTF file)"
+        )
+    )
+
     adata = sc.read_h5ad(input_file)
     ov.utils.get_gene_annotation(
         adata, gtf=gtf_path,
@@ -294,17 +321,45 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
     sc.tl.pca(adata, svd_solver='arpack')
     sc.pp.neighbors(adata, n_pcs=20)
     sc.tl.umap(adata)
-    ov.utils.download_GDSC_data()
-    ov.utils.download_CaDRReS_model()
-    print('at running')
-    adata, res,plot_df = ov.single.autoResolution(adata,cpus=cores)
-    job=ov.single.Drug_Response(adata,scriptpath='CaDRReS-Sc',
-                                    modelpath='models/',
-                                    output=output_dir)
-    data['adata'] = summarize_h5ad(adata=adata)
-    for file in os.listdir(output_dir):
-        if file in ['IC50_prediction.csv','drug_kill_prediction.csv', 'predicted cell death.png', 'GDSC prediction.png']:
-            data['files'].append((os.path.join(output_dir, file), 'Drug Response'))
+    # Drug response prediction - make optional to avoid module import errors
+    try:
+        # Validate CaDRReS-Sc and models directories exist
+        validate_directory_exists(
+            'CaDRReS-Sc',
+            description="CaDRReS-Sc Script Directory",
+            instructions=(
+                "1. Clone the CaDRReS-Sc repository:\n"
+                "   git clone https://github.com/CSB-IG/CaDRReS-Sc.git\n"
+                "2. Ensure the CaDRReS-Sc/ directory is at the project root\n"
+                "3. The directory should contain the drug response prediction scripts"
+            )
+        )
+        validate_directory_exists(
+            'models',
+            description="Drug Response Models Directory",
+            instructions=(
+                "1. Create a 'models/' directory at the project root:\n"
+                "   mkdir models\n"
+                "2. The download_CaDRReS_model() function will populate it automatically\n"
+                "3. If download fails, manually download models from CaDRReS-Sc repository"
+            )
+        )
+
+        ov.utils.download_GDSC_data()
+        ov.utils.download_CaDRReS_model()
+        print('Running drug response prediction...')
+        adata, res, plot_df = ov.single.autoResolution(adata, cpus=cores)
+        job = ov.single.Drug_Response(adata, scriptpath='CaDRReS-Sc',
+                                      modelpath='models/',
+                                      output=output_dir)
+        data['adata'] = summarize_h5ad(adata=adata)
+        for file in os.listdir(output_dir):
+            if file in ['IC50_prediction.csv', 'drug_kill_prediction.csv', 'predicted cell death.png', 'GDSC prediction.png']:
+                data['files'].append((os.path.join(output_dir, file), 'Drug Response'))
+    except Exception as e:
+        print(f"Drug response prediction failed (optional): {e}")
+        # Continue without drug response - still return CNV results
+        data['adata'] = summarize_h5ad(adata=adata) if 'adata' in locals() else {}
     cluster_key = "louvain"  # use pre-computed clusters
     if cluster_key not in adata.obs.columns:
         raise ValueError(

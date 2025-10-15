@@ -15,7 +15,7 @@ import sys
 import os
 import numpy as np
 import omicverse as ov
-from .utils import summarize_h5ad
+from .utils import summarize_h5ad, validate_file_exists
 print(f'omicverse version: {ov.__version__}')
 print(f'scanpy version: {sc.__version__}')
 
@@ -251,6 +251,20 @@ def annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarke
     import os
     script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     db_path = os.path.join(script_dir, 'db', 'pySCSA_2024_v1_plus.db')
+
+    # Validate pySCSA database exists
+    validate_file_exists(
+        db_path,
+        description="pySCSA Cell Annotation Database",
+        instructions=(
+            "1. Download the pySCSA database file:\n"
+            "   - Visit: https://github.com/Starlitnightly/omicverse\n"
+            "   - Or download directly from OmicVerse resources\n"
+            "2. Place 'pySCSA_2024_v1_plus.db' in the 'db/' directory at the project root\n"
+            "3. This database is required for automated cell type annotation"
+        )
+    )
+
     print(f"Using pySCSA database at: {db_path}")
 
     scsa=ov.single.pySCSA(adata=adata,

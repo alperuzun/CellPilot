@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any, Dict, List, Union
+import os
 
 import anndata as ad
 import pandas as pd
@@ -63,7 +64,82 @@ def summarize_h5ad(path: Union[str, Path] = None, adata: ad.AnnData = None) -> D
     finally:
         if hasattr(A, "file") and A.file is not None:
             A.file.close()
-    
+
+
+def validate_file_exists(file_path: str, description: str = "File", instructions: str = "") -> None:
+    """
+    Validate that a required file exists, raising a clear error if not.
+
+    Parameters:
+    -----------
+    file_path : str
+        Path to the file to validate
+    description : str
+        Human-readable description of the file (e.g., "CellPhoneDB database")
+    instructions : str
+        Instructions on how to obtain the file if missing
+
+    Raises:
+    -------
+    FileNotFoundError
+        If the file does not exist, with a helpful error message
+    """
+    # Convert to absolute path if relative
+    if not os.path.isabs(file_path):
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        file_path = os.path.join(script_dir, file_path)
+
+    if not os.path.exists(file_path):
+        error_msg = f"\n{'='*80}\n"
+        error_msg += f"❌ MISSING REQUIRED FILE: {description}\n"
+        error_msg += f"{'='*80}\n"
+        error_msg += f"Expected location: {file_path}\n\n"
+        if instructions:
+            error_msg += f"How to fix:\n{instructions}\n"
+        error_msg += f"{'='*80}\n"
+        raise FileNotFoundError(error_msg)
+
+    print(f"✅ Found required file: {description} at {file_path}")
+
+
+def validate_directory_exists(dir_path: str, description: str = "Directory", instructions: str = "") -> None:
+    """
+    Validate that a required directory exists, raising a clear error if not.
+
+    Parameters:
+    -----------
+    dir_path : str
+        Path to the directory to validate
+    description : str
+        Human-readable description of the directory
+    instructions : str
+        Instructions on how to obtain/create the directory if missing
+
+    Raises:
+    -------
+    NotADirectoryError
+        If the directory does not exist, with a helpful error message
+    """
+    # Convert to absolute path if relative
+    if not os.path.isabs(dir_path):
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        dir_path = os.path.join(script_dir, dir_path)
+
+    if not os.path.exists(dir_path):
+        error_msg = f"\n{'='*80}\n"
+        error_msg += f"❌ MISSING REQUIRED DIRECTORY: {description}\n"
+        error_msg += f"{'='*80}\n"
+        error_msg += f"Expected location: {dir_path}\n\n"
+        if instructions:
+            error_msg += f"How to fix:\n{instructions}\n"
+        error_msg += f"{'='*80}\n"
+        raise NotADirectoryError(error_msg)
+
+    if not os.path.isdir(dir_path):
+        raise NotADirectoryError(f"{dir_path} exists but is not a directory")
+
+    print(f"✅ Found required directory: {description} at {dir_path}")
+
 
 if __name__ == "__main__":
     print(summarize_h5ad("/Users/colinpascual/Downloads/sample.h5"))

@@ -98,11 +98,13 @@ async def cellphonedb_api(params: CellPhoneDBParams):
             params.name,                # run name / prefix
             params.counts_min,           # counts_min (now properly in the model)
         )
+        # Use the h5ad output path for visualization
+        output_path = data.get('output_h5ad_path', params.output_dir)
         return Response(
             name=params.name,
             type="cellphonedb",
             input_path=params.input_path,
-            output_dir=params.output_dir,
+            output_dir=output_path,
             data=data,
                 timestamp=data['timestamp']
             )
@@ -156,9 +158,26 @@ async def get_analysis_files(h5ad_path: str):
         if not h5ad_file.exists():
             raise HTTPException(status_code=404, detail=f"Dataset file not found: {h5ad_path}")
 
-        # Look for analysis outputs in the same directory as the H5AD file
+        # Determine if this is a directory (inferCNV) or file (annotation/cellphonedb)
+        is_directory = h5ad_file.is_dir()
+
+        # Look for analysis outputs in the appropriate directories
         analysis_files = []
-        search_dirs = [h5ad_file.parent]
+        if is_directory:
+            # InferCNV case: h5ad_path is a directory, search only in that directory (non-recursive)
+            search_dirs = [h5ad_file]
+        else:
+            # Annotation/CellPhoneDB case: h5ad_path is a file
+            search_dirs = [h5ad_file.parent]
+
+            # Add companion CellPhoneDB directory if it exists
+            base_dir_name = h5ad_file.parent.name
+            output_parent = h5ad_file.parent.parent
+            cellphonedb_dir_name = f"{base_dir_name}_cellphonedb"
+            cellphonedb_dir = output_parent / cellphonedb_dir_name
+
+            if cellphonedb_dir.exists() and cellphonedb_dir.is_dir():
+                search_dirs.append(cellphonedb_dir)
 
         def classify_file_type(file_path: Path) -> str:
             """Classify file type based on name and extension"""
@@ -173,7 +192,7 @@ async def get_analysis_files(h5ad_path: str):
                 return None
 
             # Classify by content/filename patterns
-            if name_lower.startswith('dotplot_'):
+            if 'dotplot' in name_lower:
                 return 'dotplot'
             elif 'annotation_details' in name_lower:
                 return 'annotation_details'
@@ -204,7 +223,10 @@ async def get_analysis_files(h5ad_path: str):
         for search_dir in search_dirs:
             if search_dir.exists():
                 for ext_pattern in file_extensions:
-                    for file_path in search_dir.rglob(ext_pattern):
+                    # Use glob() for non-recursive search (inferCNV directories)
+                    # Use rglob() for recursive search (annotation/cellphonedb with subfolders)
+                    search_method = search_dir.glob if is_directory else search_dir.rglob
+                    for file_path in search_method(ext_pattern):
                         file_type = classify_file_type(file_path)
                         if file_type:  # Only include if type is recognized
                             analysis_files.append({
@@ -377,14 +399,17 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
         if request.analysis_params.get('runInferCNV', False):
             job_manager.update_job(job_id, progress=0.8, current_step="Running tumor prediction and drug response...")
 
+            # Extract InferCNV parameters from the request
+            infercnv_user_params = request.analysis_params.get('inferCNVParams', {})
+
             infercnv_params = InferCNVParams(
                 input_path=processed_path,
                 name=request.name,
                 output_dir=str(output_dir),
-                reference_key="cell_type",
-                gtf_path="db/gencode.v47.annotation.gtf.gz",
-                reference_cat=["T cell", "B cell"],  # Default reference cell types
-                cnv_threshold=0.1
+                reference_key=infercnv_user_params.get('reference_key'),
+                gtf_path=infercnv_user_params.get('gtf_path', 'db/gencode.v47.annotation.gtf.gz'),
+                reference_cat=infercnv_user_params.get('reference_cat'),
+                cnv_threshold=infercnv_user_params.get('cnv_threshold', 0.03)
             )
 
             infercnv_result = await run_in_threadpool(
@@ -398,6 +423,21 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
                 infercnv_params.cnv_threshold
             )
             results['infercnv'] = infercnv_result
+
+        # Determine the output path for frontend navigation
+        # Priority: InferCNV directory > CellPhoneDB h5ad > annotation output > original path
+        output_path = processed_path
+        if 'infercnv' in results:
+            # For InferCNV, use the output directory as the path
+            output_path = str(output_dir)
+        elif 'cellphonedb' in results and results['cellphonedb'].get('output_h5ad_path'):
+            output_path = results['cellphonedb']['output_h5ad_path']
+        elif 'annotation' in results:
+            outputs = results['annotation'][0] if results['annotation'] else {}
+            output_path = outputs.get('data', {}).get('adata_output_file', output_path)
+
+        # Add outputPath to results for frontend navigation
+        results['outputPath'] = output_path
 
         # Complete the job
         job_manager.complete_job(job_id, results)
@@ -515,28 +555,69 @@ async def get_celltype_markers(h5ad_path: str, cluster_column: str = "cellmarker
 
 @app.get("/available_datasets")
 async def get_available_datasets():
-    """Get list of available h5ad datasets for visualization"""
+    """Get list of available analysis output directories for visualization"""
     try:
         from datetime import datetime
 
-        # Look for h5ad files in output directory
+        # Look for analysis directories in output directory
         script_dir = Path(__file__).parent.parent.parent  # Go up to SingleCell directory
         output_dir = script_dir / "output"
         datasets = []
 
+        def detect_analysis_type(dir_name: str) -> str:
+            """Detect analysis type based on directory name prefixes"""
+            if dir_name.startswith('cpdb_'):
+                return 'cellphonedb'
+            elif dir_name.startswith('annotation_'):
+                return 'annotation'
+            elif dir_name.startswith('infercnv_'):
+                return 'infercnv'
+            else:
+                return None
+
         if output_dir.exists():
-            for h5ad_file in output_dir.rglob("*.h5ad"):
-                # Skip temporary files
-                if "temp" in str(h5ad_file) or "norm_log" in str(h5ad_file):
+            for analysis_dir in output_dir.iterdir():
+                # Only process directories
+                if not analysis_dir.is_dir():
                     continue
 
-                stat = h5ad_file.stat()
+                # Skip temp/hidden directories
+                if analysis_dir.name.startswith('.') or analysis_dir.name == 'temp':
+                    continue
+
+                analysis_type = detect_analysis_type(analysis_dir.name)
+
+                # Skip directories without our prefixes
+                if analysis_type is None:
+                    continue
+
+                # For annotation and cellphonedb, look for h5ad file
+                # For infercnv, use the directory itself since it may not have h5ad
+                h5ad_path = None
+                if analysis_type in ['annotation', 'cellphonedb']:
+                    # Find h5ad file in directory
+                    h5ad_files = list(analysis_dir.glob("*.h5ad"))
+                    # Filter out temp files
+                    h5ad_files = [f for f in h5ad_files if "temp" not in str(f) and "norm_log" not in str(f)]
+                    if h5ad_files:
+                        h5ad_path = str(h5ad_files[0].absolute())
+                else:  # infercnv
+                    # Use directory path as identifier
+                    h5ad_path = str(analysis_dir.absolute())
+
+                # Skip if we couldn't find a valid path
+                if not h5ad_path:
+                    continue
+
+                stat = analysis_dir.stat()
+
                 datasets.append({
-                    "path": str(h5ad_file.absolute()),
-                    "name": h5ad_file.stem,
+                    "path": h5ad_path,
+                    "name": analysis_dir.name,
                     "date": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-                    "size_mb": round(stat.st_size / (1024 * 1024), 1),
-                    "directory": h5ad_file.parent.name
+                    "size_mb": round(sum(f.stat().st_size for f in analysis_dir.rglob("*") if f.is_file()) / (1024 * 1024), 1),
+                    "directory": analysis_dir.name,
+                    "analysis_type": analysis_type
                 })
 
         # Sort by modification time (newest first)

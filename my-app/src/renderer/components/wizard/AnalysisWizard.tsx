@@ -33,7 +33,7 @@ export default function AnalysisWizard({ onAnalysisComplete }: AnalysisWizardPro
 
   const handleCellPhoneDBComplete = (data: CellPhoneDBAnalysisData) => {
     setCellPhoneDBData(data);
-    setActiveStep(2);
+    // Don't set activeStep to 2 for CellPhoneDB - redirect to main visualization instead
     if (data.outputPath && onAnalysisComplete) {
       onAnalysisComplete(data.outputPath);
     }

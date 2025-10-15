@@ -26,9 +26,9 @@ export interface InferCNVAnalysisData {
 
 export default function Step3InferCNVConfig({ uploadData, onComplete, onBack, analysisData }: Step3InferCNVProps) {
   const [config, setConfig] = useState<InferCNVAnalysisData>({
-    referenceKey: analysisData?.referenceKey || '',
+    referenceKey: analysisData?.referenceKey || 'leiden',
     referenceCat: analysisData?.referenceCat || [],
-    gtfPath: analysisData?.gtfPath || 'db/gencode.v47.annotation.gtf.gz',
+    gtfPath: analysisData?.gtfPath || '/Users/colinpascual/SingleCell/backend/db/gencode.v47.annotation.gtf.gz',
     cnvThreshold: analysisData?.cnvThreshold || 0.03,
     cores: analysisData?.cores || 4,
 
@@ -114,14 +114,41 @@ export default function Step3InferCNVConfig({ uploadData, onComplete, onBack, an
           }));
 
           if (status.status === 'completed') {
-            setIsRunning(false);
-            clearInterval(pollInterval);
-            onComplete({
-              ...config,
-              status: 'completed',
-              progress: 1.0,
-              outputPath: status.result?.output_path,
-            });
+            // Fetch the actual dataset list from backend to get the real path
+            try {
+              const datasetsResponse = await api.getAvailableDatasets();
+              console.log('[Step3InferCNVConfig] Available datasets after completion:', datasetsResponse.datasets);
+
+              // Find the InferCNV dataset that matches our analysis
+              // Look for the most recent infercnv dataset
+              const infercnvDatasets = datasetsResponse.datasets
+                .filter(d => d.analysis_type === 'infercnv')
+                .sort((a, b) => b.date.localeCompare(a.date)); // Sort by date descending
+
+              const realDatasetPath = infercnvDatasets.length > 0 ? infercnvDatasets[0].path : '';
+
+              console.log('[Step3InferCNVConfig] Using real dataset path:', realDatasetPath);
+
+              setIsRunning(false);
+              clearInterval(pollInterval);
+              onComplete({
+                ...config,
+                status: 'completed',
+                progress: 1.0,
+                outputPath: realDatasetPath,
+              });
+            } catch (error) {
+              console.error('[Step3InferCNVConfig] Error fetching datasets:', error);
+              // Fallback to old behavior
+              setIsRunning(false);
+              clearInterval(pollInterval);
+              onComplete({
+                ...config,
+                status: 'completed',
+                progress: 1.0,
+                outputPath: status.result?.output_path,
+              });
+            }
           } else if (status.status === 'failed') {
             setIsRunning(false);
             clearInterval(pollInterval);
@@ -146,19 +173,25 @@ export default function Step3InferCNVConfig({ uploadData, onComplete, onBack, an
     setError(null);
 
     try {
-      const response = await api.runInferCNV({
-        input_path: uploadData.filePath,
+      const response = await api.startAnalysis({
         name: uploadData.datasetName,
-        output_dir: `/Users/colinpascual/SingleCell/output/${uploadData.datasetName}`,
-        reference_key: config.referenceKey || undefined,
-        gtf_path: config.gtfPath,
-        reference_cat: config.referenceCat.length > 0 ? config.referenceCat : undefined,
-        cnv_threshold: config.cnvThreshold,
+        input_path: uploadData.filePath,
+        output_dir: `/Users/colinpascual/SingleCell/output/infercnv_${uploadData.datasetName}`,
+        qc_params: {},
+        analysis_params: {
+          runInferCNV: true,
+          inferCNVParams: {
+            reference_key: config.referenceKey || undefined,
+            gtf_path: config.gtfPath,
+            reference_cat: config.referenceCat.length > 0 ? config.referenceCat : undefined,
+            cnv_threshold: config.cnvThreshold,
+          }
+        }
       });
 
       setConfig(prev => ({
         ...prev,
-        analysisId: response.name, // Assuming response has an ID
+        analysisId: response.job_id,
         status: 'running',
         progress: 0,
         currentStep: 'Starting InferCNV analysis...',

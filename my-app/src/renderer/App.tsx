@@ -27,8 +27,6 @@ export default function App() {
     { id: 'analysis', label: 'ANALYSIS', icon: '' },
     { id: 'visualizations', label: 'VISUALIZATIONS', icon: '' },
     { id: 'about', label: 'ABOUT', icon: '' },
-    { id: 'uploads', label: 'Uploads', icon: '' },
-    { id: 'outputs', label: 'Outputs', icon: '' },
   ];
 
   return (
@@ -42,14 +40,6 @@ export default function App() {
             className="w-8 h-8 object-contain"
           />
           <h1 className="text-xl font-semibold">CellPilot</h1>
-        </div>
-        <div className="flex space-x-3">
-          <button className="px-4 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg transition-colors text-sm">
-            UPLOAD FILE
-          </button>
-          <button className="px-4 py-2 bg-slate-600 hover:bg-slate-500 rounded-lg transition-colors text-sm">
-            DOCUMENTATION
-          </button>
         </div>
       </header>
 
@@ -107,15 +97,6 @@ export default function App() {
               </p>
             </div>
           )}
-          {activeSection === 'uploads' && (
-            <div className="p-8">
-              <h2 className="text-3xl font-bold text-gray-900 mb-4">Uploads</h2>
-              <p className="text-gray-600">
-                Manage your uploaded datasets and files here.
-              </p>
-            </div>
-          )}
-          {activeSection === 'outputs' && <OutputsPage />}
         </main>
       </div>
     </div>
