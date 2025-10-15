@@ -206,13 +206,13 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
 
     try {
       // Create output directory path
-      const outputDir = `output/annotation_${uploadData.datasetName}`;
+      const outputDir = `annotation_${uploadData.datasetName}`;
 
       // Start the analysis job
       const response = await api.startAnalysis({
         name: uploadData.datasetName,
         input_path: uploadData.filePath,
-        output_dir: `/Users/colinpascual/SingleCell/${outputDir}`,
+        dir_name: outputDir,
         qc_params: {
           // Map frontend parameters to backend parameter names
           mito_prefix: config.mitoPrefix,

@@ -63,7 +63,7 @@ async def annotate_api(params: AnnotationParams):
             annotate,
             params.name,
             params.input_path,
-            params.output_dir,
+            params.dir_name,
             params.preprocessed,
             params.preprocessing_params,
             params.use_cellmarker,
@@ -76,7 +76,7 @@ async def annotate_api(params: AnnotationParams):
             name=params.name,
             type="annotate",
             input_path=params.input_path,
-            output_dir=params.output_dir,
+            output_dir=params.dir_name,
             data=data['data'],
             timestamp=data['timestamp'],
             params=pre_params
@@ -88,10 +88,15 @@ async def annotate_api(params: AnnotationParams):
 @app.post("/cellphonedb")
 async def cellphonedb_api(params: CellPhoneDBParams):
     try:
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        project_root = os.path.dirname(script_dir)  # Get to SingleCell/
+        output_dir = os.path.join(project_root, 'output', params.dir_name)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = str(output_dir)
         data = await run_in_threadpool(
             run_cell_phone_db,
             params.input_path,          # input_file
-            params.output_dir,          # output_dir
+            output_dir,          # output_dir
             params.plot_column_names,   # plot_column_names
             params.column_name,         # column_name in obs
             params.cpdb_file_path,      # database zip
@@ -99,7 +104,7 @@ async def cellphonedb_api(params: CellPhoneDBParams):
             params.counts_min,           # counts_min (now properly in the model)
         )
         # Use the h5ad output path for visualization
-        output_path = data.get('output_h5ad_path', params.output_dir)
+        output_path = data.get('output_h5ad_path', output_dir)
         return Response(
             name=params.name,
             type="cellphonedb",
@@ -115,6 +120,11 @@ async def cellphonedb_api(params: CellPhoneDBParams):
 @app.post("/inferCNV")
 async def inferCNV_api(params: InferCNVParams):
     try:
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        project_root = os.path.dirname(script_dir)  # Get to SingleCell/
+        output_dir = os.path.join(project_root, 'output', params.dir_name)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = str(output_dir)
         data = await run_in_threadpool(
             run_inferncnv,
             params.input_path,
@@ -304,8 +314,11 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
         job_manager.start_job(job_id)
 
         # Ensure output directory exists
-        output_dir = Path(request.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Get to backend/
+        project_root = os.path.dirname(script_dir)  # Get to SingleCell/
+        output_dir = os.path.join(project_root, 'output', request.dir_name)
+        output_dir = str(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
 
         results = {}
 
@@ -329,7 +342,7 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
             annotation_params = AnnotationParams(
                 name=request.name,
                 input_path=processed_path,
-                output_dir=str(output_dir),
+                dir_name=str(output_dir),
                 preprocessed=False,  # Let it run preprocessing
                 preprocessing_params={},
                 use_cellmarker=True,
@@ -342,7 +355,7 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
                     annotate,
                     annotation_params.name,
                     annotation_params.input_path,
-                    annotation_params.output_dir,
+                    annotation_params.dir_name,
                     annotation_params.preprocessed,
                     annotation_params.preprocessing_params,
                     annotation_params.use_cellmarker,

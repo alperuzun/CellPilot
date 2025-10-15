@@ -39,9 +39,9 @@ ipcMain.handle('dialog:openAdata', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     properties: ['openFile'],
     filters: [
+      { name: 'All supported formats', extensions: ['h5ad', 'h5', 'hdf5'] },
       { name: 'AnnData files', extensions: ['h5ad'] },
-      { name: 'HDF5 files', extensions: ['h5', 'hdf5'] },
-      { name: 'All supported formats', extensions: ['h5ad', 'h5', 'hdf5'] }
+      { name: 'HDF5 files', extensions: ['h5', 'hdf5'] }
     ],
   });
   return canceled ? undefined : filePaths[0];
@@ -65,6 +65,21 @@ ipcMain.handle('dialog:openMarkerFile', async () => {
     ],
   });
   return canceled ? undefined : filePaths[0];
+});
+
+ipcMain.handle('fs:getFileStats', async (_event, filePath: string) => {
+  try {
+    const fs = await import('node:fs/promises');
+    const stats = await fs.stat(filePath);
+    return {
+      size: stats.size,
+      created: stats.birthtime,
+      modified: stats.mtime
+    };
+  } catch (error) {
+    console.error('Error getting file stats:', error);
+    return null;
+  }
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common

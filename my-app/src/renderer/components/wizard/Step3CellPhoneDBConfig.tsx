@@ -174,7 +174,7 @@ export default function Step3CellPhoneDBConfig({ uploadData, onComplete, onBack,
       const response = await api.startAnalysis({
         name: uploadData.datasetName,
         input_path: uploadData.filePath,
-        output_dir: `/Users/colinpascual/SingleCell/output/cpdb_${uploadData.datasetName}`,
+        dir_name: `cpdb_${uploadData.datasetName}`,
         qc_params: {},
         analysis_params: {
           runCellPhone: true,

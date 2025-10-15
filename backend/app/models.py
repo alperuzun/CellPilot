@@ -16,7 +16,7 @@ class AdataResponse(BaseModel):
 class AnnotationParams(BaseModel):
     name: str
     input_path: str
-    output_dir: str
+    dir_name: str
     preprocessed: bool
     preprocessing_params: Dict[str, Any]
     use_cellmarker: bool
@@ -28,7 +28,7 @@ class AnnotationParams(BaseModel):
 class CellPhoneDBParams(BaseModel):
     input_path: str
     name: str
-    output_dir: str
+    dir_name: str
     plot_column_names: List[str]
     column_name: str
     cpdb_file_path: str
@@ -37,7 +37,7 @@ class CellPhoneDBParams(BaseModel):
 class InferCNVParams(BaseModel):
     input_path: str
     name: str
-    output_dir: str
+    dir_name: str
     reference_key: str
     gtf_path: str
     reference_cat: List[str]
@@ -79,7 +79,7 @@ class QCPreviewResponse(BaseModel):
 class AnalysisJobRequest(BaseModel):
     name: str
     input_path: str
-    output_dir: str
+    dir_name: str
     qc_params: Dict[str, Any]
     analysis_params: Dict[str, Any]
 

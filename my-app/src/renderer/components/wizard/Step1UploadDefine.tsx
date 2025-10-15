@@ -48,44 +48,54 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const validateFile = (file: File): boolean => {
-    const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
-    return SUPPORTED_FORMATS.includes(fileExtension);
-  };
-
-  const handleFileUpload = useCallback(async (file: File) => {
-    if (!validateFile(file)) {
-      setError('Unsupported file format. Please select a .h5ad, .h5, or .hdf5 file.');
-      return;
-    }
-
+  const handleFileUpload = useCallback(async () => {
     setError(null);
     setUploading(true);
 
     try {
-      console.log('Processing file:', file.name);
+      // Open native Electron file dialog to get file path
+      const filePath = await window.backend.openAdataFile();
 
-      // In Electron, we can access the file path directly
-      // Use the actual file from Downloads folder
-      const filePath = `/Users/colinpascual/Downloads/${file.name}`;
+      if (!filePath) {
+        // User cancelled the dialog
+        setUploading(false);
+        return;
+      }
+
+      console.log('Processing file:', filePath);
+
+      // Extract filename from path
+      const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'unknown';
+
+      // Validate file extension
+      const fileExtension = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
+      if (!SUPPORTED_FORMATS.includes(fileExtension)) {
+        setError('Unsupported file format. Please select a .h5ad, .h5, or .hdf5 file.');
+        setUploading(false);
+        return;
+      }
+
+      // Get file stats (size, dates)
+      const fileStats = await window.backend.getFileStats(filePath);
+      const fileSize = fileStats?.size || 0;
 
       // Call backend to process the file
       const response = await api.uploadAdata({
         input_path: filePath,
-        name: file.name.replace(/\.[^/.]+$/, "")
+        name: fileName.replace(/\.[^/.]+$/, "")
       });
 
       setFormData(prev => ({
         ...prev,
-        fileName: file.name,
+        fileName: fileName,
         filePath: response.input_path,
-        fileSize: file.size,
+        fileSize: fileSize,
         datasetName: prev.datasetName || response.name,
         summary: response.summary
       }));
 
       setUploadComplete(true);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Upload error:', err);
       if (err instanceof APIError) {
         setError(`Processing failed: ${err.message}`);
@@ -119,20 +129,20 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
     e.stopPropagation();
     setDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileUpload(e.dataTransfer.files[0]);
-    }
+    // For drag-and-drop, we still trigger the dialog since we can't get real paths from File objects
+    // This provides consistent behavior
+    handleFileUpload();
   }, [handleFileUpload]);
 
-  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileUpload(e.target.files[0]);
-    }
+  const handleFileInputChange = useCallback(() => {
+    // This is now just a fallback - we primarily use the dialog
+    handleFileUpload();
   }, [handleFileUpload]);
 
   const handleFileSelect = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
+    // Directly call the dialog instead of clicking hidden input
+    handleFileUpload();
+  }, [handleFileUpload]);
 
   const handleRemoveFile = () => {
     setFormData({

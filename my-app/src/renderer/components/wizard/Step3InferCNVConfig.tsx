@@ -28,7 +28,7 @@ export default function Step3InferCNVConfig({ uploadData, onComplete, onBack, an
   const [config, setConfig] = useState<InferCNVAnalysisData>({
     referenceKey: analysisData?.referenceKey || 'leiden',
     referenceCat: analysisData?.referenceCat || [],
-    gtfPath: analysisData?.gtfPath || '/Users/colinpascual/SingleCell/backend/db/gencode.v47.annotation.gtf.gz',
+    gtfPath: analysisData?.gtfPath || 'gencode.v47.annotation.gtf.gz',
     cnvThreshold: analysisData?.cnvThreshold || 0.03,
     cores: analysisData?.cores || 4,
 
@@ -176,7 +176,7 @@ export default function Step3InferCNVConfig({ uploadData, onComplete, onBack, an
       const response = await api.startAnalysis({
         name: uploadData.datasetName,
         input_path: uploadData.filePath,
-        output_dir: `/Users/colinpascual/SingleCell/output/infercnv_${uploadData.datasetName}`,
+        dir_name: `infercnv_${uploadData.datasetName}`,
         qc_params: {},
         analysis_params: {
           runInferCNV: true,

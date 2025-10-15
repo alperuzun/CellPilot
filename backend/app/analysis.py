@@ -49,7 +49,6 @@ def run_cell_phone_db(input_file, output_dir, plot_column_names = [], column_nam
 
     data = {'figs': [], 'files': []}
     print(f"Starting CellPhoneDB analysis for {name}...")
-    os.makedirs(output_dir, exist_ok=True)
     ov.plot_set()
     print(f"Loading data from {input_file}...")
     adata = sc.read_h5ad(input_file)
@@ -242,10 +241,10 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
     data = {'figs': [], 'files': []}
     if reference_key == "": reference_key = None
     if reference_cat == "": reference_cat = None
-    os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
 
     # Validate GTF file exists
+    gtf_path = os.path.join(os.path.dirname(__file__), 'db', gtf_path)
     validate_file_exists(
         gtf_path,
         description="Gene Annotation GTF File",
@@ -380,17 +379,3 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
     # ---------------------------------------------------------------------------
     data['timestamp'] = timestamp
     return data
-
-if __name__ == "__main__":
-
-    # run_inferncnv(input_file='output/test_run/annotated_test_20250429_2353.h5ad',
-    #               output_dir='output/test_run/inferncnv',
-    #               name='test',
-    #               reference_key='cellmarker',
-    #               cores=4)
-    
-    run_cell_phone_db(input_file='output/test_run/annotated_test_20250429_2353.h5ad',
-                  output_dir='output/test_run/cellphonedb4',
-                  name='test',
-                  column_name='cell_type',
-                  cpdb_file_path='/Users/colinpascual/SingleCell/db/cellphonedb.zip')

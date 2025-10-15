@@ -9,5 +9,7 @@ contextBridge.exposeInMainWorld('backend', {
   openDir:      () => ipcRenderer.invoke('dialog:openDir'),
   /** Opens a marker gene file picker – returns absolute path or undefined */
   openMarkerFile: () => ipcRenderer.invoke('dialog:openMarkerFile'),
+  /** Get file stats (size, dates) for a given path */
+  getFileStats: (filePath: string) => ipcRenderer.invoke('fs:getFileStats', filePath),
   imageDataURL: (path: string) => ipcRenderer.invoke('image-data-url', path),
 });

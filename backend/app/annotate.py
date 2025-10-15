@@ -118,7 +118,7 @@ def run_preprocessing(adata, output_dir, params, timestamp, name, data={}):
 def annotate(
     name,
     input_file,
-    output_dir,
+    dir_name,
     preprocessed=False,
     preprocessing_params={},
     use_cellmarker=True,
@@ -134,7 +134,7 @@ def annotate(
     -----------
     input_file : str
         Path to input h5ad file
-    output_dir : str
+    dir_name : str
         Directory to save results
     species : str
         Species ('human' or 'mouse')
@@ -174,6 +174,11 @@ def annotate(
     outputs = {}
     data = {'figs': [], 'files': []}
     
+    #ex dir_name 'annotation/test
+    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Get to backend/
+    project_root = os.path.dirname(script_dir)  # Get to SingleCell/
+    output_dir = os.path.join(project_root, 'output', dir_name)
+    output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     sc.settings.verbosity = 1
     sc.settings.figdir = output_dir
@@ -543,36 +548,4 @@ def count_marker_gene_expression(adata, marker_dict, timestamp, annotation_colum
     results_df.to_csv(f'{output_dir}/{filename}', index=False)
     
     return f'{output_dir}/{filename}'
-
-def test_pipeline():
-    input_file = "/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/preprocessed_test_20250402_2109.h5ad"
-    output_dir = "output/test_run"
-    
-    # Check if the input file exists
-    if not os.path.exists(input_file):
-        print(f"ERROR: Input file not found: {input_file}")
-        print("Please make sure the file exists or update the path in the test_pipeline function.")
-        return
-    
-    params = {
-        'mito_prefix': 'MT-',
-        'mito_threshold': 0.05,
-        'min_genes': 250,
-        'min_counts': 500,
-        'n_hvgs': 2000,
-        'n_pcs': 50,
-        'n_neighbors': 15,
-        'resolution': 0.8
-    }
-    
-    try:
-        print(f"Running pipeline with input file: {input_file}")
-        annotate("test", input_file, output_dir, preprocessed=True, preprocessing_params={}, use_celltypist=False, use_cellmarker=True, use_panglao=False, use_cancer_single_cell_atlas=False)
-    except Exception as e:
-        print(f"Pipeline execution failed: {str(e)}")
-        import traceback
-        traceback.print_exc()
-
-if __name__ == "__main__":
-    test_pipeline()
 

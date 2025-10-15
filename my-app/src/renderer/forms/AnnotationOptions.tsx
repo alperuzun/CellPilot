@@ -83,7 +83,7 @@ export default function AnnotationOptions({ upload, setUpload, onComplete, setOu
       const body = {
         name:           state.name || 'run_'+Date.now(),
         input_path:     state.input,
-        output_dir:     state.output || `/Users/colinpascual/Desktop/Desktop - Colin's MacBook Pro/Coding/SharedVM/lab/SingleCell/output`,
+        output_dir:     state.output,
         preprocessed:   state.preprocessed,
         preprocessing_params: {
           mito_prefix:     'MT-',

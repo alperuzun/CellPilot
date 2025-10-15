@@ -102,7 +102,7 @@ export interface AnalysisResponse {
 export interface AnalysisJobRequest {
   name: string;
   input_path: string;
-  output_dir: string;
+  dir_name: string;
   qc_params: any;
   analysis_params: any;
 }
