@@ -157,6 +157,30 @@ export interface VisualizationData {
     qc_metrics_available: string[];
   };
   cell_ids: string[];
+  qc_report?: {
+    available: boolean;
+    stats?: {
+      initial_cells: number;
+      final_cells: number;
+      cells_removed: number;
+      retention_rate_pct: number;
+      thresholds: {
+        min_genes: number;
+        min_counts: number;
+        mito_threshold_pct: number;
+      };
+      failures: {
+        low_gene_count: number;
+        low_umi_count: number;
+        high_mito_pct: number;
+      };
+      estimated_doublets_removed: number;
+      pass_basic_filters?: number;
+      fail_rate_pct?: number;
+    };
+    text_report?: string;
+    report_path?: string;
+  };
 }
 
 export interface GeneExpressionData {
@@ -167,13 +191,27 @@ export interface MarkerGenesData {
   [cluster: string]: string[];
 }
 
+export interface CSVDataResponse {
+  type: 'drug_response' | 'generic';
+  // Drug response format
+  drug_ids?: string[];
+  drug_names?: string[];
+  cells?: string[];
+  values?: number[][];
+  // Generic format
+  columns?: string[];
+  data?: any[];
+  total_rows?: number;
+  shape: [number, number];
+}
+
 export interface DatasetInfo {
   path: string;
   name: string;
   date: string;
   size_mb: number;
   directory: string;
-  analysis_type: 'annotation' | 'cellphonedb';
+  analysis_type: 'annotation' | 'cellphonedb' | 'infercnv';
 }
 
 export interface AvailableDatasetsResponse {
@@ -372,6 +410,10 @@ export const api = {
 
   async getAnalysisFiles(h5adPath: string): Promise<AnalysisFilesResponse> {
     return apiRequest(`/analysis_files?h5ad_path=${encodeURIComponent(h5adPath)}`);
+  },
+
+  async getCSVData(filePath: string, maxRows = 1000): Promise<CSVDataResponse> {
+    return apiRequest(`/preview_csv_data?path=${encodeURIComponent(filePath)}&max_rows=${maxRows}`);
   },
 
   async getAnnotationDetails(filePath: string): Promise<AnnotationDetailsResponse> {

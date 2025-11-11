@@ -1,6 +1,7 @@
 import scanpy as sc
 import pandas as pd
 import numpy as np
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import anndata as ad
@@ -27,6 +28,82 @@ COMMON_CELL_MARKERS = [
     # Common housekeeping/reference
     'ACTB', 'GAPDH', 'B2M', 'PTPRC'
 ]
+
+def extract_qc_report(h5ad_path: str, adata) -> Dict[str, Any]:
+    """
+    Extract QC report data from JSON file or adata.uns
+
+    Parameters:
+    -----------
+    h5ad_path : str
+        Path to h5ad file
+    adata : AnnData
+        Loaded AnnData object
+
+    Returns:
+    --------
+    Dict containing QC report data or empty dict if not available
+    """
+    import json
+    import glob
+
+    # First, try to load from adata.uns if available
+    if 'qc_stats' in adata.uns:
+        try:
+            qc_stats = dict(adata.uns['qc_stats'])
+            # Try to load the text report if path is available
+            text_report = None
+            if 'txt_report_path' in qc_stats and os.path.exists(qc_stats['txt_report_path']):
+                with open(qc_stats['txt_report_path'], 'r') as f:
+                    text_report = f.read()
+
+            return {
+                'available': True,
+                'stats': qc_stats,
+                'text_report': text_report,
+                'report_path': qc_stats.get('txt_report_path', '')
+            }
+        except Exception as e:
+            print(f"DEBUG: Could not load QC stats from adata.uns: {e}")
+
+    # Second, try to find QC report files in the same directory
+    h5ad_dir = os.path.dirname(h5ad_path)
+
+    try:
+        # Look for JSON QC report files
+        json_pattern = os.path.join(h5ad_dir, '*_qc_report_*.json')
+        json_files = glob.glob(json_pattern)
+
+        if json_files:
+            # Use the most recent JSON file
+            json_file = max(json_files, key=os.path.getmtime)
+
+            with open(json_file, 'r') as f:
+                qc_stats = json.load(f)
+
+            # Look for corresponding text report
+            txt_pattern = json_file.replace('.json', '.txt')
+            text_report = None
+            if os.path.exists(txt_pattern):
+                with open(txt_pattern, 'r') as f:
+                    text_report = f.read()
+
+            return {
+                'available': True,
+                'stats': qc_stats,
+                'text_report': text_report,
+                'report_path': txt_pattern if os.path.exists(txt_pattern) else json_file
+            }
+    except Exception as e:
+        print(f"DEBUG: Could not load QC report from files: {e}")
+
+    # No QC report found
+    return {
+        'available': False,
+        'stats': None,
+        'text_report': None,
+        'report_path': None
+    }
 
 def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
     """
@@ -163,6 +240,9 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
         'qc_metrics_available': list(qc_metrics.keys())
     }
 
+    # Extract QC report data if available
+    qc_report = extract_qc_report(h5ad_path, adata)
+
     return {
         'embeddings': embeddings,
         'clusters': clusters,
@@ -170,7 +250,8 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
         'qc_metrics': qc_metrics,
         'available_genes': top_genes,
         'summary_stats': summary_stats,
-        'cell_ids': adata.obs.index.tolist()
+        'cell_ids': adata.obs.index.tolist(),
+        'qc_report': qc_report
     }
 
 def get_gene_expression(h5ad_path: str, gene_names: List[str]) -> Dict[str, List[float]]:

@@ -31,6 +31,106 @@ def default_params():
         'resolution': 0.8
     }
 
+def analyze_qc_metrics(adata, params, output_dir, name, timestamp):
+    """
+    Analyze QC metrics before filtering to understand cell quality distribution.
+
+    Parameters:
+    -----------
+    adata : AnnData
+        Input AnnData object before QC filtering
+    params : dict
+        QC parameters including thresholds
+    output_dir : str
+        Directory to save QC reports and plots
+    name : str
+        Name prefix for output files
+    timestamp : str
+        Timestamp for file naming
+
+    Returns:
+    --------
+    dict : QC statistics and filtering breakdown
+    """
+    import json
+
+    # Calculate basic QC metrics
+    adata.var['mt'] = adata.var_names.str.startswith(params['mito_prefix'])
+    sc.pp.calculate_qc_metrics(adata, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)
+
+    n_cells_initial = adata.n_obs
+
+    # Identify cells that fail each filter
+    fail_min_genes = adata.obs['n_genes_by_counts'] < params['min_genes']
+    fail_min_counts = adata.obs['total_counts'] < params['min_counts']
+    fail_mito = adata.obs['pct_counts_mt'] > (params['mito_threshold'] * 100)  # Convert to percentage
+
+    # Count failures (cells can fail multiple criteria)
+    n_fail_genes = fail_min_genes.sum()
+    n_fail_counts = fail_min_counts.sum()
+    n_fail_mito = fail_mito.sum()
+
+    # Cells that pass all basic filters (before doublet detection)
+    pass_all_basic = ~(fail_min_genes | fail_min_counts | fail_mito)
+    n_pass_basic = pass_all_basic.sum()
+
+    # Create QC statistics dictionary
+    qc_stats = {
+        'initial_cells': int(n_cells_initial),
+        'thresholds': {
+            'min_genes': int(params['min_genes']),
+            'min_counts': int(params['min_counts']),
+            'mito_threshold_pct': float(params['mito_threshold'] * 100)
+        },
+        'failures': {
+            'low_gene_count': int(n_fail_genes),
+            'low_umi_count': int(n_fail_counts),
+            'high_mito_pct': int(n_fail_mito)
+        },
+        'pass_basic_filters': int(n_pass_basic),
+        'fail_rate_pct': float((n_cells_initial - n_pass_basic) / n_cells_initial * 100)
+    }
+
+    # Generate QC violin plots with threshold lines
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    # Plot 1: Gene counts
+    sc.pl.violin(adata, 'n_genes_by_counts', ax=axes[0], show=False)
+    axes[0].axhline(y=params['min_genes'], color='red', linestyle='--', linewidth=2,
+                    label=f"Threshold: {params['min_genes']}")
+    axes[0].set_title(f"Genes per Cell\n({n_fail_genes} cells fail)")
+    axes[0].legend()
+
+    # Plot 2: UMI counts
+    sc.pl.violin(adata, 'total_counts', ax=axes[1], show=False)
+    axes[1].axhline(y=params['min_counts'], color='red', linestyle='--', linewidth=2,
+                    label=f"Threshold: {params['min_counts']}")
+    axes[1].set_title(f"UMI Counts per Cell\n({n_fail_counts} cells fail)")
+    axes[1].legend()
+
+    # Plot 3: Mitochondrial percentage
+    sc.pl.violin(adata, 'pct_counts_mt', ax=axes[2], show=False)
+    axes[2].axhline(y=params['mito_threshold'] * 100, color='red', linestyle='--', linewidth=2,
+                    label=f"Threshold: {params['mito_threshold']*100}%")
+    axes[2].set_title(f"Mitochondrial %\n({n_fail_mito} cells fail)")
+    axes[2].legend()
+
+    plt.tight_layout()
+    qc_plot_path = os.path.join(output_dir, f"{name}_qc_metrics_{timestamp}.png")
+    fig.savefig(qc_plot_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+    qc_stats['qc_plot_path'] = qc_plot_path
+
+    # Save JSON report
+    json_path = os.path.join(output_dir, f"{name}_qc_report_{timestamp}.json")
+    with open(json_path, 'w') as f:
+        json.dump(qc_stats, f, indent=2)
+
+    qc_stats['json_report_path'] = json_path
+
+    return qc_stats
+
 def run_preprocessing(adata, output_dir, params, timestamp, name, data={}):
     """
     Run the single-cell analysis pipeline without the Qt signal/slot mechanism.
@@ -70,12 +170,112 @@ def run_preprocessing(adata, output_dir, params, timestamp, name, data={}):
 
     print("Initializing OmicVerse...")
     ov.ov_plot_set()
-    print("Performing quality control...")
+
+    # ========== QC ANALYSIS BEFORE FILTERING ==========
+    print("\n" + "="*60)
+    print("🔬 Quality Control Analysis")
+    print("="*60)
+
+    # Analyze QC metrics before filtering
+    n_cells_before = adata.n_obs
+    print(f"   Starting cells: {n_cells_before}")
+    print(f"\n   Applied filters:")
+    print(f"   ✓ min_genes: {final_params['min_genes']}")
+    print(f"   ✓ min_counts: {final_params['min_counts']}")
+    print(f"   ✓ mito_threshold: {final_params['mito_threshold']*100}%")
+    print(f"   ✓ doublet detection: scrublet")
+
+    # Perform pre-filtering QC analysis
+    qc_stats = analyze_qc_metrics(adata.copy(), final_params, output_dir, name, timestamp)
+
+    print(f"\n   Pre-filtering analysis:")
+    print(f"   ❌ {qc_stats['failures']['low_umi_count']} cells: Low UMI counts (<{final_params['min_counts']})")
+    print(f"   ❌ {qc_stats['failures']['low_gene_count']} cells: Low gene counts (<{final_params['min_genes']})")
+    print(f"   ❌ {qc_stats['failures']['high_mito_pct']} cells: High mitochondrial % (>{final_params['mito_threshold']*100}%)")
+    print(f"   ℹ️  {qc_stats['pass_basic_filters']} cells pass basic filters (before doublet detection)")
+
+    # Perform actual QC filtering
+    print(f"\n   Running OmicVerse QC with doublet detection...")
     adata = ov.pp.qc(adata, tresh={
-        'mito_perc': final_params['mito_threshold'], 
-        'nUMIs': final_params['min_counts'], 
+        'mito_perc': final_params['mito_threshold'],
+        'nUMIs': final_params['min_counts'],
         'detected_genes': final_params['min_genes']
     }, doublets_method='scrublet')
+
+    # ========== POST-FILTERING SUMMARY ==========
+    n_cells_after = adata.n_obs
+    n_cells_removed = n_cells_before - n_cells_after
+    retention_rate = (n_cells_after / n_cells_before) * 100
+
+    # Estimate doublets removed (difference between basic filter pass and actual retained)
+    doublets_removed = qc_stats['pass_basic_filters'] - n_cells_after
+    if doublets_removed < 0:
+        doublets_removed = 0  # In case of edge cases
+
+    print(f"\n   Filtering complete:")
+    print(f"   ✅ Retained: {n_cells_after} cells ({retention_rate:.1f}%)")
+    print(f"   ❌ Removed: {n_cells_removed} cells ({100-retention_rate:.1f}%)")
+    if doublets_removed > 0:
+        print(f"      └─ ~{doublets_removed} cells: Doublets (Scrublet)")
+
+    # Warning if retention is very low
+    if retention_rate < 30:
+        print(f"\n   ⚠️  WARNING: >{100-retention_rate:.0f}% cells removed!")
+        print(f"      Consider relaxing QC thresholds if this seems too aggressive.")
+        print(f"      Review QC plots: {qc_stats['qc_plot_path']}")
+
+    print("="*60 + "\n")
+
+    # Update QC stats with final counts
+    qc_stats['final_cells'] = int(n_cells_after)
+    qc_stats['cells_removed'] = int(n_cells_removed)
+    qc_stats['retention_rate_pct'] = float(retention_rate)
+    qc_stats['estimated_doublets_removed'] = int(doublets_removed)
+
+    # Save updated JSON report with final stats
+    import json
+    with open(qc_stats['json_report_path'], 'w') as f:
+        json.dump(qc_stats, f, indent=2)
+
+    # Store QC stats in adata.uns for easy access during visualization
+    adata.uns['qc_stats'] = qc_stats
+
+    # Create human-readable text report
+    txt_report_path = os.path.join(output_dir, f"{name}_qc_report_{timestamp}.txt")
+    with open(txt_report_path, 'w') as f:
+        f.write("="*60 + "\n")
+        f.write("Quality Control Filtering Report\n")
+        f.write("="*60 + "\n\n")
+        f.write(f"Dataset: {name}\n")
+        f.write(f"Timestamp: {timestamp}\n\n")
+        f.write("Applied Thresholds:\n")
+        f.write(f"  - Minimum genes per cell: {final_params['min_genes']}\n")
+        f.write(f"  - Minimum UMI counts per cell: {final_params['min_counts']}\n")
+        f.write(f"  - Maximum mitochondrial %: {final_params['mito_threshold']*100}%\n")
+        f.write(f"  - Doublet detection: Scrublet\n\n")
+        f.write("Filtering Results:\n")
+        f.write(f"  - Initial cells: {n_cells_before}\n")
+        f.write(f"  - Final cells: {n_cells_after}\n")
+        f.write(f"  - Cells removed: {n_cells_removed}\n")
+        f.write(f"  - Retention rate: {retention_rate:.1f}%\n\n")
+        f.write("Breakdown by Filter (cells can fail multiple):\n")
+        f.write(f"  - Low UMI count (<{final_params['min_counts']}): {qc_stats['failures']['low_umi_count']}\n")
+        f.write(f"  - Low gene count (<{final_params['min_genes']}): {qc_stats['failures']['low_gene_count']}\n")
+        f.write(f"  - High mitochondrial % (>{final_params['mito_threshold']*100}%): {qc_stats['failures']['high_mito_pct']}\n")
+        f.write(f"  - Estimated doublets: ~{doublets_removed}\n\n")
+        if retention_rate < 30:
+            f.write("WARNING: Very high cell loss detected!\n")
+            f.write("Consider reviewing QC plots and potentially relaxing thresholds.\n\n")
+        f.write(f"QC Plots: {qc_stats['qc_plot_path']}\n")
+        f.write(f"JSON Report: {qc_stats['json_report_path']}\n")
+
+    qc_stats['txt_report_path'] = txt_report_path
+
+    # Add QC reports to data dictionary for frontend
+    data['qc_stats'] = qc_stats
+    data['figs'].append((qc_stats['qc_plot_path'], 'QC Metrics'))
+    data['files'].append((txt_report_path, 'QC Report'))
+    data['files'].append((qc_stats['json_report_path'], 'QC Report (JSON)'))
     print("Normalizing and finding highly variable genes...")
     adata = ov.pp.preprocess(adata, mode='shiftlog|pearson', n_HVGs=final_params['n_hvgs'])
     adata.raw = adata

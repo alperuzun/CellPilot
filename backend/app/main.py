@@ -88,20 +88,26 @@ async def annotate_api(params: AnnotationParams):
 @app.post("/cellphonedb")
 async def cellphonedb_api(params: CellPhoneDBParams):
     try:
-        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        project_root = os.path.dirname(script_dir)  # Get to SingleCell/
-        output_dir = os.path.join(project_root, 'output', params.dir_name)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # If output_dir is provided use it, otherwise create one from name
+        if params.output_dir:
+            output_dir = params.output_dir
+        else:
+            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            project_root = os.path.dirname(script_dir)  # Get to SingleCell/
+            output_dir = os.path.join(project_root, 'output', f'cpdb_{params.name}')
+        
+        os.makedirs(output_dir, exist_ok=True)
         output_dir = str(output_dir)
+        
         data = await run_in_threadpool(
             run_cell_phone_db,
             params.input_path,          # input_file
-            output_dir,          # output_dir
+            output_dir,                  # output_dir
             params.plot_column_names,   # plot_column_names
             params.column_name,         # column_name in obs
             params.cpdb_file_path,      # database zip
             params.name,                # run name / prefix
-            params.counts_min,           # counts_min (now properly in the model)
+            params.counts_min,          # counts_min (now properly in the model)
         )
         # Use the h5ad output path for visualization
         output_path = data.get('output_h5ad_path', output_dir)
@@ -111,8 +117,8 @@ async def cellphonedb_api(params: CellPhoneDBParams):
             input_path=params.input_path,
             output_dir=output_path,
             data=data,
-                timestamp=data['timestamp']
-            )
+            timestamp=data['timestamp']
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -120,29 +126,35 @@ async def cellphonedb_api(params: CellPhoneDBParams):
 @app.post("/inferCNV")
 async def inferCNV_api(params: InferCNVParams):
     try:
-        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        project_root = os.path.dirname(script_dir)  # Get to SingleCell/
-        output_dir = os.path.join(project_root, 'output', params.dir_name)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # If output_dir is provided use it, otherwise create one from name
+        if params.output_dir:
+            output_dir = params.output_dir
+        else:
+            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            project_root = os.path.dirname(script_dir)  # Get to SingleCell/
+            output_dir = os.path.join(project_root, 'output', f'infercnv_{params.name}')
+        
+        os.makedirs(output_dir, exist_ok=True)
         output_dir = str(output_dir)
+        
         data = await run_in_threadpool(
             run_inferncnv,
             params.input_path,
-            params.output_dir,
+            output_dir,
             params.name,
             params.reference_key,
             params.gtf_path,
-        params.reference_cat,
-        params.cnv_threshold
+            params.reference_cat,
+            params.cnv_threshold
         )
         return Response(
             name=params.name,
             type="inferCNV",
             input_path=params.input_path,
-            output_dir=params.output_dir,
+            output_dir=output_dir,
             data=data,
-                timestamp=data['timestamp']
-            )
+            timestamp=data['timestamp']
+        )
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -158,6 +170,60 @@ def preview_txt(path: str):
 @app.get("/preview_csv")
 def preview_csv(path: str):
     return FileResponse(path, media_type="text/csv")
+
+@app.get("/preview_csv_data")
+async def preview_csv_data(path: str, max_rows: int = 1000):
+    """Parse CSV file and return structured JSON data for table display"""
+    try:
+        import pandas as pd
+
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail=f"File not found: {path}")
+
+        # Read CSV with pandas
+        df = pd.read_csv(path, header=None)
+
+        # Detect drug response format (first row is numeric IDs, second row is drug names)
+        # This is specific to CaDRReS-Sc output format
+        try:
+            # Check if this looks like a drug response CSV
+            first_row_numeric = pd.to_numeric(df.iloc[0, 1:], errors='coerce').notna().sum() > 10
+
+            if first_row_numeric and len(df) >= 3:
+                # Drug response format detected
+                drug_ids = df.iloc[0, 1:].astype(str).tolist()
+                drug_names = df.iloc[1, 1:].astype(str).tolist()
+                cell_labels = df.iloc[2:, 0].astype(str).tolist()
+
+                # Convert values to float, handling any non-numeric values
+                values = []
+                for idx in range(2, len(df)):
+                    row_values = pd.to_numeric(df.iloc[idx, 1:], errors='coerce').fillna(0).tolist()
+                    values.append(row_values)
+
+                return {
+                    "type": "drug_response",
+                    "drug_ids": drug_ids,
+                    "drug_names": drug_names,
+                    "cells": cell_labels,
+                    "values": values,
+                    "shape": [len(cell_labels), len(drug_names)]
+                }
+        except Exception:
+            pass  # Fall through to generic handling
+
+        # Generic CSV handling (with proper headers)
+        df_with_headers = pd.read_csv(path)
+        return {
+            "type": "generic",
+            "columns": df_with_headers.columns.tolist(),
+            "data": df_with_headers.head(max_rows).to_dict('records'),
+            "total_rows": len(df_with_headers),
+            "shape": list(df_with_headers.shape)
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/analysis_files")
 async def get_analysis_files(h5ad_path: str):
@@ -501,28 +567,6 @@ async def get_visualization_data(h5ad_path: str):
             print(f"ENDPOINT DEBUG: File not found: {h5ad_path}")
             raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
 
-        # Check for problematic files and provide workaround
-        file_name = os.path.basename(h5ad_path)
-        if "annotated_quick_test_20250928_2354" in file_name:
-            print(f"ENDPOINT DEBUG: Detected problematic file {file_name}, returning empty visualization data")
-            # Return minimal visualization data structure to prevent hanging
-            return {
-                'embeddings': {},
-                'clusters': {},
-                'cell_types': {},
-                'qc_metrics': {},
-                'available_genes': [],
-                'summary_stats': {
-                    'n_cells': 0,
-                    'n_genes': 0,
-                    'n_clusters': 0,
-                    'embeddings_available': [],
-                    'cell_types_available': [],
-                    'qc_metrics_available': []
-                },
-                'cell_ids': []
-            }
-
         print(f"ENDPOINT DEBUG: File exists, starting threadpool execution...")
         data = await run_in_threadpool(extract_visualization_data, h5ad_path)
         print(f"ENDPOINT DEBUG: Threadpool execution completed successfully")
@@ -616,11 +660,11 @@ async def get_available_datasets():
                     if h5ad_files:
                         h5ad_path = str(h5ad_files[0].absolute())
                 else:  # infercnv
-                    # Use directory path as identifier
+                    # InferCNV doesn't output h5ad files, use directory path for PNG visualizations
                     h5ad_path = str(analysis_dir.absolute())
 
-                # Skip if we couldn't find a valid path
-                if not h5ad_path:
+                # Skip if we couldn't find a valid path (only for annotation/cellphonedb)
+                if not h5ad_path and analysis_type in ['annotation', 'cellphonedb']:
                     continue
 
                 stat = analysis_dir.stat()
@@ -716,13 +760,3 @@ async def get_obs_columns(request: AdataRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-if __name__ == "__main__":
-    params = AnnotationParams(
-        name="test",
-        input_path="/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/preprocessed_test_20250429_2353.h5ad",
-        output_dir="/Users/colinpascual/Desktop/Coding/SharedVM/lab/SingleCell/output/test_run/annotation",
-        use_cellmarker=True,
-        use_panglao=True,
-    )
-    asyncio.run(annotate_api(params))

@@ -89,6 +89,9 @@ export default function InteractiveDashboard({ uploadData, analysisData, onNewAn
     if ('outputPath' in analysisData && analysisData.outputPath) {
       return analysisData.outputPath;
     }
+    if ('output_dir' in analysisData && analysisData.output_dir) {
+      return analysisData.output_dir;
+    }
     if ('annotatedDatasetPath' in analysisData && analysisData.annotatedDatasetPath) {
       return analysisData.annotatedDatasetPath;
     }

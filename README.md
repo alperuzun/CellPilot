@@ -180,3 +180,4 @@ For detailed Cell Ranger instructions, see the [10x Genomics documentation](http
 4. Press **Run**; progress bars and log output will update live.  
 5. When finished, CellPilot previews all generated PNGs in a scrollable dialog.
 
+cell-type bug, infercnv, cellphone db selection, manual annotation

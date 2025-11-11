@@ -244,7 +244,7 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
 
     # Validate GTF file exists
-    gtf_path = os.path.join(os.path.dirname(__file__), 'db', gtf_path)
+    gtf_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'db', gtf_path)
     validate_file_exists(
         gtf_path,
         description="Gene Annotation GTF File",
@@ -359,7 +359,7 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
         print(f"Drug response prediction failed (optional): {e}")
         # Continue without drug response - still return CNV results
         data['adata'] = summarize_h5ad(adata=adata) if 'adata' in locals() else {}
-    cluster_key = "louvain"  # use pre-computed clusters
+    cluster_key = "leiden"  # use pre-computed clusters
     if cluster_key not in adata.obs.columns:
         raise ValueError(
             f"'{cluster_key}' column not found in adata.obs. Provide AnnData with pre-computed clusters.")
@@ -377,5 +377,12 @@ def run_inferncnv(input_file, output_dir, name, reference_key=None, gtf_path='db
     print(f"Tumor UMAP with clusters saved to {cluster_fig_path}")
     data['figs'].append((cluster_fig_path, 'Tumor UMAP'))
     # ---------------------------------------------------------------------------
+    
+    # # Save the processed h5ad file for visualization
+    # output_h5ad_path = os.path.join(str(output_dir), f'{str(name)}_infercnv_{timestamp}.h5ad')
+    # adata.write_h5ad(output_h5ad_path, compression='gzip')
+    # data['output_h5ad_path'] = output_h5ad_path
+    # print(f"InferCNV h5ad saved to {output_h5ad_path}")
+    
     data['timestamp'] = timestamp
     return data

@@ -30,6 +30,7 @@ import QCViolin from './QCViolin';
 import AnnotationResults from './AnnotationResults';
 import ClusterAnnotationTable from './ClusterAnnotationTable';
 import InteractiveImageViewer from './InteractiveImageViewer';
+import DrugResponseTable from './DrugResponseTable';
 
 interface VisualizationDashboardProps {
   h5adPath?: string;
@@ -160,6 +161,18 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
         console.log('[VisualizationDashboard] Correcting analysis type from', currentAnalysisType, 'to', analysisType);
         setCurrentAnalysisType(analysisType);
       }
+    } else {
+      // Fallback: detect analysis type from path name if dataset not in list yet
+      const pathLower = pathToUse.toLowerCase();
+      if (pathLower.includes('infercnv')) {
+        console.log('[VisualizationDashboard] Detected inferCNV from path name (fallback)');
+        analysisType = 'infercnv';
+        setCurrentAnalysisType('infercnv');
+      } else if (pathLower.includes('cellphonedb') || pathLower.includes('cpdb')) {
+        console.log('[VisualizationDashboard] Detected cellphonedb from path name (fallback)');
+        analysisType = 'cellphonedb';
+        setCurrentAnalysisType('cellphonedb');
+      }
     }
 
     setLoading(true);
@@ -223,6 +236,16 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
           setSelectedDataset(initialH5adPath);
         } else {
           console.warn('[VisualizationDashboard] Could not find dataset info for:', initialH5adPath);
+          // Fallback: detect analysis type from path name
+          const pathLower = initialH5adPath.toLowerCase();
+          if (pathLower.includes('infercnv')) {
+            console.log('[VisualizationDashboard] Detected inferCNV from path name');
+            setCurrentAnalysisType('infercnv');
+          } else if (pathLower.includes('cellphonedb')) {
+            console.log('[VisualizationDashboard] Detected cellphonedb from path name');
+            setCurrentAnalysisType('cellphonedb');
+          }
+          setSelectedDataset(initialH5adPath);
         }
 
         // Give React a tick to update state, then load
@@ -250,6 +273,15 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
           setCurrentAnalysisType(datasetInfo.analysis_type);
         } else {
           console.warn('[VisualizationDashboard] Could not find dataset info for redirect:', initialH5adPath);
+          // Fallback: detect analysis type from path name
+          const pathLower = initialH5adPath.toLowerCase();
+          if (pathLower.includes('infercnv')) {
+            console.log('[VisualizationDashboard] Detected inferCNV from path name (redirect)');
+            setCurrentAnalysisType('infercnv');
+          } else if (pathLower.includes('cellphonedb')) {
+            console.log('[VisualizationDashboard] Detected cellphonedb from path name (redirect)');
+            setCurrentAnalysisType('cellphonedb');
+          }
         }
 
         // Give React a tick to update state, then load
@@ -535,16 +567,29 @@ const VisualizationDashboard: React.FC<VisualizationDashboardProps> = ({
                 </TabPanel>
 
                 <TabPanel value={activeTab} index={2}>
-                  <InteractiveImageViewer
-                    images={analysisFiles.filter(file =>
-                      file.name.includes('drug') ||
-                      file.name.includes('IC50') ||
-                      file.name.includes('GDSC') ||
-                      file.name.includes('death')
-                    )}
-                    title="Drug Response Predictions"
-                    category="drug-response"
-                  />
+                  <Stack spacing={4}>
+                    {/* CSV Data Tables */}
+                    <DrugResponseTable
+                      files={analysisFiles.filter(file =>
+                        file.type === 'csv_data' &&
+                        (file.name.includes('IC50') || file.name.includes('drug_kill'))
+                      )}
+                    />
+
+                    {/* Image Visualizations */}
+                    <InteractiveImageViewer
+                      images={analysisFiles.filter(file =>
+                        file.type !== 'csv_data' && (
+                          file.name.includes('drug') ||
+                          file.name.includes('GDSC') ||
+                          file.name.includes('death') ||
+                          file.name.includes('prediction')
+                        )
+                      )}
+                      title="Drug Response Visualizations"
+                      category="drug-response"
+                    />
+                  </Stack>
                 </TabPanel>
               </>
             ) : (

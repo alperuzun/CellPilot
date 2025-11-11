@@ -13,7 +13,18 @@ import {
   Chip,
   Switch,
   FormControlLabel,
+  Alert,
+  AlertTitle,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Grid,
+  Divider,
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import WarningIcon from '@mui/icons-material/Warning';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import InfoIcon from '@mui/icons-material/Info';
 import { VisualizationData } from '../../services/api';
 
 interface QCViolinProps {
@@ -196,9 +207,170 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
     <Card sx={{ height: 'fit-content' }}>
       <CardContent>
         <Stack spacing={3}>
+          {/* QC Report Panel */}
+          {data.qc_report?.available && data.qc_report.stats && (
+            <Card variant="outlined" sx={{ bgcolor: 'grey.50' }}>
+              <CardContent>
+                <Stack spacing={2}>
+                  <Typography variant="h6" component="h3" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <InfoIcon color="primary" />
+                    Quality Control Filtering Report
+                  </Typography>
+
+                  {/* Text Report Accordion */}
+                  {data.qc_report.text_report && (
+                    <Accordion>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Typography variant="body2" fontWeight="bold">
+                          View Full Text Report
+                        </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Box sx={{
+                          bgcolor: 'background.paper',
+                          p: 2,
+                          borderRadius: 1,
+                          fontFamily: 'monospace',
+                          fontSize: '0.85rem',
+                          whiteSpace: 'pre-wrap',
+                          maxHeight: 400,
+                          overflow: 'auto'
+                        }}>
+                          {data.qc_report.text_report}
+                        </Box>
+                      </AccordionDetails>
+                    </Accordion>
+                  )}
+
+                  {/* Summary Cards */}
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={4}>
+                      <Card variant="outlined" sx={{ bgcolor: 'success.50', borderColor: 'success.main' }}>
+                        <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                          <CheckCircleIcon color="success" sx={{ fontSize: 40, mb: 1 }} />
+                          <Typography variant="h4" color="success.main">
+                            {data.qc_report.stats.final_cells.toLocaleString()}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Cells Retained
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+
+                    <Grid item xs={12} sm={4}>
+                      <Card variant="outlined" sx={{ bgcolor: 'error.50', borderColor: 'error.main' }}>
+                        <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                          <WarningIcon color="error" sx={{ fontSize: 40, mb: 1 }} />
+                          <Typography variant="h4" color="error.main">
+                            {data.qc_report.stats.cells_removed.toLocaleString()}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Cells Removed
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+
+                    <Grid item xs={12} sm={4}>
+                      <Card variant="outlined" sx={{
+                        bgcolor: data.qc_report.stats.retention_rate_pct < 30 ? 'warning.50' : 'info.50',
+                        borderColor: data.qc_report.stats.retention_rate_pct < 30 ? 'warning.main' : 'info.main'
+                      }}>
+                        <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                          <InfoIcon
+                            color={data.qc_report.stats.retention_rate_pct < 30 ? 'warning' : 'info'}
+                            sx={{ fontSize: 40, mb: 1 }}
+                          />
+                          <Typography
+                            variant="h4"
+                            color={data.qc_report.stats.retention_rate_pct < 30 ? 'warning.main' : 'info.main'}
+                          >
+                            {data.qc_report.stats.retention_rate_pct.toFixed(1)}%
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Retention Rate
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  </Grid>
+
+                  {/* Filtering Breakdown */}
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                      Filtering Breakdown
+                    </Typography>
+                    <Stack spacing={1}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="body2">
+                          • Low UMI counts (&lt;{data.qc_report.stats.thresholds.min_counts})
+                        </Typography>
+                        <Chip
+                          label={data.qc_report.stats.failures.low_umi_count.toLocaleString()}
+                          size="small"
+                          color="error"
+                          variant="outlined"
+                        />
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="body2">
+                          • Low gene counts (&lt;{data.qc_report.stats.thresholds.min_genes})
+                        </Typography>
+                        <Chip
+                          label={data.qc_report.stats.failures.low_gene_count.toLocaleString()}
+                          size="small"
+                          color="error"
+                          variant="outlined"
+                        />
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="body2">
+                          • High mitochondrial % (&gt;{data.qc_report.stats.thresholds.mito_threshold_pct}%)
+                        </Typography>
+                        <Chip
+                          label={data.qc_report.stats.failures.high_mito_pct.toLocaleString()}
+                          size="small"
+                          color="error"
+                          variant="outlined"
+                        />
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="body2">
+                          • Doublets detected (Scrublet)
+                        </Typography>
+                        <Chip
+                          label={data.qc_report.stats.estimated_doublets_removed.toLocaleString()}
+                          size="small"
+                          color="warning"
+                          variant="outlined"
+                        />
+                      </Box>
+                    </Stack>
+                  </Box>
+
+                  {/* Warning Alert */}
+                  {data.qc_report.stats.retention_rate_pct < 30 && (
+                    <Alert severity="warning" icon={<WarningIcon />}>
+                      <AlertTitle>High Cell Loss Detected</AlertTitle>
+                      Over {(100 - data.qc_report.stats.retention_rate_pct).toFixed(0)}% of cells were removed during QC filtering.
+                      Consider reviewing the QC thresholds if this seems too aggressive for your dataset.
+                    </Alert>
+                  )}
+
+                  <Typography variant="caption" color="text.secondary">
+                    Note: Cells can fail multiple criteria. The counts above show all cells that failed each specific threshold.
+                  </Typography>
+                </Stack>
+              </CardContent>
+            </Card>
+          )}
+
+          <Divider />
+
           {/* Title */}
           <Typography variant="h5" component="h2">
-            Quality Control Metrics
+            QC Metrics Distribution
           </Typography>
 
           {/* Controls */}

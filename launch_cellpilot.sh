@@ -79,6 +79,17 @@ if [ ! -d "my-app/node_modules" ]; then
   echo "✅ Frontend dependencies installed."
 fi
 
+# --- Cleanup existing backend on port 8000 ------------------------
+echo "🧹 Checking for existing processes on port 8000..."
+if lsof -ti :8000 >/dev/null 2>&1; then
+  echo "   ⚠️  Found process on port 8000, cleaning up..."
+  lsof -ti :8000 | xargs kill -9
+  sleep 1  # Give the OS time to free the port
+  echo "   ✅ Port 8000 cleared"
+else
+  echo "   ✅ Port 8000 is available"
+fi
+
 # --- Start backend -------------------------------------------------
 echo "▶️  Starting API server..."
 pushd "$(dirname "$0")/backend" >/dev/null
