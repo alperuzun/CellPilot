@@ -50,13 +50,16 @@ def extract_qc_report(h5ad_path: str, adata) -> Dict[str, Any]:
     # First, try to load from adata.uns if available
     if 'qc_stats' in adata.uns:
         try:
-            qc_stats = dict(adata.uns['qc_stats'])
-            # Try to load the text report if path is available
-            text_report = None
-            if 'txt_report_path' in qc_stats and os.path.exists(qc_stats['txt_report_path']):
-                with open(qc_stats['txt_report_path'], 'r') as f:
-                    text_report = f.read()
+            raw_stats = adata.uns['qc_stats']
+            qc_stats = {}
+            for k, v in dict(raw_stats).items():
+                if isinstance(v, dict):
+                    # recursively clean nested dicts if needed
+                    qc_stats[k] = {kk: to_builtin(vv) for kk, vv in v.items()}
+                else:
+                    qc_stats[k] = to_builtin(v)
 
+            ...
             return {
                 'available': True,
                 'stats': qc_stats,
@@ -65,6 +68,7 @@ def extract_qc_report(h5ad_path: str, adata) -> Dict[str, Any]:
             }
         except Exception as e:
             print(f"DEBUG: Could not load QC stats from adata.uns: {e}")
+
 
     # Second, try to find QC report files in the same directory
     h5ad_dir = os.path.dirname(h5ad_path)
@@ -104,6 +108,13 @@ def extract_qc_report(h5ad_path: str, adata) -> Dict[str, Any]:
         'text_report': None,
         'report_path': None
     }
+
+def to_builtin(val):
+    if isinstance(val, (np.integer,)):
+        return int(val)
+    if isinstance(val, (np.floating,)):
+        return float(val)
+    return val
 
 def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
     """
@@ -159,19 +170,24 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
             clusters[col] = {
                 'labels': adata.obs[col].astype(str).tolist(),
                 'categories': adata.obs[col].cat.categories.tolist() if hasattr(adata.obs[col], 'cat') else list(set(adata.obs[col].astype(str))),
-                'counts': adata.obs[col].value_counts().to_dict()
+                'counts': {str(k): int(v) for k, v in adata.obs[col].value_counts().to_dict().items()}
             }
 
     # Extract cell type annotations
     cell_types = {}
     annotation_columns = ['cellmarker', 'panglaodb', 'cancersea', 'cell_type', 'manual_annotation']
+    print(f"DEBUG: Available obs columns: {list(adata.obs.columns)}")
+    print(f"DEBUG: Checking for annotation columns: {annotation_columns}")
     for col in annotation_columns:
         if col in adata.obs.columns:
+            print(f"DEBUG: Found annotation column '{col}'")
             cell_types[col] = {
                 'labels': adata.obs[col].astype(str).tolist(),
                 'categories': adata.obs[col].cat.categories.tolist() if hasattr(adata.obs[col], 'cat') else list(set(adata.obs[col].astype(str))),
-                'counts': adata.obs[col].value_counts().to_dict()
+                'counts': {str(k): int(v) for k, v in adata.obs[col].value_counts().to_dict().items()}
             }
+        else:
+            print(f"DEBUG: Column '{col}' NOT found in adata.obs")
 
     # Extract QC metrics
     qc_metrics = {}

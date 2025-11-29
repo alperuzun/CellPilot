@@ -51,6 +51,7 @@ class Response(BaseModel):
     timestamp: str
     type: Optional[str] = None
     params: Optional[Dict[str, Any]] = None
+    
 class QCMetricsRequest(BaseModel):
     input_path: str
 

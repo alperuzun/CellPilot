@@ -10,6 +10,7 @@ from .visualization import extract_visualization_data, get_gene_expression, get_
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 import asyncio
+import json
 import os
 from pathlib import Path
 app = FastAPI(title="CellPilot API")
@@ -217,9 +218,9 @@ async def preview_csv_data(path: str, max_rows: int = 1000):
         return {
             "type": "generic",
             "columns": df_with_headers.columns.tolist(),
-            "data": df_with_headers.head(max_rows).to_dict('records'),
+            "data": json.loads(df_with_headers.head(max_rows).to_json(orient='records')),
             "total_rows": len(df_with_headers),
-            "shape": list(df_with_headers.shape)
+            "shape": [int(x) for x in df_with_headers.shape]
         }
 
     except Exception as e:
@@ -658,7 +659,12 @@ async def get_available_datasets():
                     # Filter out temp files
                     h5ad_files = [f for f in h5ad_files if "temp" not in str(f) and "norm_log" not in str(f)]
                     if h5ad_files:
-                        h5ad_path = str(h5ad_files[0].absolute())
+                        # Prioritize annotated files over preprocessed files
+                        annotated_files = [f for f in h5ad_files if "annotated_" in f.name]
+                        if annotated_files:
+                            h5ad_path = str(annotated_files[0].absolute())
+                        else:
+                            h5ad_path = str(h5ad_files[0].absolute())
                 else:  # infercnv
                     # InferCNV doesn't output h5ad files, use directory path for PNG visualizations
                     h5ad_path = str(analysis_dir.absolute())

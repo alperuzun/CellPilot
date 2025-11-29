@@ -4,7 +4,6 @@ import Step1UploadDefine, { UploadData } from './Step1UploadDefine';
 import Step3ConfigureLaunch, { AnalysisData } from './Step3ConfigureLaunch';
 import Step3CellPhoneDBConfig, { CellPhoneDBAnalysisData } from './Step3CellPhoneDBConfig';
 import Step3InferCNVConfig, { InferCNVAnalysisData } from './Step3InferCNVConfig';
-import InteractiveDashboard from '../dashboard/InteractiveDashboard';
 
 
 interface AnalysisWizardProps {
@@ -25,7 +24,7 @@ export default function AnalysisWizard({ onAnalysisComplete }: AnalysisWizardPro
 
   const handleStep2Complete = (data: AnalysisData, outputPath?: string) => {
     setAnalysisData(data);
-    setActiveStep(2);
+    // Redirect directly to VisualizationDashboard via App.tsx
     if (outputPath && onAnalysisComplete) {
       onAnalysisComplete(outputPath);
     }
@@ -33,7 +32,7 @@ export default function AnalysisWizard({ onAnalysisComplete }: AnalysisWizardPro
 
   const handleCellPhoneDBComplete = (data: CellPhoneDBAnalysisData) => {
     setCellPhoneDBData(data);
-    // Don't set activeStep to 2 for CellPhoneDB - redirect to main visualization instead
+    // Redirect directly to VisualizationDashboard via App.tsx
     if (data.outputPath && onAnalysisComplete) {
       onAnalysisComplete(data.outputPath);
     }
@@ -41,7 +40,7 @@ export default function AnalysisWizard({ onAnalysisComplete }: AnalysisWizardPro
 
   const handleInferCNVComplete = (data: InferCNVAnalysisData) => {
     setInferCNVData(data);
-    setActiveStep(2);
+    // Redirect directly to VisualizationDashboard via App.tsx
     if (data.outputPath && onAnalysisComplete) {
       onAnalysisComplete(data.outputPath);
     }
@@ -50,28 +49,6 @@ export default function AnalysisWizard({ onAnalysisComplete }: AnalysisWizardPro
   const handleBackToStep1 = () => {
     setActiveStep(0);
   };
-
-  const handleNewAnalysis = () => {
-    setActiveStep(0);
-    setUploadData(undefined);
-    setAnalysisData(undefined);
-    setCellPhoneDBData(undefined);
-    setInferCNVData(undefined);
-  };
-
-  // If we're on the dashboard step, show full-screen dashboard
-  if (activeStep === 2 && uploadData && (analysisData || cellPhoneDBData || inferCNVData)) {
-    // Pass the appropriate analysis data based on analysis type
-    const dashboardAnalysisData = analysisData || cellPhoneDBData || inferCNVData!;
-
-    return (
-      <InteractiveDashboard
-        uploadData={uploadData}
-        analysisData={dashboardAnalysisData}
-        onNewAnalysis={handleNewAnalysis}
-      />
-    );
-  }
 
   return (
     <div className="h-screen flex flex-col">

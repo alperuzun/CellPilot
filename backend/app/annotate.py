@@ -483,6 +483,17 @@ def annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarke
     scsa.cell_anno(clustertype='leiden',
                cluster='all',rank_rep=True)
     scsa.cell_auto_anno(adata,key=db_type)
+
+    # Validate that annotation column was created
+    print(f"DEBUG: Columns in adata.obs after cell_auto_anno: {list(adata.obs.columns)}")
+    if db_type not in adata.obs.columns:
+        raise ValueError(
+            f"Annotation failed: Column '{db_type}' was not created by cell_auto_anno(). "
+            f"Available columns: {list(adata.obs.columns)}. "
+            f"This likely indicates an issue with the {db_type} database configuration in pySCSA."
+        )
+    print(f"SUCCESS: Annotation column '{db_type}' was created successfully")
+
     import io
     import sys
     from contextlib import redirect_stdout

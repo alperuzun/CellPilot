@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Union
 import os
+import json
 
 import anndata as ad
 import pandas as pd
@@ -28,25 +29,27 @@ def summarize_h5ad(path: Union[str, Path] = None, adata: ad.AnnData = None) -> D
     else:
         A = adata
     try:
-        obs_preview = (
+        obs_preview = json.loads(
             A.obs.reset_index()
               .head(5)
-              .to_dict(orient="records")
+              .to_json(orient="records")
         )
-        var_preview = (
+        var_preview = json.loads(
             A.var.reset_index()
               .head(5)
-              .to_dict(orient="records")
+              .to_json(orient="records")
         )
         clusters = None
         if "leiden" in A.obs.columns:
             clusters = A.obs["leiden"].value_counts().to_dict()
-            clusters = [{"cluster": k, "count": v} for k, v in clusters.items()]
+            clusters = [{"cluster": k, "count": int(v)} for k, v in clusters.items()]
         label_columns = ["cellmarker", "panglaodb", "cancersea"]
         label_counts = {}
         for l in label_columns:
             if l in A.obs.columns:
-                label_counts[l] = A.obs[l].value_counts().to_dict()
+                label_counts[l] = {k: int(v) for k, v in A.obs[l].value_counts().to_dict().items()}
+            else:
+                print(f"DEBUG: Annotation column '{l}' not found in adata.obs")
 
 
         return {

@@ -94,7 +94,7 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
 
     // Annotation options - matching backend defaults
     runAnnotation: analysisData?.runAnnotation ?? true,
-    useCellmarker: analysisData?.useCellmarker ?? true,
+    useCellmarker: analysisData?.useCellmarker ?? false,
     usePanglao: analysisData?.usePanglao ?? false,
     useCancerSingleCellAtlas: analysisData?.useCancerSingleCellAtlas ?? false,
 
@@ -107,6 +107,7 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   const [expandedSections, setExpandedSections] = useState({
     qc: true,
@@ -162,7 +163,7 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
               currentStep: 'Analysis Complete!',
               annotatedDatasetPath: realDatasetPath
             };
-            onComplete(completedAnalysis, realDatasetPath);
+            onComplete(completedAnalysis);
             setRunning(false);
             clearInterval(pollInterval);
           } catch (error) {
@@ -181,7 +182,7 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
               currentStep: 'Analysis Complete!',
               annotatedDatasetPath: annotatedDatasetPath
             };
-            onComplete(completedAnalysis, annotatedDatasetPath);
+            onComplete(completedAnalysis);
             setRunning(false);
             clearInterval(pollInterval);
           }
@@ -199,7 +200,44 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     return () => clearInterval(pollInterval);
   }, [jobId, running, config, onComplete]);
 
+  const validateForm = (): string | null => {
+    // Check if running annotation
+    if (config.runAnnotation) {
+      if (!config.useCellmarker && !config.usePanglao && !config.useCancerSingleCellAtlas) {
+        return 'At least one annotation method must be selected (CellMarker, PanglaoDB, or CancerSEA)';
+      }
+    }
+    
+    // Check if any analysis is selected
+    if (!config.runAnnotation && !config.runCellPhone && !config.runInferCNV) {
+      return 'At least one analysis type must be enabled (Annotation, CellPhoneDB, or InferCNV)';
+    }
+    
+    // Validate QC thresholds
+    if (config.minGenes <= 0) {
+      return 'Minimum genes per cell must be greater than 0';
+    }
+    if (config.minCounts <= 0) {
+      return 'Minimum counts per cell must be greater than 0';
+    }
+    if (config.mitoThreshold <= 0 || config.mitoThreshold > 100) {
+      return 'Mitochondrial threshold must be between 0 and 100%';
+    }
+    
+    return null;
+  };
+
   const handleStartAnalysis = async () => {
+    // Clear any previous errors
+    setError(null);
+    
+    // Validate form
+    const validationError = validateForm();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    
     setRunning(true);
     setProgress(0);
     setCurrentStep('Starting analysis...');
@@ -207,7 +245,6 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     try {
       // Create output directory path
       const outputDir = `annotation_${uploadData.datasetName}`;
-
       // Start the analysis job
       const response = await api.startAnalysis({
         name: uploadData.datasetName,
@@ -247,11 +284,16 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
       setCurrentStep('Analysis job started. Monitoring progress...');
     } catch (error) {
       console.error('Failed to start analysis:', error);
+      let errorMessage = 'An unexpected error occurred. Please try again.';
+      
       if (error instanceof APIError) {
-        setCurrentStep(`Failed to start analysis: ${error.message}`);
-      } else {
-        setCurrentStep('Failed to start analysis. Please try again.');
+        errorMessage = `Backend Error: ${error.message}`;
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
       }
+      
+      setError(errorMessage);
+      setCurrentStep('');
       setConfig(prev => ({ ...prev, status: 'failed' }));
       setRunning(false);
     }
@@ -390,6 +432,29 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
               </span>
             </div>
           </div>
+
+          {/* Error Alert */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+              <div className="flex">
+                <svg className="w-5 h-5 text-red-400 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-red-800">Error</h3>
+                  <p className="text-sm text-red-700 mt-1">{error}</p>
+                </div>
+                <button
+                  onClick={() => setError(null)}
+                  className="ml-3 text-red-400 hover:text-red-600"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Configuration Sections */}
           <div className="space-y-4 mb-8">
