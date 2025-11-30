@@ -96,3 +96,26 @@ class JobStatusResponse(BaseModel):
     current_step: str
     message: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
+
+class CreateLayerRequest(BaseModel):
+    input_path: str
+    layer_name: str
+    source_layer: str
+
+class UpdateLayerRequest(BaseModel):
+    input_path: str
+    layer_name: str
+    mapping: Dict[str, str] = {}
+    mapping_type: str = 'cluster'  # 'cluster', 'cell', 'selection'
+    source_layer: Optional[str] = None
+    cell_ids: Optional[List[str]] = None
+    new_label: Optional[str] = None
+    categories: Optional[List[str]] = None
+
+class DifferentialExpressionRequest(BaseModel):
+    input_path: str
+    selected_cell_ids: List[str]
+    reference_cell_ids: Optional[List[str]] = None
+    n_genes: int = 50
+    mode: str = 'global' # 'global' or 'local'
+    cluster_column: str = 'leiden'

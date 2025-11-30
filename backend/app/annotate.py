@@ -1,3 +1,4 @@
+
 import matplotlib
 matplotlib.use("Agg")          # headless backend – no windows created
 import scanpy as sc
@@ -447,6 +448,119 @@ def annotate(
     print("Cell type analysis complete!")
     return outputs, params
 
+def save_annotation_confidence(anno_df, output_dir, name, db_type, timestamp, data={}):
+    """
+    Calculate and save structured annotation confidence data.
+    Implements High/Medium/Ambiguous/Unknown logic and alternative candidates.
+    """
+    import json
+    
+    confidence_results = {
+        "metadata": {
+            "name": name,
+            "db_type": db_type,
+            "timestamp": timestamp,
+            "logic": {
+                "high": "Top > 2*RunnerUp OR RunnerUp < 0",
+                "medium": "Top - RunnerUp > 0.5",
+                "ambiguous": "Top - RunnerUp < 0.2",
+                "unknown": "Top < 1.0"
+            }
+        },
+        "clusters": {}
+    }
+    
+    # Iterate through unique clusters
+    clusters = sorted(anno_df['Cluster'].unique())
+    
+    for cluster in clusters:
+        # Get all candidates for this cluster, sorted by Z-score descending
+        cluster_df = anno_df[anno_df['Cluster'] == cluster].sort_values('Z-score', ascending=False)
+        
+        if len(cluster_df) == 0:
+            continue
+            
+        top_cand = cluster_df.iloc[0]
+        top_score = float(top_cand['Z-score'])
+        top_name = top_cand['Cell Type']
+        
+        # Default values
+        confidence = "Unknown"
+        runner_up = None
+        alternatives = []
+        
+        # Get runner up if exists
+        if len(cluster_df) > 1:
+            runner_cand = cluster_df.iloc[1]
+            runner_score = float(runner_cand['Z-score'])
+            runner_name = runner_cand['Cell Type']
+            
+            runner_up = {
+                "cell_type": runner_name,
+                "z_score": runner_score
+            }
+            
+            # Logic Tree
+            if top_score < 1.0:
+                confidence = "Unknown"
+            elif top_score > runner_score * 2 or runner_score < 0:
+                confidence = "High"
+            elif (top_score - runner_score) > 0.5:
+                confidence = "Medium"
+            elif (top_score - runner_score) < 0.2:
+                confidence = "Ambiguous"
+            else:
+                # Fallback for 0.2 <= diff <= 0.5 cases - treat as Medium/Low or just Ambiguous
+                # User's logic didn't explicitly cover 0.2-0.5 gap, but 'Medium' check is >0.5
+                # Ambiguous is <0.2. So 0.2-0.5 is undefined. Let's call it "Low" or "Ambiguous".
+                # Let's group with Ambiguous for safety or create "Low".
+                # User prompted: "Is Top - RunnerUp > 0.5? ... Result: Medium"
+                # "Is Top - RunnerUp < 0.2? ... Result: Ambiguous"
+                # Gap: 0.2 to 0.5. Let's call it "Low Confidence".
+                confidence = "Low"
+                
+            # Collect alternatives (within 0.5 of top score)
+            # Exclude top candidate itself
+            alt_df = cluster_df[
+                (cluster_df['Z-score'] >= (top_score - 0.5)) & 
+                (cluster_df['Cell Type'] != top_name)
+            ]
+            
+            for _, row in alt_df.iterrows():
+                alternatives.append({
+                    "cell_type": row['Cell Type'],
+                    "z_score": float(row['Z-score']),
+                    "diff_from_top": round(top_score - float(row['Z-score']), 3)
+                })
+                
+        else:
+            # Only one candidate
+            if top_score < 1.0:
+                confidence = "Unknown"
+            else:
+                confidence = "High" # Only one candidate means no confusion
+                
+        confidence_results["clusters"][str(cluster)] = {
+            "top_candidate": {
+                "cell_type": top_name,
+                "z_score": top_score
+            },
+            "runner_up": runner_up,
+            "confidence": confidence,
+            "alternatives": alternatives
+        }
+        
+    # Save to JSON
+    json_filename = f'{name}_{db_type}_annotation_confidence_{timestamp}.json'
+    json_path = os.path.join(output_dir, json_filename)
+    
+    with open(json_path, 'w') as f:
+        json.dump(confidence_results, f, indent=2)
+        
+    print(f"Annotation confidence data saved to: {json_path}")
+    data['files'].append((json_path, f'{db_type} Confidence Analysis'))
+    return json_path
+
 def annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarker', name='', data={}):
     """Annotate clusters using OmicVerse"""
     print("Running OmicVerse annotation...")
@@ -480,7 +594,7 @@ def annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarke
                     tissue='All',
                     model_path=db_path
     )
-    scsa.cell_anno(clustertype='leiden',
+    anno_df = scsa.cell_anno(clustertype='leiden',
                cluster='all',rank_rep=True)
     scsa.cell_auto_anno(adata,key=db_type)
 
@@ -504,6 +618,12 @@ def annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarke
             scsa.cell_anno_print()
     scsa.cell_anno_print()
     print(f"Annotation details saved to: {annotation_output_file}")
+    
+    # Calculate and save confidence data
+    try:
+        save_annotation_confidence(anno_df, output_dir, name, db_type, timestamp, data)
+    except Exception as e:
+        print(f"Error saving annotation confidence: {e}")
 
     # Build a counts-aware categorical column for nicer legend labels
     counts = adata.obs[db_type].value_counts().to_dict()
@@ -759,4 +879,3 @@ def count_marker_gene_expression(adata, marker_dict, timestamp, annotation_colum
     results_df.to_csv(f'{output_dir}/{filename}', index=False)
     
     return f'{output_dir}/{filename}'
-

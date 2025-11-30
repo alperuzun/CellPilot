@@ -1,12 +1,14 @@
+
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .models import AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams, Response, AnalysisJobRequest, AnalysisJobResponse, JobStatusResponse
+from .models import AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams, Response, AnalysisJobRequest, AnalysisJobResponse, JobStatusResponse, CreateLayerRequest, UpdateLayerRequest, DifferentialExpressionRequest
 from .tasks import spawn_process
 from .utils import summarize_h5ad
 from .analysis import run_cell_phone_db, run_inferncnv
 from .annotate import annotate
 from .job_manager import job_manager
 from .visualization import extract_visualization_data, get_gene_expression, get_marker_genes_by_cluster, get_celltype_markers_by_column
+from .analysis_utils import perform_differential_expression
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 import asyncio
@@ -14,6 +16,20 @@ import json
 import os
 from pathlib import Path
 app = FastAPI(title="CellPilot API")
+
+class FileLockManager:
+    def __init__(self):
+        self.locks = {}
+        self.global_lock = asyncio.Lock()
+
+    async def get_lock(self, path: str):
+        abs_path = os.path.abspath(path)
+        async with self.global_lock:
+            if abs_path not in self.locks:
+                self.locks[abs_path] = asyncio.Lock()
+            return self.locks[abs_path]
+
+lock_manager = FileLockManager()
 
 #  allow renderer → http://localhost:5173 or packaged file://
 app.add_middleware(
@@ -141,7 +157,7 @@ async def inferCNV_api(params: InferCNVParams):
         data = await run_in_threadpool(
             run_inferncnv,
             params.input_path,
-            output_dir,
+            params.output_dir,
             params.name,
             params.reference_key,
             params.gtf_path,
@@ -271,6 +287,8 @@ async def get_analysis_files(h5ad_path: str):
             # Classify by content/filename patterns
             if 'dotplot' in name_lower:
                 return 'dotplot'
+            elif 'annotation_confidence' in name_lower and file_path.suffix == '.json':
+                return 'annotation_confidence' # New type
             elif 'annotation_details' in name_lower:
                 return 'annotation_details'
             elif 'clusters_umap' in name_lower or 'cluster_plot' in name_lower:
@@ -330,11 +348,17 @@ async def get_analysis_files(h5ad_path: str):
 
 @app.get("/annotation_details")
 async def get_annotation_details(file_path: str):
-    """Parse and return annotation details from text file"""
+    """Parse and return annotation details from text file OR read confidence JSON"""
     try:
         if not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
 
+        # If it's the new JSON format
+        if file_path.endswith('.json') and 'annotation_confidence' in file_path:
+            with open(file_path, 'r') as f:
+                return json.load(f)
+
+        # Legacy Text File Parsing
         annotation_details = []
         with open(file_path, 'r') as f:
             for line in f:
@@ -371,6 +395,18 @@ async def get_annotation_details(file_path: str):
                             })
 
         return {"annotations": annotation_details}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/annotation_confidence")
+async def get_annotation_confidence(file_path: str):
+    """Return the structured annotation confidence JSON data"""
+    try:
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+            
+        with open(file_path, 'r') as f:
+            return json.load(f)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -544,6 +580,25 @@ async def start_analysis(request: AnalysisJobRequest, background_tasks: Backgrou
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/differential_expression")
+async def differential_expression_api(request: DifferentialExpressionRequest):
+    """Perform differential expression analysis on selected cells"""
+    try:
+        lock = await lock_manager.get_lock(request.input_path)
+        async with lock:
+            results = await run_in_threadpool(
+                perform_differential_expression,
+                request.input_path,
+                request.selected_cell_ids,
+                request.reference_cell_ids,
+                request.n_genes,
+                request.mode,
+                request.cluster_column
+            )
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/job_status/{job_id}")
 async def get_job_status(job_id: str):
     """Get the status of an analysis job"""
@@ -569,7 +624,11 @@ async def get_visualization_data(h5ad_path: str):
             raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
 
         print(f"ENDPOINT DEBUG: File exists, starting threadpool execution...")
-        data = await run_in_threadpool(extract_visualization_data, h5ad_path)
+        
+        lock = await lock_manager.get_lock(h5ad_path)
+        async with lock:
+            data = await run_in_threadpool(extract_visualization_data, h5ad_path)
+            
         print(f"ENDPOINT DEBUG: Threadpool execution completed successfully")
         return data
     except Exception as e:
@@ -583,7 +642,9 @@ async def get_gene_expression_data(h5ad_path: str, gene_names: list[str]):
         if not os.path.exists(h5ad_path):
             raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
 
-        expression_data = await run_in_threadpool(get_gene_expression, h5ad_path, gene_names)
+        lock = await lock_manager.get_lock(h5ad_path)
+        async with lock:
+            expression_data = await run_in_threadpool(get_gene_expression, h5ad_path, gene_names)
         return expression_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -595,7 +656,9 @@ async def get_marker_genes(h5ad_path: str, cluster_column: str = "leiden", n_gen
         if not os.path.exists(h5ad_path):
             raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
 
-        marker_data = await run_in_threadpool(get_marker_genes_by_cluster, h5ad_path, cluster_column, n_genes)
+        lock = await lock_manager.get_lock(h5ad_path)
+        async with lock:
+            marker_data = await run_in_threadpool(get_marker_genes_by_cluster, h5ad_path, cluster_column, n_genes)
         return marker_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -607,7 +670,9 @@ async def get_celltype_markers(h5ad_path: str, cluster_column: str = "cellmarker
         if not os.path.exists(h5ad_path):
             raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
 
-        marker_data = await run_in_threadpool(get_celltype_markers_by_column, h5ad_path, cluster_column)
+        lock = await lock_manager.get_lock(h5ad_path)
+        async with lock:
+            marker_data = await run_in_threadpool(get_celltype_markers_by_column, h5ad_path, cluster_column)
         return marker_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -700,14 +765,17 @@ async def get_obs_columns(request: AdataRequest):
 
         # Load the file using the same logic as other endpoints
         path_str = str(request.input_path).lower()
-        if path_str.endswith('.h5') and not path_str.endswith('.h5ad'):
-            # This is likely a 10X H5 file
-            print(f"Reading as 10X H5 file: {request.input_path}")
-            adata = await run_in_threadpool(sc.read_10x_h5, request.input_path)
-        else:
-            # This is an H5AD file
-            print(f"Reading as H5AD file: {request.input_path}")
-            adata = await run_in_threadpool(ad.read_h5ad, request.input_path)
+        
+        lock = await lock_manager.get_lock(request.input_path)
+        async with lock:
+            if path_str.endswith('.h5') and not path_str.endswith('.h5ad'):
+                # This is likely a 10X H5 file
+                print(f"Reading as 10X H5 file: {request.input_path}")
+                adata = await run_in_threadpool(sc.read_10x_h5, request.input_path)
+            else:
+                # This is an H5AD file
+                print(f"Reading as H5AD file: {request.input_path}")
+                adata = await run_in_threadpool(ad.read_h5ad, request.input_path)
 
         # Get all columns from obs
         all_columns = list(adata.obs.columns)
@@ -764,5 +832,130 @@ async def get_obs_columns(request: AdataRequest):
             "total_columns": len(all_columns)
         }
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/create_annotation_layer")
+async def create_annotation_layer(request: CreateLayerRequest):
+    """Create a new annotation layer (column) in adata.obs"""
+    try:
+        def _create():
+            import scanpy as sc
+            import anndata as ad
+            
+            # Read
+            path_str = str(request.input_path).lower()
+            if path_str.endswith('.h5') and not path_str.endswith('.h5ad'):
+                adata = sc.read_10x_h5(request.input_path)
+            else:
+                adata = sc.read_h5ad(request.input_path)
+                
+            # Check source
+            if request.source_layer not in adata.obs.columns:
+                raise ValueError(f"Source layer '{request.source_layer}' not found")
+            
+            # Create copy
+            adata.obs[request.layer_name] = adata.obs[request.source_layer].copy()
+            
+            # Write
+            adata.write_h5ad(request.input_path)
+            return {"status": "success", "layer": request.layer_name}
+
+        lock = await lock_manager.get_lock(request.input_path)
+        async with lock:
+            return await run_in_threadpool(_create)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update_annotation_layer")
+async def update_annotation_layer(request: UpdateLayerRequest):
+    """Update an annotation layer with new labels"""
+    try:
+        def _update():
+            import scanpy as sc
+            import pandas as pd
+            
+            # Read
+            path_str = str(request.input_path).lower()
+            if path_str.endswith('.h5') and not path_str.endswith('.h5ad'):
+                adata = sc.read_10x_h5(request.input_path)
+            else:
+                adata = sc.read_h5ad(request.input_path)
+                
+            target_col = request.layer_name
+            
+            if request.mapping_type == 'cluster':
+                # Init if missing (and source provided)
+                if target_col not in adata.obs.columns:
+                    if not request.source_layer:
+                        raise ValueError(f"Layer '{target_col}' not found and no source_layer provided")
+                    if request.source_layer not in adata.obs.columns:
+                        raise ValueError(f"Source layer '{request.source_layer}' not found")
+                    adata.obs[target_col] = adata.obs[request.source_layer].copy()
+                
+                # Apply mapping
+                # Convert to string, replace, convert to category
+                current_vals = adata.obs[target_col].astype(str)
+                # Map only what's in keys
+                new_vals = current_vals.replace(request.mapping)
+                adata.obs[target_col] = new_vals.astype('category')
+                
+            elif request.mapping_type == 'cell':
+                # Cell-wise update
+                if target_col not in adata.obs.columns:
+                     adata.obs[target_col] = "Unannotated"
+                
+                series = adata.obs[target_col].astype(str)
+                # Update with dict
+                update_series = pd.Series(request.mapping)
+                series.update(update_series)
+                adata.obs[target_col] = series.astype('category')
+            
+            elif request.mapping_type == 'set_categories':
+                if target_col not in adata.obs.columns:
+                    adata.obs[target_col] = "Unannotated"
+                
+                if not request.categories:
+                    raise ValueError("categories list is required for set_categories")
+                
+                # Update categories
+                current_series = adata.obs[target_col].astype(str)
+                adata.obs[target_col] = pd.Categorical(current_series, categories=request.categories)
+
+            elif request.mapping_type == 'selection':
+                if target_col not in adata.obs.columns:
+                    adata.obs[target_col] = "Unannotated"
+                
+                # Check for categories first if provided
+                if request.categories:
+                    # Explicitly set categories
+                    current_series = adata.obs[target_col].astype(str)
+                    adata.obs[target_col] = pd.Categorical(current_series, categories=request.categories)
+
+                if not request.cell_ids or not request.new_label:
+                    raise ValueError("cell_ids and new_label are required for selection mapping")
+                
+                # Convert to string to allow new values if not restricted by categories
+                if not request.categories:
+                    adata.obs[target_col] = adata.obs[target_col].astype(str)
+                
+                # Filter valid IDs
+                valid_ids = [cid for cid in request.cell_ids if cid in adata.obs.index]
+                if valid_ids:
+                    if request.categories and request.new_label not in request.categories:
+                        raise ValueError(f"Label '{request.new_label}' is not in allowed categories")
+                    adata.obs.loc[valid_ids, target_col] = request.new_label
+                    
+                # Convert back to category if we didn't use explicit categories
+                if not request.categories:
+                    adata.obs[target_col] = adata.obs[target_col].astype('category')
+
+            # Write
+            adata.write_h5ad(request.input_path)
+            return {"status": "success", "layer": target_col}
+
+        lock = await lock_manager.get_lock(request.input_path)
+        async with lock:
+            return await run_in_threadpool(_update)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

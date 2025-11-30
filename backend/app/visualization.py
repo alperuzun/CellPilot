@@ -59,7 +59,12 @@ def extract_qc_report(h5ad_path: str, adata) -> Dict[str, Any]:
                 else:
                     qc_stats[k] = to_builtin(v)
 
-            ...
+            # Look for text report in uns or file
+            text_report = None
+            if 'txt_report_path' in qc_stats and os.path.exists(qc_stats['txt_report_path']):
+                with open(qc_stats['txt_report_path'], 'r') as f:
+                    text_report = f.read()
+            
             return {
                 'available': True,
                 'stats': qc_stats,
@@ -162,39 +167,70 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
             'y': adata.obsm['X_pca'][:, 1].tolist()
         }
 
-    # Extract cluster information
-    clusters = {}
-    cluster_columns = ['leiden', 'louvain']
-    for col in cluster_columns:
-        if col in adata.obs.columns:
-            clusters[col] = {
-                'labels': adata.obs[col].astype(str).tolist(),
-                'categories': adata.obs[col].cat.categories.tolist() if hasattr(adata.obs[col], 'cat') else list(set(adata.obs[col].astype(str))),
-                'counts': {str(k): int(v) for k, v in adata.obs[col].value_counts().to_dict().items()}
-            }
-
-    # Extract cell type annotations
-    cell_types = {}
-    annotation_columns = ['cellmarker', 'panglaodb', 'cancersea', 'cell_type', 'manual_annotation']
-    print(f"DEBUG: Available obs columns: {list(adata.obs.columns)}")
-    print(f"DEBUG: Checking for annotation columns: {annotation_columns}")
-    for col in annotation_columns:
-        if col in adata.obs.columns:
-            print(f"DEBUG: Found annotation column '{col}'")
-            cell_types[col] = {
-                'labels': adata.obs[col].astype(str).tolist(),
-                'categories': adata.obs[col].cat.categories.tolist() if hasattr(adata.obs[col], 'cat') else list(set(adata.obs[col].astype(str))),
-                'counts': {str(k): int(v) for k, v in adata.obs[col].value_counts().to_dict().items()}
-            }
-        else:
-            print(f"DEBUG: Column '{col}' NOT found in adata.obs")
-
     # Extract QC metrics
     qc_metrics = {}
     qc_columns = ['total_counts', 'n_genes_by_counts', 'pct_counts_mt', 'doublet_score']
     for col in qc_columns:
         if col in adata.obs.columns:
             qc_metrics[col] = adata.obs[col].tolist()
+
+    # Extract clusters and cell types dynamically
+    clusters = {}
+    cell_types = {}
+    
+    # Define known categories to help classification
+    known_cluster_cols = ['leiden', 'louvain', 'cluster', 'seurat_clusters']
+    known_annotation_cols = ['cellmarker', 'panglaodb', 'cancersea', 'cell_type', 'manual_annotation', 'celltype', 'annotation']
+
+    for col in adata.obs.columns:
+        # Skip QC columns
+        if col in qc_metrics:
+            continue
+            
+        # Check if categorical or low-cardinality string/int
+        is_cat = False
+        if hasattr(adata.obs[col], 'cat'):
+            is_cat = True
+        elif adata.obs[col].dtype == 'object' or adata.obs[col].dtype.name == 'category':
+            if adata.obs[col].nunique() < 200:
+                is_cat = True
+        
+        if is_cat:
+            try:
+                # Prepare data
+                series = adata.obs[col].astype(str)
+                # Get unique categories (sorted)
+                if hasattr(adata.obs[col], 'cat'):
+                    categories = adata.obs[col].cat.categories.tolist()
+                else:
+                    categories = sorted(series.unique().tolist())
+                
+                # Create entry
+                entry = {
+                    'labels': series.tolist(),
+                    'categories': categories,
+                    'counts': {str(k): int(v) for k, v in series.value_counts().to_dict().items()}
+                }
+                
+                # Classify into clusters vs cell_types
+                col_lower = col.lower()
+                is_annotation = any(key in col_lower for key in known_annotation_cols)
+                # If it's a custom layer created by user (usually Capitalized or snake_case), it's valuable.
+                # If it has "manual" or "v1", treat as annotation
+                if "manual" in col_lower or "_v" in col_lower:
+                    is_annotation = True
+                
+                if is_annotation:
+                    cell_types[col] = entry
+                else:
+                    clusters[col] = entry
+                    
+            except Exception as e:
+                print(f"DEBUG: Error processing column {col}: {e}")
+
+    # Ensure defaults exist
+    if not clusters and not cell_types:
+        print("DEBUG: No clusters or cell types found. Checking for any categorical column.")
 
     # Get curated gene list combining common markers + dataset-specific genes
     curated_genes = []
@@ -237,7 +273,7 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
                     curated_genes.append(gene)
                     if len(curated_genes) >= 50:
                         break
-
+        
         # Sort alphabetically for easy searching
         curated_genes.sort()
         top_genes = curated_genes
