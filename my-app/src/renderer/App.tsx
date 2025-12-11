@@ -85,8 +85,8 @@ export default function App() {
           )}
           {activeSection === 'visualizations' && (
             <VisualizationDashboard
-              h5adPath={visualizationDataset}
-              autoLoad={!!visualizationDataset}
+              initialPath={visualizationDataset}
+              onBack={() => setActiveSection('analysis')}
             />
           )}
           {activeSection === 'about' && (

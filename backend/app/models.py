@@ -119,3 +119,27 @@ class DifferentialExpressionRequest(BaseModel):
     n_genes: int = 50
     mode: str = 'global' # 'global' or 'local'
     cluster_column: str = 'leiden'
+
+class PreprocessingParams(BaseModel):
+    n_hvgs: int = 2000
+    n_pcs: int = 50
+    n_neighbors: int = 15
+    resolution: float = 0.8
+
+class SubclusterAnnotationParams(BaseModel):
+    use_cellmarker: bool = True
+    use_panglao: bool = False
+    use_cancer_single_cell_atlas: bool = False
+
+class SubclusterRequest(BaseModel):
+    parent_path: str
+    cell_ids: List[str]
+    name: str
+    preprocessing_params: PreprocessingParams
+    annotation_params: SubclusterAnnotationParams
+
+class MergeSubclusterRequest(BaseModel):
+    parent_path: str
+    subcluster_path: str
+    source_layer: str
+    target_layer: str

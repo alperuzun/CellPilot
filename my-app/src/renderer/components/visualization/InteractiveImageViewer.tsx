@@ -1,55 +1,44 @@
-import React, { useState } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  CardMedia,
-  CardActionArea,
-  CardActions,
-  Typography,
-  Grid,
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  IconButton,
-  Button,
-  Zoom,
-  Fade,
-  Chip,
-  Stack,
-  useTheme,
-  alpha
-} from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
-import DownloadIcon from '@mui/icons-material/Download';
-import FullscreenIcon from '@mui/icons-material/Fullscreen';
-import ZoomInIcon from '@mui/icons-material/ZoomIn';
-import ZoomOutIcon from '@mui/icons-material/ZoomOut';
-import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
-import NavigateNextIcon from '@mui/icons-material/NavigateNext';
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
-
-interface ImageFile {
-  path: string;
-  name: string;
-  type: string;
-  size_mb?: number;
-}
+import React, { useState, useEffect } from 'react';
+import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Download, Maximize2, X, ImageIcon } from 'lucide-react';
+import { api, DatasetInfo, AnalysisFile } from '../../services/api';
 
 interface InteractiveImageViewerProps {
-  images: ImageFile[];
-  title: string;
-  category: string;
+  dataset: DatasetInfo;
 }
 
-export default function InteractiveImageViewer({ images, title, category }: InteractiveImageViewerProps) {
-  const theme = useTheme();
-  const [selectedImage, setSelectedImage] = useState<ImageFile | null>(null);
+export default function InteractiveImageViewer({ dataset }: InteractiveImageViewerProps) {
+  const [images, setImages] = useState<AnalysisFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedImage, setSelectedImage] = useState<AnalysisFile | null>(null);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [imageLoading, setImageLoading] = useState<{ [key: string]: boolean }>({});
 
-  const handleImageClick = (image: ImageFile, index: number) => {
+  useEffect(() => {
+    const loadImages = async () => {
+      try {
+        setLoading(true);
+        // For InferCNV/CPDB, dataset.path is likely the directory.
+        // The API expects h5ad_path or directory path.
+        const response = await api.getAnalysisFiles(dataset.path);
+        
+        // Filter for images
+        const imageFiles = response.files.filter(f => 
+            ['dotplot', 'heatmap', 'network_plot', 'cluster_plot', 'annotation_plot', 'other_plot'].includes(f.type) ||
+            f.path.endsWith('.png') || f.path.endsWith('.jpg') || f.path.endsWith('.svg')
+        );
+        
+        setImages(imageFiles);
+      } catch (err) {
+        console.error('Failed to load images:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadImages();
+  }, [dataset]);
+
+  const handleImageClick = (image: AnalysisFile, index: number) => {
     setSelectedImage(image);
     setSelectedIndex(index);
     setZoomLevel(1);
@@ -61,13 +50,8 @@ export default function InteractiveImageViewer({ images, title, category }: Inte
     setZoomLevel(1);
   };
 
-  const handleZoomIn = () => {
-    setZoomLevel(prev => Math.min(prev + 0.25, 3));
-  };
-
-  const handleZoomOut = () => {
-    setZoomLevel(prev => Math.max(prev - 0.25, 0.5));
-  };
+  const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 0.25, 3));
+  const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 0.25, 0.5));
 
   const handlePrevious = () => {
     if (selectedIndex > 0) {
@@ -85,304 +69,145 @@ export default function InteractiveImageViewer({ images, title, category }: Inte
     }
   };
 
-  const handleDownload = (image: ImageFile) => {
+  const handleDownload = (image: AnalysisFile) => {
     const link = document.createElement('a');
-    link.href = `http://127.0.0.1:8000/preview_img?path=${encodeURIComponent(image.path)}`;
-    link.download = image.name + '.png';
+    link.href = api.getPreviewImageUrl(image.path);
+    link.download = image.name;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const getCategoryColor = () => {
-    switch(category.toLowerCase()) {
-      case 'heatmap': return theme.palette.error.main;
-      case 'dotplot': return theme.palette.info.main;
-      case 'network': return theme.palette.success.main;
-      default: return theme.palette.primary.main;
-    }
-  };
-
   const formatImageName = (name: string) => {
-    // Make names more readable by replacing underscores and capitalizing
     return name
       .replace(/_/g, ' ')
       .replace(/\b\w/g, l => l.toUpperCase())
       .replace(/Cpdb/g, 'CellPhoneDB')
-      .replace(/\d{8} \d{4}/g, ''); // Remove timestamps
+      .replace(/\d{8} \d{4}/g, '')
+      .replace(/\.png$|\.jpg$|\.svg$/, '');
   };
 
+  if (loading) {
+      return (
+          <div className="flex items-center justify-center h-full">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+          </div>
+      );
+  }
+
+  if (images.length === 0) {
+      return (
+          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+              <ImageIcon size={48} className="mb-4 opacity-50" />
+              <p>No visualization images found for this analysis.</p>
+          </div>
+      );
+  }
+
   return (
-    <>
-      <Box sx={{ mb: 2 }}>
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            {title}
-          </Typography>
-          <Chip
-            label={`${images.length} images`}
-            size="small"
-            sx={{
-              backgroundColor: alpha(getCategoryColor(), 0.1),
-              color: getCategoryColor(),
-              fontWeight: 500
-            }}
-          />
-        </Stack>
-
-        <Grid container spacing={3}>
-          {images.map((image, index) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
-              <Zoom in timeout={300 + index * 100}>
-                <Card
-                  sx={{
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    '&:hover': {
-                      transform: 'translateY(-4px)',
-                      boxShadow: theme.shadows[8],
-                      '& .image-overlay': {
-                        opacity: 1
-                      }
-                    }
-                  }}
-                >
-                  <CardActionArea
-                    onClick={() => handleImageClick(image, index)}
-                    sx={{ position: 'relative', flexGrow: 1 }}
-                  >
-                    <Box sx={{ position: 'relative', paddingTop: '75%' }}>
-                      <CardMedia
-                        component="img"
-                        image={`http://127.0.0.1:8000/preview_img?path=${encodeURIComponent(image.path)}`}
-                        alt={image.name}
-                        onLoad={() => setImageLoading(prev => ({ ...prev, [image.path]: false }))}
-                        onLoadStart={() => setImageLoading(prev => ({ ...prev, [image.path]: true }))}
-                        sx={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover'
-                        }}
-                      />
-                      <Box
-                        className="image-overlay"
-                        sx={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          opacity: 0,
-                          transition: 'opacity 0.3s'
-                        }}
-                      >
-                        <Stack direction="row" spacing={1}>
-                          <IconButton
-                            sx={{
-                              color: 'white',
-                              backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                              '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.2)' }
-                            }}
-                          >
-                            <FullscreenIcon />
-                          </IconButton>
-                        </Stack>
-                      </Box>
-                    </Box>
-                  </CardActionArea>
-                  <CardContent sx={{ flexGrow: 0 }}>
-                    <Typography
-                      variant="subtitle2"
-                      noWrap
-                      sx={{ fontWeight: 500 }}
-                      title={formatImageName(image.name)}
-                    >
-                      {formatImageName(image.name)}
-                    </Typography>
-                    {image.size_mb && (
-                      <Typography variant="caption" color="text.secondary">
-                        {image.size_mb.toFixed(1)} MB
-                      </Typography>
-                    )}
-                  </CardContent>
-                  <CardActions sx={{ justifyContent: 'space-between', px: 2, pb: 2 }}>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDownload(image);
-                      }}
-                      title="Download"
-                    >
-                      <DownloadIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleImageClick(image, index)}
-                      title="View Details"
-                    >
-                      <InfoOutlinedIcon fontSize="small" />
-                    </IconButton>
-                  </CardActions>
-                </Card>
-              </Zoom>
-            </Grid>
-          ))}
-        </Grid>
-      </Box>
-
-      {/* Full Screen Image Dialog */}
-      <Dialog
-        open={Boolean(selectedImage)}
-        onClose={handleClose}
-        maxWidth={false}
-        fullWidth
-        PaperProps={{
-          sx: {
-            backgroundColor: 'rgba(0, 0, 0, 0.95)',
-            maxWidth: '95vw',
-            maxHeight: '95vh',
-            m: 2
-          }
-        }}
-      >
-        {selectedImage && (
-          <>
-            <DialogTitle sx={{
-              color: 'white',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
-            }}>
-              <Box>
-                <Typography variant="h6">{formatImageName(selectedImage.name)}</Typography>
-                <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                  {selectedIndex + 1} of {images.length}
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={1}>
-                <IconButton
-                  onClick={handleZoomOut}
-                  disabled={zoomLevel <= 0.5}
-                  sx={{ color: 'white' }}
-                >
-                  <ZoomOutIcon />
-                </IconButton>
-                <Chip
-                  label={`${Math.round(zoomLevel * 100)}%`}
-                  sx={{
-                    color: 'white',
-                    borderColor: 'rgba(255, 255, 255, 0.3)'
-                  }}
-                  variant="outlined"
-                />
-                <IconButton
-                  onClick={handleZoomIn}
-                  disabled={zoomLevel >= 3}
-                  sx={{ color: 'white' }}
-                >
-                  <ZoomInIcon />
-                </IconButton>
-                <IconButton
-                  onClick={() => handleDownload(selectedImage)}
-                  sx={{ color: 'white' }}
-                >
-                  <DownloadIcon />
-                </IconButton>
-                <IconButton
-                  onClick={handleClose}
-                  sx={{ color: 'white' }}
-                >
-                  <CloseIcon />
-                </IconButton>
-              </Stack>
-            </DialogTitle>
-            <DialogContent sx={{
-              p: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              position: 'relative',
-              overflow: 'auto'
-            }}>
-              <Fade in timeout={500}>
-                <Box
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minHeight: '60vh',
-                    p: 2,
-                    position: 'relative'
-                  }}
-                >
-                  <img
-                    src={`http://127.0.0.1:8000/preview_img?path=${encodeURIComponent(selectedImage.path)}`}
-                    alt={selectedImage.name}
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '75vh',
-                      objectFit: 'contain',
-                      transform: `scale(${zoomLevel})`,
-                      transition: 'transform 0.3s ease',
-                      cursor: zoomLevel > 1 ? 'grab' : 'default'
+    <div className="p-8 h-full overflow-y-auto custom-scrollbar bg-transparent">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        {images.map((image, index) => (
+          <div
+            key={index}
+            className="group bg-gray-800 border border-gray-700 rounded-xl overflow-hidden hover:border-blue-500/50 transition-all cursor-pointer shadow-lg"
+            onClick={() => handleImageClick(image, index)}
+          >
+            <div className="relative pt-[75%] bg-gray-900/50">
+              <img
+                src={api.getPreviewImageUrl(image.path)}
+                alt={image.name}
+                className="absolute inset-0 w-full h-full object-contain p-2"
+                loading="lazy"
+              />
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+                <button className="p-2 bg-white/10 backdrop-blur rounded-full text-white hover:bg-white/20 transition-colors">
+                  <Maximize2 size={24} />
+                </button>
+              </div>
+            </div>
+            <div className="p-3 bg-gray-800">
+              <h3 className="text-sm font-medium text-gray-200 truncate mb-1" title={formatImageName(image.name)}>
+                {formatImageName(image.name)}
+              </h3>
+              <div className="flex justify-between items-center">
+                 <span className="text-xs text-gray-500 uppercase">{image.type.replace('_', ' ')}</span>
+                 <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDownload(image);
                     }}
-                  />
+                    className="p-1 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
+                    title="Download"
+                  >
+                    <Download size={14} />
+                  </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
 
-                  {/* Navigation Buttons */}
-                  {selectedIndex > 0 && (
-                    <IconButton
-                      onClick={handlePrevious}
-                      sx={{
-                        position: 'absolute',
-                        left: 20,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                        color: 'white',
-                        '&:hover': {
-                          backgroundColor: 'rgba(0, 0, 0, 0.7)'
-                        }
-                      }}
-                    >
-                      <NavigateBeforeIcon fontSize="large" />
-                    </IconButton>
-                  )}
+      {/* Full Screen Modal */}
+      {selectedImage && (
+        <div className="fixed inset-0 z-[100] bg-black/95 flex flex-col animate-in fade-in duration-200">
+          {/* Toolbar */}
+          <div className="flex items-center justify-between p-4 text-white border-b border-white/10 bg-black/50 backdrop-blur">
+            <div>
+              <h3 className="font-medium text-lg">{formatImageName(selectedImage.name)}</h3>
+              <p className="text-sm text-gray-400">{selectedIndex + 1} of {images.length}</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 bg-white/10 rounded-lg p-1">
+                <button onClick={handleZoomOut} disabled={zoomLevel <= 0.5} className="p-1 hover:bg-white/10 rounded disabled:opacity-50">
+                  <ZoomOut size={20} />
+                </button>
+                <span className="text-sm w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
+                <button onClick={handleZoomIn} disabled={zoomLevel >= 3} className="p-1 hover:bg-white/10 rounded disabled:opacity-50">
+                  <ZoomIn size={20} />
+                </button>
+              </div>
+              <button onClick={() => handleDownload(selectedImage)} className="p-2 hover:bg-white/10 rounded transition-colors" title="Download">
+                <Download size={24} />
+              </button>
+              <button onClick={handleClose} className="p-2 hover:bg-white/10 rounded transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+          </div>
 
-                  {selectedIndex < images.length - 1 && (
-                    <IconButton
-                      onClick={handleNext}
-                      sx={{
-                        position: 'absolute',
-                        right: 20,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                        color: 'white',
-                        '&:hover': {
-                          backgroundColor: 'rgba(0, 0, 0, 0.7)'
-                        }
-                      }}
-                    >
-                      <NavigateNextIcon fontSize="large" />
-                    </IconButton>
-                  )}
-                </Box>
-              </Fade>
-            </DialogContent>
-          </>
-        )}
-      </Dialog>
-    </>
+          {/* Image Area */}
+          <div className="flex-1 relative flex items-center justify-center overflow-hidden p-4">
+            <img
+              src={api.getPreviewImageUrl(selectedImage.path)}
+              alt={selectedImage.name}
+              style={{
+                transform: `scale(${zoomLevel})`,
+                transition: 'transform 0.2s ease-out'
+              }}
+              className="max-w-full max-h-full object-contain"
+            />
+
+            {/* Nav Buttons */}
+            {selectedIndex > 0 && (
+              <button
+                onClick={handlePrevious}
+                className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors backdrop-blur-sm border border-white/10"
+              >
+                <ChevronLeft size={32} />
+              </button>
+            )}
+            {selectedIndex < images.length - 1 && (
+              <button
+                onClick={handleNext}
+                className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors backdrop-blur-sm border border-white/10"
+              >
+                <ChevronRight size={32} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

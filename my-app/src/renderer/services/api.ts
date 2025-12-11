@@ -211,7 +211,8 @@ export interface DatasetInfo {
   date: string;
   size_mb: number;
   directory: string;
-  analysis_type: 'annotation' | 'cellphonedb' | 'infercnv';
+  analysis_type: 'annotation' | 'cellphonedb' | 'infercnv' | 'subcluster';
+  parent_path?: string; // For subclusters
 }
 
 export interface AvailableDatasetsResponse {
@@ -220,7 +221,7 @@ export interface AvailableDatasetsResponse {
 
 export interface AnalysisFile {
   path: string;
-  type: 'dotplot' | 'annotation_details' | 'cluster_plot' | 'annotation_plot' | 'network_plot' | 'heatmap' | 'csv_data' | 'text_file' | 'html_report' | 'pdf_report' | 'other_plot';
+  type: 'dotplot' | 'annotation_details' | 'cluster_plot' | 'annotation_plot' | 'network_plot' | 'heatmap' | 'csv_data' | 'text_file' | 'html_report' | 'pdf_report' | 'other_plot' | 'annotation_confidence';
   name: string;
   size_mb: number;
 }
@@ -253,6 +254,95 @@ export interface ObsColumnsResponse {
   cluster_columns: ObsColumnInfo[];
   other_columns: ObsColumnInfo[];
   total_columns: number;
+}
+
+export interface CreateLayerRequest {
+  input_path: string;
+  layer_name: string;
+  source_layer: string;
+}
+
+export interface UpdateLayerRequest {
+  input_path: string;
+  layer_name: string;
+  mapping?: { [key: string]: string };
+  mapping_type: 'cluster' | 'cell' | 'selection' | 'set_categories';
+  source_layer?: string;
+  cell_ids?: string[];
+  new_label?: string;
+  categories?: string[];
+}
+
+export interface DifferentialExpressionRequest {
+  input_path: string;
+  selected_cell_ids: string[];
+  reference_cell_ids?: string[];
+  n_genes?: number;
+  mode?: 'global' | 'local';
+  cluster_column?: string;
+}
+
+export interface DifferentialExpressionResult {
+  gene: string;
+  log2fc: number;
+  pval: number;
+  pval_adj: number;
+  pct_in: number;
+  pct_out: number;
+  mean_in: number;
+  mean_out: number;
+}
+
+export interface DifferentialExpressionResponse {
+  status: string;
+  results: DifferentialExpressionResult[];
+  comparison: string;
+  n_selected: number;
+  n_reference: number;
+  error?: string;
+}
+
+// Subclustering Interfaces
+export interface PreprocessingParams {
+  n_hvgs: number;
+  n_pcs: number;
+  n_neighbors: number;
+  resolution: number;
+}
+
+export interface SubclusterAnnotationParams {
+  use_cellmarker: boolean;
+  use_panglao: boolean;
+  use_cancer_single_cell_atlas: boolean;
+}
+
+export interface SubclusterRequest {
+  parent_path: string;
+  cell_ids: string[];
+  name: string;
+  preprocessing_params: PreprocessingParams;
+  annotation_params: SubclusterAnnotationParams;
+}
+
+export interface SubclusterResponse {
+  job_id: string;
+  status: string;
+  message: string;
+}
+
+export interface SubclusterInfo {
+  name: string;
+  path: string;
+  date: string;
+  parent_path: string;
+  analysis_type: string;
+}
+
+export interface MergeSubclusterRequest {
+  parent_path: string;
+  subcluster_path: string;
+  source_layer: string;
+  target_layer: string;
 }
 
 class APIError extends Error {
@@ -419,11 +509,55 @@ export const api = {
   async getAnnotationDetails(filePath: string): Promise<AnnotationDetailsResponse> {
     return apiRequest(`/annotation_details?file_path=${encodeURIComponent(filePath)}`);
   },
+  
+  async getAnnotationConfidence(filePath: string): Promise<any> {
+    return apiRequest(`/annotation_confidence?file_path=${encodeURIComponent(filePath)}`);
+  },
 
   async getObsColumns(filePath: string): Promise<ObsColumnsResponse> {
     return apiRequest('/get_obs_columns', {
       method: 'POST',
       body: JSON.stringify({ input_path: filePath, name: 'temp' }),
+    });
+  },
+
+  async createAnnotationLayer(params: CreateLayerRequest): Promise<{ status: string; layer: string }> {
+    return apiRequest('/create_annotation_layer', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async updateAnnotationLayer(params: UpdateLayerRequest): Promise<{ status: string; layer: string }> {
+    return apiRequest('/update_annotation_layer', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async getDifferentialExpression(params: DifferentialExpressionRequest): Promise<DifferentialExpressionResponse> {
+    return apiRequest('/differential_expression', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  // Subclustering API Methods
+  async startSubclusterAnalysis(params: SubclusterRequest): Promise<SubclusterResponse> {
+    return apiRequest('/subcluster', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async getSubclusters(parentPath: string): Promise<{ subclusters: SubclusterInfo[] }> {
+    return apiRequest(`/subclusters?parent_path=${encodeURIComponent(parentPath)}`);
+  },
+
+  async mergeSubclusterLabels(params: MergeSubclusterRequest): Promise<{ status: string; updated_cells: number; target_layer: string }> {
+    return apiRequest('/merge_subcluster', {
+      method: 'POST',
+      body: JSON.stringify(params),
     });
   },
 };

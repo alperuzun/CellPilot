@@ -1,52 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TableSortLabel,
-  Stack,
-  TextField,
-  Paper,
-  IconButton,
-  Tooltip,
-  CircularProgress,
-  Alert,
-  Tabs,
-  Tab,
-} from '@mui/material';
-import DownloadIcon from '@mui/icons-material/Download';
 import { AnalysisFile, CSVDataResponse, api } from '../../services/api';
+import { Download, Search, ArrowUp, ArrowDown } from 'lucide-react';
 
 interface DrugResponseTableProps {
   files: AnalysisFile[];
-}
-
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`drug-tabpanel-${index}`}
-      aria-labelledby={`drug-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box>{children}</Box>}
-    </div>
-  );
 }
 
 const DrugResponseTable: React.FC<DrugResponseTableProps> = ({ files }) => {
@@ -142,23 +99,29 @@ const DrugResponseTable: React.FC<DrugResponseTableProps> = ({ files }) => {
 
   // Get color for heatmap cell
   const getCellColor = (value: number, isIC50: boolean): string => {
-    if (isNaN(value)) return '#f5f5f5';
+    if (isNaN(value)) return '#374151'; // gray-700
 
     if (isIC50) {
       // IC50: lower is better (more sensitive) - green for low, red for high
-      if (value < 0.3) return '#4caf50'; // Green
-      if (value < 0.5) return '#8bc34a'; // Light green
-      if (value < 0.7) return '#ffeb3b'; // Yellow
-      if (value < 0.9) return '#ff9800'; // Orange
-      return '#f44336'; // Red
+      // Adjusted for dark mode visibility
+      if (value < 0.3) return '#166534'; // Green-800
+      if (value < 0.5) return '#15803d'; // Green-700
+      if (value < 0.7) return '#854d0e'; // Yellow-800
+      if (value < 0.9) return '#9a3412'; // Orange-800
+      return '#991b1b'; // Red-800
     } else {
       // Drug kill: higher is better (more cells killed) - green for high, red for low
-      if (value > 70) return '#4caf50'; // Green
-      if (value > 50) return '#8bc34a'; // Light green
-      if (value > 30) return '#ffeb3b'; // Yellow
-      if (value > 10) return '#ff9800'; // Orange
-      return '#f44336'; // Red
+      if (value > 70) return '#166534'; // Green-800
+      if (value > 50) return '#15803d'; // Green-700
+      if (value > 30) return '#854d0e'; // Yellow-800
+      if (value > 10) return '#9a3412'; // Orange-800
+      return '#991b1b'; // Red-800
     }
+  };
+
+  const getCellTextColor = (value: number, isIC50: boolean): string => {
+    if (isNaN(value)) return 'text-gray-500';
+    return 'text-gray-100';
   };
 
   const downloadCSV = (data: CSVDataResponse, filename: string) => {
@@ -185,181 +148,152 @@ const DrugResponseTable: React.FC<DrugResponseTableProps> = ({ files }) => {
 
   if (loading) {
     return (
-      <Card>
-        <CardContent>
-          <Box display="flex" justifyContent="center" alignItems="center" p={4}>
-            <CircularProgress />
-          </Box>
-        </CardContent>
-      </Card>
+      <div className="bg-gray-800 p-8 rounded-lg border border-gray-700 flex justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <Card>
-        <CardContent>
-          <Alert severity="error">{error}</Alert>
-        </CardContent>
-      </Card>
+      <div className="bg-red-900/20 border border-red-900/50 rounded-lg p-4 text-red-400">
+        {error}
+      </div>
     );
   }
 
   if (!ic50File && !drugKillFile) {
     return (
-      <Card>
-        <CardContent>
-          <Alert severity="info">No drug response CSV data available</Alert>
-        </CardContent>
-      </Card>
+      <div className="bg-blue-900/20 border border-blue-900/50 rounded-lg p-4 text-blue-400">
+        No drug response CSV data available
+      </div>
     );
   }
 
+  const isIC50 = currentTab === 0 ? (!!ic50File) : !drugKillFile; // Logic handles missing files
+
   return (
-    <Card>
-      <CardContent>
-        <Stack spacing={2}>
-          <Box display="flex" justifyContent="space-between" alignItems="center">
-            <Typography variant="h6">Drug Response Predictions</Typography>
-            <Tooltip title="Download CSV">
-              <IconButton
-                onClick={() => {
-                  if (currentData) {
-                    const filename = currentTab === 0 ? 'IC50_prediction.csv' : 'drug_kill_prediction.csv';
-                    downloadCSV(currentData, filename);
-                  }
-                }}
-                disabled={!currentData}
-              >
-                <DownloadIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
+    <div className="bg-gray-800 rounded-lg border border-gray-700 shadow-sm overflow-hidden text-gray-100">
+      <div className="p-4 border-b border-gray-700 space-y-4">
+        <div className="flex justify-between items-center">
+          <h3 className="text-lg font-semibold text-gray-100">Drug Response Predictions</h3>
+          <button
+            onClick={() => {
+              if (currentData) {
+                const filename = currentTab === 0 ? 'IC50_prediction.csv' : 'drug_kill_prediction.csv';
+                downloadCSV(currentData, filename);
+              }
+            }}
+            disabled={!currentData}
+            className="p-2 text-gray-400 hover:text-gray-200 disabled:opacity-50 transition-colors"
+            title="Download CSV"
+          >
+            <Download size={20} />
+          </button>
+        </div>
 
-          <Tabs value={currentTab} onChange={(_, newValue) => setCurrentTab(newValue)}>
-            {ic50File && <Tab label="IC50 Predictions" />}
-            {drugKillFile && <Tab label="Drug Kill Predictions" />}
-          </Tabs>
+        {/* Tabs */}
+        <div className="flex space-x-1 bg-gray-900 p-1 rounded-lg w-fit border border-gray-700">
+          {ic50File && (
+            <button
+              onClick={() => setCurrentTab(0)}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
+                currentTab === 0 
+                  ? 'bg-gray-700 text-white shadow-sm' 
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              IC50 Predictions
+            </button>
+          )}
+          {drugKillFile && (
+            <button
+              onClick={() => setCurrentTab(ic50File ? 1 : 0)}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
+                currentTab === (ic50File ? 1 : 0)
+                  ? 'bg-gray-700 text-white shadow-sm' 
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              Drug Kill Predictions
+            </button>
+          )}
+        </div>
 
-          <TextField
-            label="Search drugs"
-            variant="outlined"
-            size="small"
+        {/* Search */}
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Search size={16} className="text-gray-400" />
+          </div>
+          <input
+            type="text"
+            placeholder="Search drugs..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            fullWidth
+            className="block w-full pl-10 pr-3 py-2 border border-gray-600 rounded-md leading-5 bg-gray-900 text-gray-100 placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 sm:text-sm"
           />
+        </div>
+        
+        {processedData && (
+          <p className="text-sm text-gray-400">
+            Showing {processedData.drugRows.length} drugs × {processedData.cells.length} cell populations
+            <br />
+            {isIC50 
+              ? "IC50 values: Lower values indicate higher drug sensitivity (better response)"
+              : "Drug Kill %: Higher values indicate more effective cell killing"
+            }
+          </p>
+        )}
+      </div>
 
-          {ic50File && (
-            <TabPanel value={currentTab} index={0}>
-              {processedData && (
-                <>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Showing {processedData.drugRows.length} drugs × {processedData.cells.length} cell populations
-                    <br />
-                    IC50 values: Lower values indicate higher drug sensitivity (better response)
-                  </Typography>
-                  <TableContainer component={Paper} sx={{ maxHeight: 600 }}>
-                    <Table stickyHeader size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell><strong>Drug Name</strong></TableCell>
-                          {processedData.cells.map((cell, idx) => (
-                            <TableCell key={idx} align="center">
-                              <TableSortLabel
-                                active={sortColumn === idx}
-                                direction={sortColumn === idx ? sortDirection : 'desc'}
-                                onClick={() => handleSort(idx)}
-                              >
-                                <strong>{cell}</strong>
-                              </TableSortLabel>
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {processedData.drugRows.map((row, rowIdx) => (
-                          <TableRow key={rowIdx} hover>
-                            <TableCell>{row.drugName}</TableCell>
-                            {row.cellValues.map((value, cellIdx) => (
-                              <TableCell
-                                key={cellIdx}
-                                align="center"
-                                sx={{
-                                  backgroundColor: getCellColor(value, true),
-                                  color: value < 0.5 || value > 0.7 ? 'white' : 'black',
-                                  fontWeight: 'bold',
-                                }}
-                              >
-                                {value.toFixed(3)}
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </>
-              )}
-            </TabPanel>
-          )}
-
-          {drugKillFile && (
-            <TabPanel value={currentTab} index={ic50File ? 1 : 0}>
-              {processedData && (
-                <>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Showing {processedData.drugRows.length} drugs × {processedData.cells.length} cell populations
-                    <br />
-                    Drug Kill %: Higher values indicate more effective cell killing
-                  </Typography>
-                  <TableContainer component={Paper} sx={{ maxHeight: 600 }}>
-                    <Table stickyHeader size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell><strong>Drug Name</strong></TableCell>
-                          {processedData.cells.map((cell, idx) => (
-                            <TableCell key={idx} align="center">
-                              <TableSortLabel
-                                active={sortColumn === idx}
-                                direction={sortColumn === idx ? sortDirection : 'desc'}
-                                onClick={() => handleSort(idx)}
-                              >
-                                <strong>{cell}</strong>
-                              </TableSortLabel>
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {processedData.drugRows.map((row, rowIdx) => (
-                          <TableRow key={rowIdx} hover>
-                            <TableCell>{row.drugName}</TableCell>
-                            {row.cellValues.map((value, cellIdx) => (
-                              <TableCell
-                                key={cellIdx}
-                                align="center"
-                                sx={{
-                                  backgroundColor: getCellColor(value, false),
-                                  color: value < 30 || value > 70 ? 'white' : 'black',
-                                  fontWeight: 'bold',
-                                }}
-                              >
-                                {value.toFixed(1)}%
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </>
-              )}
-            </TabPanel>
-          )}
-        </Stack>
-      </CardContent>
-    </Card>
+      {/* Table */}
+      {processedData && (
+        <div className="overflow-x-auto max-h-[600px]">
+          <table className="min-w-full divide-y divide-gray-700">
+            <thead className="bg-gray-900 sticky top-0 z-10 shadow-sm">
+              <tr>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-900">
+                  Drug Name
+                </th>
+                {processedData.cells.map((cell, idx) => (
+                  <th 
+                    key={idx}
+                    scope="col" 
+                    className="px-6 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800 bg-gray-900"
+                    onClick={() => handleSort(idx)}
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      {cell}
+                      {sortColumn === idx && (
+                        sortDirection === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />
+                      )}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="bg-gray-800 divide-y divide-gray-700">
+              {processedData.drugRows.map((row, rowIdx) => (
+                <tr key={rowIdx} className="hover:bg-gray-700 transition-colors">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-100 bg-gray-800 sticky left-0 border-r border-gray-700">
+                    {row.drugName}
+                  </td>
+                  {row.cellValues.map((value, cellIdx) => (
+                    <td
+                      key={cellIdx}
+                      className={`px-6 py-4 whitespace-nowrap text-sm text-center font-bold ${getCellTextColor(value, isIC50)}`}
+                      style={{ backgroundColor: getCellColor(value, isIC50) }}
+                    >
+                      {isIC50 ? value.toFixed(3) : `${value.toFixed(1)}%`}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 };
 

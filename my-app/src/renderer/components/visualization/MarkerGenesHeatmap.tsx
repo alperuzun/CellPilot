@@ -1,23 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Plot from 'react-plotly.js';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  FormControl,
-  Select,
-  MenuItem,
-  SelectChangeEvent,
-  Stack,
-  Button,
-  Chip,
-  Slider,
-  CircularProgress,
-  ToggleButton,
-  ToggleButtonGroup,
-} from '@mui/material';
 import { VisualizationData, MarkerGenesData, GeneExpressionData, api } from '../../services/api';
+import { Select, Button } from './Shared';
+import { RefreshCw, Star, Layers, Users } from 'lucide-react';
 
 interface MarkerGenesHeatmapProps {
   h5adPath: string;
@@ -92,7 +77,6 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
   useEffect(() => {
     const availableOptions = markerMode === 'cluster' ? clusterOptions : cellTypeOptions;
     if (availableOptions.length > 0 && !availableOptions.some(opt => opt.value === clusterColumn)) {
-      // Current column is not available in the new mode, select first available
       setClusterColumn(availableOptions[0].value);
     }
   }, [markerMode]);
@@ -106,11 +90,9 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
     const groupData = markerMode === 'cluster' ? data.clusters[clusterColumn] : data.cell_types[clusterColumn];
     if (!groupData) return { z: [], x: [], y: [], cellIndices: [] };
 
-    // Get all genes and categories
     const allGenes = Array.from(new Set(Object.values(markerGenes).flat()));
     const categories = groupData.categories;
 
-    // Filter cells if needed
     let cellIndices: number[];
     if (showOnlySelected && selectedCells.length > 0) {
       cellIndices = data.cell_ids
@@ -121,7 +103,6 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
       cellIndices = Array.from({ length: data.cell_ids.length }, (_, i) => i);
     }
 
-    // Calculate average expression per cluster
     const heatmapData: number[][] = [];
     const yLabels: string[] = [];
 
@@ -187,190 +168,175 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
       x: x,
       y: y,
       type: 'heatmap' as const,
-      colorscale: 'Viridis',
+      colorscale: 'Turbo', // Use Turbo for consistency
       hoveronholes: false,
       hovertemplate: 'Cluster: %{x}<br>Gene: %{y}<br>Avg Expression: %{z:.2f}<extra></extra>',
       colorbar: {
-        title: 'Average Expression',
+        title: 'Avg Exp',
         titleside: 'right',
+        titlefont: { color: '#e5e7eb' },
+        tickfont: { color: '#e5e7eb' },
       },
     },
   ];
 
   const layout = {
-    title: {
-      text: markerMode === 'cluster'
-        ? `Top ${nGenes} Differential Genes per Cluster (${clusterColumn})${showOnlySelected ? ' - Selected Cells Only' : ''}`
-        : `Top Differential Genes per Cell Type (${clusterColumn})${showOnlySelected ? ' - Selected Cells Only' : ''}`,
-      font: { size: 16 },
-    },
+    title: false,
     xaxis: {
       title: markerMode === 'cluster' ? 'Clusters' : 'Cell Types',
       tickangle: -45,
       side: 'bottom' as const,
+      color: '#e5e7eb',
+      gridcolor: '#374151',
     },
     yaxis: {
       title: 'Genes',
       autorange: 'reversed' as const,
+      color: '#e5e7eb',
+      gridcolor: '#374151',
     },
     height: Math.max(400, y.length * 20 + 100),
-    margin: { l: 100, r: 100, t: 80, b: 100 },
+    margin: { l: 100, r: 100, t: 20, b: 100 },
     annotations: createAnnotations(),
-    plot_bgcolor: 'white',
-    paper_bgcolor: 'white',
+    plot_bgcolor: 'transparent',
+    paper_bgcolor: 'transparent',
+    font: { color: '#e5e7eb' },
   };
 
   if (loading) {
     return (
-      <Card>
-        <CardContent>
-          <Box display="flex" justifyContent="center" alignItems="center" minHeight={300}>
-            <Stack alignItems="center" spacing={2}>
-              <CircularProgress />
-              <Typography>Loading marker genes...</Typography>
-            </Stack>
-          </Box>
-        </CardContent>
-      </Card>
+      <div className="bg-gray-800 p-8 rounded-lg border border-gray-700 flex flex-col items-center justify-center min-h-[300px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+        <p className="text-gray-400">Loading marker genes...</p>
+      </div>
     );
   }
 
   return (
-    <Card sx={{ height: 'fit-content' }}>
-      <CardContent>
-        <Stack spacing={3}>
-          {/* Title */}
-          <Typography variant="h5" component="h2">
-            Marker Genes Heatmap
-          </Typography>
+    <div className="space-y-6 text-gray-100">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-100">Marker Genes Heatmap</h2>
+      </div>
 
-          {/* Controls */}
-          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center">
-            {/* Marker Mode Toggle */}
-            <FormControl size="small">
-              <Typography variant="body2" gutterBottom>
-                Marker Type:
-              </Typography>
-              <ToggleButtonGroup
-                value={markerMode}
-                exclusive
-                onChange={(e, newMode) => newMode && setMarkerMode(newMode)}
-                size="small"
-              >
-                <ToggleButton value="cluster">Markers per Cluster</ToggleButton>
-                <ToggleButton value="celltype">Markers per Cell Type</ToggleButton>
-              </ToggleButtonGroup>
-            </FormControl>
+      {/* Controls */}
+      <div className="bg-gray-800/50 p-4 border border-gray-700 rounded-lg shadow-sm flex flex-wrap gap-4 items-end">
+        {/* Marker Mode Toggle */}
+        <div className="flex bg-gray-900 p-1 rounded-lg border border-gray-700">
+          <button
+            onClick={() => setMarkerMode('cluster')}
+            className={`flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+              markerMode === 'cluster' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Layers size={16} className="mr-2" />
+            Cluster
+          </button>
+          <button
+            onClick={() => setMarkerMode('celltype')}
+            className={`flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
+              markerMode === 'celltype' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Users size={16} className="mr-2" />
+            Cell Type
+          </button>
+        </div>
 
-            {/* Column selector */}
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <Typography variant="body2" gutterBottom>
-                {markerMode === 'cluster' ? 'Cluster Column:' : 'Cell Type Column:'}
-              </Typography>
-              <Select
-                value={clusterColumn}
-                onChange={(e: SelectChangeEvent) => setClusterColumn(e.target.value)}
-              >
-                {(markerMode === 'cluster' ? clusterOptions : cellTypeOptions).map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+        {/* Column selector */}
+        <div className="w-64">
+          <Select
+            label={markerMode === 'cluster' ? 'Cluster Column' : 'Cell Type Column'}
+            value={clusterColumn}
+            onChange={(e) => setClusterColumn(e.target.value)}
+            options={markerMode === 'cluster' ? clusterOptions : cellTypeOptions}
+            className="bg-gray-900 border-gray-700 text-gray-100"
+          />
+        </div>
 
-            {/* Number of genes slider - only for cluster mode */}
-            {markerMode === 'cluster' && (
-              <Box sx={{ minWidth: 150 }}>
-                <Typography variant="body2" gutterBottom>
-                  Genes per cluster: {nGenes}
-                </Typography>
-                <Slider
-                  value={nGenes}
-                  onChange={(_, value) => setNGenes(value as number)}
-                  min={5}
-                  max={25}
-                  step={5}
-                  valueLabelDisplay="auto"
-                />
-              </Box>
-            )}
+        {/* Number of genes slider */}
+        {markerMode === 'cluster' && (
+          <div className="w-40">
+            <label className="block text-xs font-medium text-gray-400 mb-1">
+              Genes per cluster: {nGenes}
+            </label>
+            <input
+              type="range"
+              min="5"
+              max="25"
+              step="5"
+              value={nGenes}
+              onChange={(e) => setNGenes(parseInt(e.target.value))}
+              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            />
+          </div>
+        )}
 
-            {/* Refresh button */}
+        <div className="flex gap-2 ml-auto">
+          {/* Selected cells toggle */}
+          {selectedCells.length > 0 && (
             <Button
-              variant="outlined"
-              onClick={loadMarkerGenes}
-              disabled={loading}
+              variant={showOnlySelected ? "primary" : "secondary"}
+              onClick={() => setShowOnlySelected(!showOnlySelected)}
+              size="sm"
+              className={!showOnlySelected ? "bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600" : ""}
             >
-              Refresh
+              Use Selected Cells ({selectedCells.length})
             </Button>
-
-            {/* Selected cells toggle */}
-            {selectedCells.length > 0 && (
-              <Button
-                variant={showOnlySelected ? "contained" : "outlined"}
-                onClick={() => setShowOnlySelected(!showOnlySelected)}
-                size="small"
-              >
-                Use Selected Cells ({selectedCells.length})
-              </Button>
-            )}
-          </Stack>
-
-          {/* Summary */}
-          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-            <Chip
-              label={`${Object.keys(markerGenes).length} ${markerMode === 'cluster' ? 'clusters' : 'cell types'}`}
-              variant="outlined"
-            />
-            <Chip
-              label={`${y.length} genes`}
-              variant="outlined"
-            />
-            <Chip
-              label={`${cellIndices.length} cells analyzed`}
-              variant="outlined"
-            />
-            <Chip
-              label={markerMode === 'cluster' ? "★ = Top marker for cluster" : "★ = Top marker for cell type"}
-              variant="outlined"
-              sx={{ backgroundColor: 'yellow', opacity: 0.7 }}
-            />
-          </Stack>
-
-          {/* Description */}
-          <Typography variant="body2" color="text.secondary">
-            {markerMode === 'cluster'
-              ? 'This heatmap shows average gene expression across clusters. Stars (★) indicate top differential genes computed for each cluster using statistical analysis (Wilcoxon test).'
-              : 'This heatmap shows average gene expression across cell types. Stars (★) indicate top differential genes computed for each cell type using statistical analysis (Wilcoxon test).'
-            } Hover over cells to see exact expression values.
-          </Typography>
-
-          {/* Plot */}
-          {z.length > 0 ? (
-            <Box sx={{ width: '100%', overflowX: 'auto' }}>
-              <Plot
-                data={plotData}
-                layout={layout}
-                config={{
-                  displayModeBar: true,
-                  displaylogo: false,
-                  responsive: true,
-                  modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d'],
-                }}
-                style={{ width: '100%', minWidth: x.length * 60 + 200 }}
-              />
-            </Box>
-          ) : (
-            <Box display="flex" justifyContent="center" alignItems="center" minHeight={200}>
-              <Typography color="text.secondary">
-                No marker genes data available. Try refreshing or selecting a different cluster column.
-              </Typography>
-            </Box>
           )}
-        </Stack>
-      </CardContent>
-    </Card>
+
+          {/* Refresh button */}
+          <Button
+            variant="secondary"
+            onClick={loadMarkerGenes}
+            disabled={loading}
+            icon={<RefreshCw size={16} />}
+            size="sm"
+            className="bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600"
+          >
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Summary Chips */}
+      <div className="flex flex-wrap gap-2">
+        <span className="px-3 py-1 bg-gray-800 text-gray-300 rounded-full text-sm font-medium border border-gray-700">
+          {Object.keys(markerGenes).length} {markerMode === 'cluster' ? 'clusters' : 'cell types'}
+        </span>
+        <span className="px-3 py-1 bg-blue-900/30 text-blue-300 rounded-full text-sm font-medium border border-blue-800">
+          {y.length} genes
+        </span>
+        <span className="px-3 py-1 bg-green-900/30 text-green-300 rounded-full text-sm font-medium border border-green-800">
+          {cellIndices.length} cells analyzed
+        </span>
+        <span className="px-3 py-1 bg-yellow-900/30 text-yellow-300 rounded-full text-sm font-medium border border-yellow-800 flex items-center gap-1">
+          <Star size={12} fill="orange" className="text-orange-500" /> Top marker
+        </span>
+      </div>
+
+      {/* Plot */}
+      {z.length > 0 ? (
+        <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
+          <div style={{ minWidth: Math.max(600, x.length * 60 + 200) }}>
+            <Plot
+              data={plotData}
+              layout={layout}
+              config={{
+                displayModeBar: true,
+                displaylogo: false,
+                responsive: true,
+                modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d'],
+              }}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="bg-gray-900 border border-dashed border-gray-700 rounded-lg h-64 flex items-center justify-center text-gray-500">
+          No marker genes data available. Try refreshing or selecting a different column.
+        </div>
+      )}
+    </div>
   );
 };
 

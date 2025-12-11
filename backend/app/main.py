@@ -1,7 +1,7 @@
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .models import AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams, Response, AnalysisJobRequest, AnalysisJobResponse, JobStatusResponse, CreateLayerRequest, UpdateLayerRequest, DifferentialExpressionRequest
+from .models import AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams, Response, AnalysisJobRequest, AnalysisJobResponse, JobStatusResponse, CreateLayerRequest, UpdateLayerRequest, DifferentialExpressionRequest, SubclusterRequest, MergeSubclusterRequest
 from .tasks import spawn_process
 from .utils import summarize_h5ad
 from .analysis import run_cell_phone_db, run_inferncnv
@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 import asyncio
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 app = FastAPI(title="CellPilot API")
 
@@ -315,6 +316,9 @@ async def get_analysis_files(h5ad_path: str):
         # Search all relevant file types
         file_extensions = ['*.png', '*.jpg', '*.jpeg', '*.svg', '*.pdf', '*.txt', '*.csv', '*.html', '*.json']
 
+        # Check if the h5ad file itself is inside a subclusters directory
+        is_in_subcluster = 'subclusters' in str(h5ad_file)
+        
         for search_dir in search_dirs:
             if search_dir.exists():
                 for ext_pattern in file_extensions:
@@ -322,6 +326,10 @@ async def get_analysis_files(h5ad_path: str):
                     # Use rglob() for recursive search (annotation/cellphonedb with subfolders)
                     search_method = search_dir.glob if is_directory else search_dir.rglob
                     for file_path in search_method(ext_pattern):
+                        # Skip files in subclusters directory ONLY when loading parent analysis files
+                        # If we're already viewing a subcluster, don't skip its files
+                        if not is_in_subcluster and 'subclusters' in str(file_path):
+                            continue
                         file_type = classify_file_type(file_path)
                         if file_type:  # Only include if type is recognized
                             analysis_files.append({
@@ -957,5 +965,147 @@ async def update_annotation_layer(request: UpdateLayerRequest):
         lock = await lock_manager.get_lock(request.input_path)
         async with lock:
             return await run_in_threadpool(_update)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --------------------------- Subclustering ---------------------------
+
+@app.post("/subcluster")
+async def create_subcluster(request: SubclusterRequest, background_tasks: BackgroundTasks):
+    """Start a subclustering job in the background"""
+    try:
+        job_id = job_manager.create_job(request.name)
+        
+        async def run_subcluster_task(jid, req):
+            try:
+                from .subcluster import run_subclustering_workflow
+                
+                # Run the synchronous workflow in a threadpool
+                results = await run_in_threadpool(
+                    run_subclustering_workflow,
+                    req.parent_path,
+                    req.cell_ids,
+                    req.name,
+                    req.preprocessing_params.dict(),
+                    req.annotation_params.dict()
+                )
+                
+                job_manager.complete_job(jid, results)
+                
+            except Exception as e:
+                print(f"Subclustering job failed: {e}")
+                job_manager.fail_job(jid, str(e))
+
+        background_tasks.add_task(run_subcluster_task, job_id, request)
+        
+        return AnalysisJobResponse(
+            job_id=job_id,
+            status="pending",
+            message="Subclustering job started"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/subclusters")
+async def get_subclusters(parent_path: str):
+    """List available subclusters for a given parent dataset"""
+    try:
+        parent_dir = os.path.dirname(parent_path)
+        subcluster_base_dir = os.path.join(parent_dir, 'subclusters')
+        
+        if not os.path.exists(subcluster_base_dir):
+            return {"subclusters": []}
+            
+        subclusters = []
+        for entry in os.scandir(subcluster_base_dir):
+            if entry.is_dir():
+                # Look for .h5ad file inside
+                h5ad_files = list(Path(entry.path).glob("*.h5ad"))
+                if h5ad_files:
+                    f = h5ad_files[0]
+                    stat = f.stat()
+                    # format timestamp
+                    dt = datetime.fromtimestamp(stat.st_mtime)
+                    date_str = dt.strftime("%Y-%m-%d %H:%M")
+                    
+                    subclusters.append({
+                        "name": entry.name, 
+                        "path": str(f.absolute()),
+                        "date": date_str,
+                        "parent_path": parent_path
+                    })
+        
+        # Sort by date desc
+        subclusters.sort(key=lambda x: x['date'], reverse=True)
+        return {"subclusters": subclusters}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/merge_subcluster")
+async def merge_subcluster(request: MergeSubclusterRequest):
+    """Merge labels from a subcluster back into the parent dataset"""
+    try:
+        def _merge():
+            import scanpy as sc
+            import pandas as pd
+            
+            # Load Parent
+            if request.parent_path.endswith('.h5ad'):
+                parent_adata = sc.read_h5ad(request.parent_path)
+            else:
+                raise ValueError("Parent must be h5ad for merging")
+                
+            # Load Subcluster
+            sub_adata = sc.read_h5ad(request.subcluster_path)
+            
+            # Validate columns
+            if request.source_layer not in sub_adata.obs.columns:
+                raise ValueError(f"Source layer '{request.source_layer}' not found in subcluster")
+                
+            # Ensure target layer exists in parent or initialize it
+            target_col = request.target_layer
+            if target_col not in parent_adata.obs.columns:
+                # Copy from a default base if available (e.g. 'leiden') to avoid empty holes
+                # or just initialize with 'Unannotated'
+                defaults = ['cell_type', 'leiden', 'louvain']
+                base_col = next((c for c in defaults if c in parent_adata.obs.columns), None)
+                
+                if base_col:
+                    parent_adata.obs[target_col] = parent_adata.obs[base_col].astype(str)
+                else:
+                    parent_adata.obs[target_col] = "Unannotated"
+            
+            # Convert to string to allow updates
+            parent_adata.obs[target_col] = parent_adata.obs[target_col].astype(str)
+            
+            # Get mapping from subcluster
+            sub_labels = sub_adata.obs[request.source_layer].astype(str).to_dict()
+            
+            # Update parent cells that exist in subcluster
+            updated_count = 0
+            for cell_id, label in sub_labels.items():
+                if cell_id in parent_adata.obs.index:
+                    parent_adata.obs.at[cell_id, target_col] = label
+                    updated_count += 1
+            
+            # Convert back to category
+            parent_adata.obs[target_col] = parent_adata.obs[target_col].astype('category')
+            
+            # Save Parent
+            parent_adata.write_h5ad(request.parent_path)
+            
+            return {
+                "status": "success",
+                "updated_cells": updated_count,
+                "target_layer": target_col
+            }
+
+        # Lock parent file for writing
+        lock = await lock_manager.get_lock(request.parent_path)
+        async with lock:
+            return await run_in_threadpool(_merge)
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,30 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TableSortLabel,
-  Chip,
-  Stack,
-  TextField,
-  FormControl,
-  Select,
-  MenuItem,
-  InputLabel,
-  SelectChangeEvent,
-  Paper,
-  IconButton,
-  Tooltip,
-} from '@mui/material';
-import DownloadIcon from '@mui/icons-material/Download';
 import { AnnotationDetail } from '../../services/api';
+import { Select } from './Shared';
+import { Download, ChevronUp, ChevronDown, Check, Search } from 'lucide-react';
 
 interface ClusterAnnotationTableProps {
   annotations: AnnotationDetail[];
@@ -105,12 +82,12 @@ const ClusterAnnotationTable: React.FC<ClusterAnnotationTableProps> = ({
     }
   };
 
-  const getConfidenceColor = (confidence: string) => {
+  const getConfidenceColorClass = (confidence: string) => {
     switch (confidence) {
-      case 'High': return 'success';
-      case 'Medium': return 'warning';
-      case 'Low': return 'error';
-      default: return 'default';
+      case 'High': return 'bg-green-900/30 text-green-300 border border-green-800';
+      case 'Medium': return 'bg-yellow-900/30 text-yellow-300 border border-yellow-800';
+      case 'Low': return 'bg-red-900/30 text-red-300 border border-red-800';
+      default: return 'bg-gray-800 text-gray-300 border border-gray-700';
     }
   };
 
@@ -134,186 +111,155 @@ const ClusterAnnotationTable: React.FC<ClusterAnnotationTableProps> = ({
   };
 
   const confidenceCounts = useMemo(() => {
-    const counts = { High: 0, Medium: 0, Low: 0 };
+    const counts: Record<string, number> = { High: 0, Medium: 0, Low: 0 };
     annotations.forEach(annotation => {
-      counts[annotation.confidence]++;
+      if (counts[annotation.confidence] !== undefined) {
+        counts[annotation.confidence]++;
+      }
     });
     return counts;
   }, [annotations]);
 
   if (annotations.length === 0) {
     return (
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            {title}
-          </Typography>
-          <Typography color="text.secondary">
-            No annotation details available.
-          </Typography>
-        </CardContent>
-      </Card>
+      <div className="bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-700 text-center">
+        <h3 className="text-lg font-medium text-gray-100">{title}</h3>
+        <p className="text-gray-400 mt-1">No annotation details available.</p>
+      </div>
     );
   }
 
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <div className="w-4 h-4" />;
+    return sortDirection === 'asc' ? <ChevronUp size={16} /> : <ChevronDown size={16} />;
+  };
+
   return (
-    <Card>
-      <CardContent>
-        <Stack spacing={3}>
-          {/* Header */}
-          <Box display="flex" justifyContent="space-between" alignItems="center">
-            <Typography variant="h6">
-              {title}
-            </Typography>
-            <Tooltip title="Download as CSV">
-              <IconButton onClick={downloadCSV} size="small">
-                <DownloadIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
+    <div className="bg-gray-800 rounded-lg border border-gray-700 shadow-sm text-gray-100">
+      <div className="p-4 border-b border-gray-700 flex flex-wrap justify-between items-center gap-4">
+        <h3 className="text-lg font-semibold text-gray-100">{title}</h3>
+        <button
+          onClick={downloadCSV}
+          className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-gray-300 bg-gray-800 border border-gray-600 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          title="Download as CSV"
+        >
+          <Download size={16} className="mr-2" />
+          Download CSV
+        </button>
+      </div>
 
-          {/* Summary */}
-          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-            <Chip
-              label={`${processedAnnotations.length} clusters`}
-              variant="outlined"
-            />
-            <Chip
-              label={`${confidenceCounts.High} high confidence`}
-              color="success"
-              variant="outlined"
-            />
-            <Chip
-              label={`${confidenceCounts.Medium} medium confidence`}
-              color="warning"
-              variant="outlined"
-            />
-            <Chip
-              label={`${confidenceCounts.Low} low confidence`}
-              color="error"
-              variant="outlined"
-            />
-          </Stack>
+      <div className="p-4 space-y-4">
+        {/* Summary Chips */}
+        <div className="flex flex-wrap gap-2">
+          <span className="px-3 py-1 bg-gray-700 text-gray-300 rounded-full text-sm font-medium border border-gray-600">
+            {processedAnnotations.length} clusters
+          </span>
+          <span className="px-3 py-1 bg-green-900/30 text-green-300 rounded-full text-sm font-medium border border-green-800">
+            {confidenceCounts.High} high confidence
+          </span>
+          <span className="px-3 py-1 bg-yellow-900/30 text-yellow-300 rounded-full text-sm font-medium border border-yellow-800">
+            {confidenceCounts.Medium} medium confidence
+          </span>
+          <span className="px-3 py-1 bg-red-900/30 text-red-300 rounded-full text-sm font-medium border border-red-800">
+            {confidenceCounts.Low} low confidence
+          </span>
+        </div>
 
-          {/* Filters */}
-          <Stack direction="row" spacing={2} alignItems="center">
-            <TextField
-              size="small"
-              label="Search clusters or cell types"
+        {/* Filters */}
+        <div className="flex flex-wrap gap-4 items-center">
+          <div className="relative flex-1 min-w-[250px]">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search size={16} className="text-gray-400" />
+            </div>
+            <input
+              type="text"
+              placeholder="Search clusters or cell types..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              sx={{ minWidth: 250 }}
+              className="block w-full pl-10 pr-3 py-2 border border-gray-600 rounded-md leading-5 bg-gray-900 text-gray-100 placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 sm:text-sm"
             />
+          </div>
 
-            <FormControl size="small" sx={{ minWidth: 150 }}>
-              <InputLabel>Confidence</InputLabel>
-              <Select
-                value={confidenceFilter}
-                label="Confidence"
-                onChange={(e: SelectChangeEvent) => setConfidenceFilter(e.target.value)}
-              >
-                <MenuItem value="all">All</MenuItem>
-                <MenuItem value="High">High</MenuItem>
-                <MenuItem value="Medium">Medium</MenuItem>
-                <MenuItem value="Low">Low</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
+          <div className="w-48">
+            <Select
+              value={confidenceFilter}
+              onChange={(e) => setConfidenceFilter(e.target.value)}
+              options={[
+                { value: 'all', label: 'All Confidence' },
+                { value: 'High', label: 'High Confidence' },
+                { value: 'Medium', label: 'Medium Confidence' },
+                { value: 'Low', label: 'Low Confidence' },
+              ]}
+              className="bg-gray-900 border-gray-600 text-gray-100"
+            />
+          </div>
+        </div>
 
-          {/* Table */}
-          <TableContainer component={Paper} sx={{ maxHeight: 600 }}>
-            <Table stickyHeader size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>
-                    <TableSortLabel
-                      active={sortField === 'cluster'}
-                      direction={sortField === 'cluster' ? sortDirection : 'asc'}
-                      onClick={() => handleSort('cluster')}
-                    >
-                      Cluster
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell>
-                    <TableSortLabel
-                      active={sortField === 'cell_type'}
-                      direction={sortField === 'cell_type' ? sortDirection : 'asc'}
-                      onClick={() => handleSort('cell_type')}
-                    >
-                      Cell Type
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell align="right">
-                    <TableSortLabel
-                      active={sortField === 'z_score'}
-                      direction={sortField === 'z_score' ? sortDirection : 'asc'}
-                      onClick={() => handleSort('z_score')}
-                    >
-                      Z-Score
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell>
-                    <TableSortLabel
-                      active={sortField === 'confidence'}
-                      direction={sortField === 'confidence' ? sortDirection : 'asc'}
-                      onClick={() => handleSort('confidence')}
-                    >
-                      Confidence
-                    </TableSortLabel>
-                  </TableCell>
-                  <TableCell align="center">Quality</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {processedAnnotations.map((annotation, index) => (
-                  <TableRow key={`${annotation.cluster}-${annotation.cell_type}-${index}`}>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {annotation.cluster}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {annotation.cell_type}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography variant="body2" fontWeight="medium">
-                        {annotation.z_score.toFixed(2)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={annotation.confidence}
-                        color={getConfidenceColor(annotation.confidence) as any}
-                        size="small"
-                        variant="outlined"
-                      />
-                    </TableCell>
-                    <TableCell align="center">
-                      {annotation.is_nice && (
-                        <Chip
-                          label="✓"
-                          color="success"
-                          size="small"
-                          sx={{ minWidth: 'auto', width: 24, fontSize: '0.75rem' }}
-                        />
-                      )}
-                    </TableCell>
-                  </TableRow>
+        {/* Table */}
+        <div className="overflow-x-auto border border-gray-700 rounded-md">
+          <table className="min-w-full divide-y divide-gray-700">
+            <thead className="bg-gray-900">
+              <tr>
+                {[
+                  { id: 'cluster', label: 'Cluster' },
+                  { id: 'cell_type', label: 'Cell Type' },
+                  { id: 'z_score', label: 'Z-Score', align: 'right' },
+                  { id: 'confidence', label: 'Confidence' },
+                ].map((col) => (
+                  <th
+                    key={col.id}
+                    scope="col"
+                    className={`px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-800 ${col.align === 'right' ? 'text-right' : ''}`}
+                    onClick={() => handleSort(col.id as SortField)}
+                  >
+                    <div className={`flex items-center gap-1 ${col.align === 'right' ? 'justify-end' : ''}`}>
+                      {col.label}
+                      <SortIcon field={col.id as SortField} />
+                    </div>
+                  </th>
                 ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+                <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">
+                  Quality
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-gray-800 divide-y divide-gray-700">
+              {processedAnnotations.map((annotation, index) => (
+                <tr key={`${annotation.cluster}-${annotation.cell_type}-${index}`} className="hover:bg-gray-700 transition-colors">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-100">
+                    {annotation.cluster}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                    {annotation.cell_type}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400 text-right font-mono">
+                    {annotation.z_score.toFixed(2)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full border ${getConfidenceColorClass(annotation.confidence)}`}>
+                      {annotation.confidence}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-400">
+                    {annotation.is_nice && (
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-900/30 text-green-400 border border-green-800">
+                        <Check size={14} />
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-          <Typography variant="body2" color="text.secondary">
-            Showing {processedAnnotations.length} of {annotations.length} clusters.
-            Z-scores indicate annotation confidence - higher values suggest stronger evidence.
-            Quality markers (✓) indicate high-confidence annotations validated by the analysis pipeline.
-          </Typography>
-        </Stack>
-      </CardContent>
-    </Card>
+        <p className="text-sm text-gray-500">
+          Showing {processedAnnotations.length} of {annotations.length} clusters.
+          Z-scores indicate annotation confidence - higher values suggest stronger evidence.
+          Quality markers (✓) indicate high-confidence annotations validated by the analysis pipeline.
+        </p>
+      </div>
+    </div>
   );
 };
 

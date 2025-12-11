@@ -1,28 +1,23 @@
-import React, { useState, useCallback } from 'react';
+import React from 'react';
 import Plot from 'react-plotly.js';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  FormControl,
-  Select,
-  MenuItem,
-  SelectChangeEvent,
-  Chip,
-  Stack,
-  Autocomplete,
-  TextField,
-  Slider,
-  Switch,
-  FormControlLabel,
-} from '@mui/material';
-import { VisualizationData, GeneExpressionData, api } from '../../services/api';
+import { VisualizationData, GeneExpressionData } from '../../services/api';
 
 interface UMAPPlotProps {
-  h5adPath: string;
   data: VisualizationData;
+  // Visualization State
+  colorBy: string;
+  pointSize: number;
+  opacity: number;
+  showGeneExpression: boolean;
+  selectedGene: string;
+  geneExpression: GeneExpressionData;
+  selectedCells: string[];
+  customLabels?: Record<string, string>; // New prop for optimistic updates
+  activeTool?: 'select' | 'pan' | 'lasso';
+  // Handlers
   onCellSelection?: (cellIds: string[]) => void;
+  onSelectionCoordinates?: (coords: { x: number, y: number } | null) => void;
+  onClusterSelect?: (cluster: string) => void; // New: Quick-select cluster from legend
 }
 
 interface ColorMapping {
@@ -32,16 +27,22 @@ interface ColorMapping {
   categories?: string[];
 }
 
-const UMAPPlot: React.FC<UMAPPlotProps> = ({ h5adPath, data, onCellSelection }) => {
-  const [colorBy, setColorBy] = useState<string>('leiden');
-  const [geneExpression, setGeneExpression] = useState<GeneExpressionData>({});
-  const [selectedGene, setSelectedGene] = useState<string>('');
-  const [loadingGene, setLoadingGene] = useState<boolean>(false);
-  const [selectedCells, setSelectedCells] = useState<number[]>([]);
-  const [showGeneExpression, setShowGeneExpression] = useState<boolean>(false);
-  const [pointSize, setPointSize] = useState<number>(4);
-  const [opacity, setOpacity] = useState<number>(0.7);
-
+const UMAPPlot: React.FC<UMAPPlotProps> = ({ 
+  data, 
+  colorBy,
+  pointSize,
+  opacity,
+  showGeneExpression,
+  selectedGene,
+  geneExpression,
+  selectedCells,
+  customLabels,
+  activeTool,
+  onCellSelection,
+  onSelectionCoordinates,
+  onClusterSelect
+}) => {
+  
   // Get available embeddings (prioritize UMAP)
   const availableEmbeddings = data.summary_stats?.embeddings_available || [];
   const currentEmbedding = availableEmbeddings.includes('umap') ? 'umap' : availableEmbeddings[0] || 'umap';
@@ -49,14 +50,11 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({ h5adPath, data, onCellSelection }) 
 
   if (!coordinates) {
     return (
-      <Card>
-        <CardContent>
-          <Typography variant="h6">No embedding data available</Typography>
-          <Typography color="text.secondary">
-            Available embeddings: {availableEmbeddings.join(', ') || 'None'}
-          </Typography>
-        </CardContent>
-      </Card>
+      <div className="flex items-center justify-center h-full text-gray-400">
+        <div className="text-center">
+          <p>No embedding data available</p>
+        </div>
+      </div>
     );
   }
 
@@ -79,31 +77,67 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({ h5adPath, data, onCellSelection }) 
     return colorMap;
   };
 
+  // Custom colorscale for gene expression with better gradient visibility
+  const geneExpressionColorscale: [number, string][] = [
+    [0, '#1a1a2e'],      // Dark blue/gray for zero/low expression
+    [0.1, '#16213e'],    // Slightly lighter
+    [0.2, '#0f3460'],    // Navy blue
+    [0.3, '#1e5f74'],    // Teal
+    [0.4, '#4a9c6d'],    // Green
+    [0.5, '#8bc34a'],    // Light green
+    [0.6, '#cddc39'],    // Yellow-green
+    [0.7, '#ffeb3b'],    // Yellow
+    [0.8, '#ff9800'],    // Orange
+    [0.9, '#f44336'],    // Red
+    [1, '#b71c1c'],      // Dark red for highest expression
+  ];
+
   // Prepare color mapping based on current selection
   const getColorMapping = (): ColorMapping => {
     if (showGeneExpression && selectedGene && geneExpression[selectedGene]) {
       return {
         type: 'continuous',
         values: geneExpression[selectedGene],
-        colorscale: 'Viridis',
+        colorscale: geneExpressionColorscale as any,
       };
     }
 
+    const applyCustomLabels = (values: string[], categories: string[]) => {
+        if (!customLabels || Object.keys(customLabels).length === 0) {
+            return { values, categories };
+        }
+        
+        const newValues = values.map(v => customLabels[v] || v);
+        // Recalculate unique categories
+        const categorySet = new Set<string>();
+        categories.forEach(c => categorySet.add(customLabels[c] || c));
+        
+        return { values: newValues, categories: Array.from(categorySet) };
+    };
+
     // Handle cluster coloring
     if (data.clusters[colorBy]) {
+      const { values, categories } = applyCustomLabels(
+          data.clusters[colorBy].labels, 
+          data.clusters[colorBy].categories
+      );
       return {
         type: 'categorical',
-        values: data.clusters[colorBy].labels,
-        categories: data.clusters[colorBy].categories,
+        values,
+        categories,
       };
     }
 
     // Handle cell type coloring
     if (data.cell_types[colorBy]) {
+      const { values, categories } = applyCustomLabels(
+          data.cell_types[colorBy].labels, 
+          data.cell_types[colorBy].categories
+      );
       return {
         type: 'categorical',
-        values: data.cell_types[colorBy].labels,
-        categories: data.cell_types[colorBy].categories,
+        values,
+        categories,
       };
     }
 
@@ -116,39 +150,24 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({ h5adPath, data, onCellSelection }) 
       };
     }
 
-    // Default to leiden clustering
-    return {
-      type: 'categorical',
-      values: data.clusters.leiden?.labels || [],
-      categories: data.clusters.leiden?.categories || [],
-    };
+    // Default to leiden clustering or first available
+    const defaultKey = Object.keys(data.clusters)[0] || 'leiden';
+    if (data.clusters[defaultKey]) {
+        const { values, categories } = applyCustomLabels(
+            data.clusters[defaultKey].labels, 
+            data.clusters[defaultKey].categories
+        );
+        return {
+            type: 'categorical',
+            values,
+            categories,
+        };
+    }
+
+    return { type: 'categorical', values: [], categories: [] };
   };
 
   const colorMapping = getColorMapping();
-
-
-  // Load gene expression data
-  const loadGeneExpression = useCallback(async (gene: string) => {
-    if (!gene || geneExpression[gene]) return;
-
-    setLoadingGene(true);
-    try {
-      const expressionData = await api.getGeneExpression(h5adPath, [gene]);
-      setGeneExpression(prev => ({ ...prev, ...expressionData }));
-    } catch (error) {
-      console.error('Error loading gene expression:', error);
-    } finally {
-      setLoadingGene(false);
-    }
-  }, [h5adPath, geneExpression]);
-
-  // Handle gene selection
-  const handleGeneSelect = useCallback((gene: string) => {
-    setSelectedGene(gene);
-    if (gene) {
-      loadGeneExpression(gene);
-    }
-  }, [loadGeneExpression]);
 
   // Prepare plot data
   const getPlotColors = () => {
@@ -161,26 +180,30 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({ h5adPath, data, onCellSelection }) 
     }
   };
 
+  // Map selected cell IDs to indices
+  const selectedIndices = React.useMemo(() => {
+    if (!selectedCells.length) return [];
+    // Create a map for O(1) lookup if cell_ids is large
+    const idMap = new Map(data.cell_ids.map((id, i) => [id, i]));
+    return selectedCells.map(id => idMap.get(id)).filter(i => i !== undefined) as number[];
+  }, [selectedCells, data.cell_ids]);
+
   const plotData = [
     {
       x: coordinates.x,
       y: coordinates.y,
       mode: 'markers' as const,
-      type: 'scatter' as const,
+      type: 'scattergl' as const, // Use WebGL for performance
       marker: {
         size: pointSize,
         opacity: opacity,
         color: getPlotColors(),
         colorscale: colorMapping.type === 'continuous' ? colorMapping.colorscale : undefined,
         line: {
-          color: 'rgba(255,255,255,0.8)',
-          width: 0.5,
+          color: 'rgba(255,255,255,0.2)',
+          width: 0, // Remove border for cleaner look on dark background? User asked for "dots more apparent", maybe keep it simple
         },
-        showscale: colorMapping.type === 'continuous',
-        colorbar: colorMapping.type === 'continuous' ? {
-          title: showGeneExpression ? selectedGene : colorBy,
-          titleside: 'right',
-        } : undefined,
+        showscale: false, // We'll use a custom legend/colorbar in the UI if needed, or let Plotly handle it
       },
       text: coordinates.x.map((_, i) => {
         const cellId = data.cell_ids[i];
@@ -191,334 +214,153 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({ h5adPath, data, onCellSelection }) 
 
         return `Cell: ${cellId}<br>${colorBy}: ${colorValue}${geneValue ? `<br>${selectedGene}: ${geneValue}` : ''}`;
       }),
-      hovertemplate: '%{text}<extra></extra>',
+      hoverinfo: 'text',
       selected: {
         marker: {
-          color: '#ffff00',
-          size: pointSize + 3,
           opacity: 1.0,
-          line: { color: '#000000', width: 2 }
+          size: pointSize + 3,
+          line: {
+            color: 'white',
+            width: 2
+          }
         }
       },
       unselected: {
         marker: {
-          opacity: opacity  // Keep original opacity, no dimming
+          opacity: opacity * 0.3 // Dim unselected
         }
       },
-      selectedpoints: selectedCells,
+      selectedpoints: selectedIndices.length > 0 ? selectedIndices : null,
     },
   ];
 
   // Plot layout
   const layout = {
-    title: {
-      text: `${currentEmbedding.toUpperCase()} Plot - Colored by ${showGeneExpression && selectedGene ? selectedGene : colorBy}`,
-      font: { size: 16 },
-    },
+    title: false,
     xaxis: {
-      title: `${currentEmbedding.toUpperCase()}_1`,
+      title: '',
       showgrid: true,
-      gridcolor: 'rgba(0,0,0,0.1)',
+      gridcolor: 'rgba(255,255,255,0.05)',
+      zeroline: false,
+      showticklabels: false,
     },
     yaxis: {
-      title: `${currentEmbedding.toUpperCase()}_2`,
+      title: '',
       showgrid: true,
-      gridcolor: 'rgba(0,0,0,0.1)',
+      gridcolor: 'rgba(255,255,255,0.05)',
+      zeroline: false,
+      showticklabels: false,
     },
     hovermode: 'closest' as const,
-    dragmode: 'select' as const,
+    dragmode: activeTool === 'lasso' ? 'lasso' : activeTool === 'select' ? 'select' : 'pan',
     selectdirection: 'any' as const,
-    plot_bgcolor: 'white',
-    paper_bgcolor: 'white',
-    margin: { l: 60, r: 60, t: 60, b: 60 },
-    height: 600,
+    plot_bgcolor: 'transparent', // Transparent for dark mode background
+    paper_bgcolor: 'transparent',
+    margin: { l: 0, r: 0, t: 0, b: 0 },
+    autosize: true,
     showlegend: false,
   };
 
   // Handle cell selection
   const handleSelection = (eventData: any) => {
-    console.log('Selection event:', eventData);
-    if (eventData && eventData.points && eventData.points.length > 0) {
-      const selected = eventData.points.map((point: any) => point.pointIndex);
-      console.log('Selected cell indices:', selected);
-      setSelectedCells(selected);
-      if (onCellSelection) {
-        const cellIds = selected.map((i: number) => data.cell_ids[i]);
-        console.log('Selected cell IDs:', cellIds);
-        onCellSelection(cellIds);
-      }
-    } else {
-      console.log('No points in selection event');
+    if (eventData && eventData.points) {
+      // If we have points, select them
+      if (eventData.points.length > 0) {
+        const selectedIndices = eventData.points.map((point: any) => point.pointIndex);
+        if (onCellSelection) {
+          const cellIds = selectedIndices.map((i: number) => data.cell_ids[i]);
+          onCellSelection(cellIds);
+        }
+      } 
+      // If event fires with empty points (sometimes happens on clear), do nothing or clear
+      // We rely on onDeselect for explicit clearing usually, but sometimes select tool returns empty
     }
   };
 
-  // Available color options
-  const colorOptions = [
-    ...Object.keys(data.clusters).map(key => ({ label: `Cluster (${key})`, value: key, group: 'Clusters' })),
-    ...Object.keys(data.cell_types).map(key => ({ label: `Cell Type (${key})`, value: key, group: 'Cell Types' })),
-    ...Object.keys(data.qc_metrics).map(key => ({ label: `QC Metric (${key})`, value: key, group: 'QC Metrics' })),
-  ];
+  // Legend Component
+  const Legend = () => {
+    if (colorMapping.type === 'continuous') {
+        // Use gradient matching gene expression colorscale
+        const isGeneExpression = showGeneExpression && selectedGene;
+        const gradientStyle = isGeneExpression 
+            ? 'linear-gradient(to right, #1a1a2e, #0f3460, #1e5f74, #4a9c6d, #8bc34a, #cddc39, #ffeb3b, #ff9800, #f44336, #b71c1c)'
+            : 'linear-gradient(to right, #0d0887, #46039f, #7201a8, #9c179e, #bd3786, #d8576b, #ed7953, #fb9f3a, #fdca26, #f0f921)'; // Plasma
+        
+        return (
+            <div className="absolute top-4 right-4 bg-neutral-900/80 backdrop-blur border border-neutral-800 p-3 rounded-lg shadow-xl max-w-[200px]">
+                <div className="text-xs font-semibold text-gray-300 mb-2">{selectedGene || colorBy}</div>
+                <div 
+                    className="h-2 w-full rounded-full mb-1"
+                    style={{ background: gradientStyle }}
+                ></div>
+                <div className="flex justify-between text-[10px] text-gray-400">
+                    <span>Low</span>
+                    <span>High</span>
+                </div>
+            </div>
+        );
+    }
 
+    if (colorMapping.type === 'categorical' && colorMapping.categories) {
+        const categoryColors = generateCategoryColors(colorMapping.categories);
+        return (
+            <div className="absolute top-4 right-4 bg-neutral-900/80 backdrop-blur border border-neutral-800 p-3 rounded-lg shadow-xl max-w-[200px] max-h-[300px] overflow-y-auto custom-scrollbar z-20 pointer-events-auto">
+                <div className="text-xs font-semibold text-gray-300 mb-2 sticky top-0 bg-neutral-900/0">{colorBy}</div>
+                <div className="space-y-1">
+                    {colorMapping.categories.map(cat => (
+                        <div 
+                            key={cat} 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                e.nativeEvent.stopImmediatePropagation();
+                                onClusterSelect?.(cat);
+                            }}
+                            className="flex items-center gap-2 text-[10px] text-gray-400 cursor-pointer hover:bg-neutral-700/50 hover:text-white px-1 py-0.5 rounded transition-colors"
+                        >
+                            <span 
+                                className="w-3 h-3 rounded-full flex-shrink-0" 
+                                style={{ backgroundColor: categoryColors[cat] }}
+                            ></span>
+                            <span className="truncate">{cat}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
+    return null;
+  };
 
   return (
-    <Card sx={{ height: 'fit-content' }}>
-      <CardContent>
-        <Stack spacing={3}>
-          {/* Title */}
-          <Typography variant="h5" component="h2">
-            Interactive {currentEmbedding.toUpperCase()} Visualization
-          </Typography>
-
-          {/* Controls */}
-          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-            {/* Color by selector */}
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <Typography variant="body2" gutterBottom>
-                Color by:
-              </Typography>
-              <Select
-                value={colorBy}
-                onChange={(e: SelectChangeEvent) => {
-                  setColorBy(e.target.value);
-                  setShowGeneExpression(false);
-                }}
-              >
-                {colorOptions.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            {/* Gene expression toggle */}
-            <Box>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={showGeneExpression}
-                    onChange={(e) => setShowGeneExpression(e.target.checked)}
-                  />
-                }
-                label="Gene Expression"
-              />
-            </Box>
-
-            {/* Gene selector */}
-            {showGeneExpression && (
-              <Autocomplete
-                sx={{ minWidth: 250 }}
-                options={data.available_genes}
-                value={selectedGene}
-                onChange={(_, newValue) => handleGeneSelect(newValue || '')}
-                loading={loadingGene}
-                filterOptions={(options, { inputValue }) => {
-                  // Show all genes - no artificial limits
-                  if (!inputValue) return options; // Show all genes when no search input
-
-                  const inputLower = inputValue.toLowerCase();
-                  return options.filter(gene =>
-                    gene.toLowerCase().includes(inputLower)
-                  ); // Show all matching results
-                }}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label={`Search ${data.available_genes.length} genes`}
-                    placeholder="Type gene name (e.g., CD3D, ACTB)"
-                    size="small"
-                    variant="outlined"
-                    helperText={`${data.available_genes.length} curated genes + type any gene name`}
-                  />
-                )}
-                renderOption={(props, option) => (
-                  <Box component="li" {...props}>
-                    <Box>
-                      <Typography variant="body2" fontWeight="bold">
-                        {option}
-                      </Typography>
-                      {/* Add gene category hints for common markers */}
-                      {['CD3D', 'CD3E', 'CD4', 'CD8A', 'CD8B'].includes(option) && (
-                        <Typography variant="caption" color="primary">T cell marker</Typography>
-                      )}
-                      {['CD19', 'MS4A1', 'CD79A', 'CD79B'].includes(option) && (
-                        <Typography variant="caption" color="secondary">B cell marker</Typography>
-                      )}
-                      {['CD14', 'FCGR3A', 'LYZ', 'CD68'].includes(option) && (
-                        <Typography variant="caption" color="success.main">Myeloid marker</Typography>
-                      )}
-                      {['NKG7', 'GNLY', 'NCR1'].includes(option) && (
-                        <Typography variant="caption" color="warning.main">NK cell marker</Typography>
-                      )}
-                    </Box>
-                  </Box>
-                )}
-                freeSolo
-                clearOnBlur={false}
-                selectOnFocus
-                handleHomeEndKeys
-              />
-            )}
-          </Stack>
-
-          {/* Plot controls */}
-          <Stack direction="row" spacing={4} alignItems="center">
-            <Box sx={{ minWidth: 120 }}>
-              <Typography variant="body2" gutterBottom>
-                Point Size: {pointSize}
-              </Typography>
-              <Slider
-                value={pointSize}
-                onChange={(_, value) => setPointSize(value as number)}
-                min={1}
-                max={10}
-                step={0.5}
-                valueLabelDisplay="auto"
-              />
-            </Box>
-
-            <Box sx={{ minWidth: 120 }}>
-              <Typography variant="body2" gutterBottom>
-                Opacity: {opacity}
-              </Typography>
-              <Slider
-                value={opacity}
-                onChange={(_, value) => setOpacity(value as number)}
-                min={0.1}
-                max={1}
-                step={0.1}
-                valueLabelDisplay="auto"
-              />
-            </Box>
-
-            {selectedCells.length > 0 && (
-              <Box>
-                <Chip
-                  label={`✓ ${selectedCells.length} cells selected (${((selectedCells.length / coordinates.x.length) * 100).toFixed(1)}%)`}
-                  onDelete={() => setSelectedCells([])}
-                  color="warning"
-                  variant="filled"
-                  sx={{
-                    fontWeight: 'bold',
-                    '& .MuiChip-label': {
-                      color: 'white'
-                    }
-                  }}
-                />
-              </Box>
-            )}
-          </Stack>
-
-          {/* Summary stats */}
-          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-            <Chip label={`${data.summary_stats.n_cells.toLocaleString()} cells`} variant="outlined" />
-            <Chip label={`${data.summary_stats.n_genes.toLocaleString()} genes`} variant="outlined" />
-            <Chip label={`${data.summary_stats.n_clusters} clusters`} variant="outlined" />
-          </Stack>
-
-          {/* Color legend for categorical data */}
-          {colorMapping.type === 'categorical' && !showGeneExpression && colorMapping.categories && (
-            <Box>
-              <Typography variant="body2" gutterBottom sx={{ fontWeight: 'bold' }}>
-                {colorBy === 'leiden' || colorBy === 'louvain' ? 'Clusters:' : 'Cell Types:'}
-              </Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                {colorMapping.categories.map((category) => {
-                  const categoryColors = generateCategoryColors(colorMapping.categories || []);
-                  const color = categoryColors[category];
-                  const count = colorMapping.type === 'categorical' && data.clusters[colorBy]
-                    ? data.clusters[colorBy].counts?.[category]
-                    : data.cell_types[colorBy]?.counts?.[category] || 0;
-
-                  return (
-                    <Box
-                      key={category}
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 0.5,
-                        px: 1,
-                        py: 0.5,
-                        bgcolor: 'grey.100',
-                        borderRadius: 1,
-                        fontSize: '0.75rem'
-                      }}
-                    >
-                      <Box
-                        sx={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: '50%',
-                          bgcolor: color,
-                          border: '1px solid rgba(0,0,0,0.1)'
-                        }}
-                      />
-                      <Typography variant="caption">
-                        {category} ({count})
-                      </Typography>
-                    </Box>
-                  );
-                })}
-              </Stack>
-            </Box>
-          )}
-
-          {/* Selection Summary */}
-          {selectedCells.length > 0 && (
-            <Card sx={{ bgcolor: 'primary.light', color: 'primary.contrastText' }}>
-              <CardContent sx={{ py: 2 }}>
-                <Typography variant="h6" gutterBottom>
-                  Selected Cells Summary ({selectedCells.length} cells)
-                </Typography>
-                <Typography variant="body2">
-                  {selectedCells.map(i => data.cell_ids[i]).slice(0, 10).join(', ')}
-                  {selectedCells.length > 10 && ` ... and ${selectedCells.length - 10} more`}
-                </Typography>
-                {colorMapping.type === 'categorical' && (
-                  <Box sx={{ mt: 2 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      Selection breakdown by {colorBy}:
-                    </Typography>
-                    {(() => {
-                      const selectionCounts: { [key: string]: number } = {};
-                      selectedCells.forEach(i => {
-                        const value = (colorMapping.values as string[])[i];
-                        selectionCounts[value] = (selectionCounts[value] || 0) + 1;
-                      });
-                      return Object.entries(selectionCounts).map(([value, count]) => (
-                        <Typography key={value} variant="caption" sx={{ display: 'block' }}>
-                          {value}: {count} cells ({((count / selectedCells.length) * 100).toFixed(1)}%)
-                        </Typography>
-                      ));
-                    })()}
-                  </Box>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Plot */}
-          <Box sx={{ width: '100%', height: 600 }}>
-            <Plot
-              data={plotData}
-              layout={layout}
-              config={{
-                displayModeBar: true,
-                modeBarButtonsToRemove: ['pan2d'],
-                displaylogo: false,
-                responsive: true,
-              }}
-              style={{ width: '100%', height: '100%' }}
-              onSelected={handleSelection}
-              onDeselect={() => {
-                setSelectedCells([]);
-                if (onCellSelection) onCellSelection([]);
-              }}
-            />
-          </Box>
-        </Stack>
-      </CardContent>
-    </Card>
+    <div 
+        className="relative w-full h-full"
+        onMouseUp={(e) => {
+            if ((activeTool === 'select' || activeTool === 'lasso') && onSelectionCoordinates) {
+                // Determine a safe position (e.g., slightly offset from cursor)
+                onSelectionCoordinates({ x: e.clientX, y: e.clientY });
+            }
+        }}
+    >
+        <Plot
+        data={plotData}
+        layout={layout}
+        config={{
+            displayModeBar: false, // Cleaner look
+            responsive: true,
+            scrollZoom: true,
+        }}
+        style={{ width: '100%', height: '100%' }}
+        useResizeHandler={true}
+        onSelected={handleSelection}
+        onDeselect={() => {
+            // Only clear if we are in a selection mode, otherwise pan might trigger this?
+            // Actually onDeselect is specific to double-click or mode change clearing
+            if (onCellSelection) onCellSelection([]);
+        }}
+        />
+        <Legend />
+    </div>
   );
 };
 
