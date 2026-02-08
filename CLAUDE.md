@@ -6,17 +6,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 CellPilot is a comprehensive single-cell RNA-seq analysis platform with three main components:
 
-1. **Frontend (Electron + React)**: Desktop application built with Electron, React, TypeScript, and Material-UI
-2. **Backend (FastAPI)**: Python REST API server handling computational tasks  
+1. **Frontend (Electron + React)**: Desktop application built with Electron 36, React 19, TypeScript, and Material-UI v7
+2. **Backend (FastAPI)**: Python REST API server handling computational tasks
 3. **Scientific Computing Core**: Integrated analysis modules including CaDRReS-Sc for drug response prediction
 
-### Key Components
+### Directory Structure
 
-- **Frontend**: `/my-app/` - Electron desktop application with React renderer
-- **Backend**: `/backend/` - FastAPI server with analysis endpoints
-- **CaDRReS-Sc**: `/CaDRReS-Sc/` - Drug response prediction module
-- **Data**: `/data/`, `/models/`, `/output/` - Input data, trained models, and analysis results
-- **Databases**: `/db/` - Reference databases (CellPhoneDB, gene annotations)
+```
+SingleCell/
+├── backend/                    # FastAPI REST API server
+│   ├── app/                   # Main application code
+│   │   ├── main.py           # FastAPI app with all endpoints
+│   │   ├── models.py         # Pydantic request/response models
+│   │   ├── annotate.py       # Cell type annotation pipeline
+│   │   ├── analysis.py       # CellPhoneDB & InferCNV pipelines
+│   │   ├── visualization.py  # Data extraction for visualization
+│   │   ├── subcluster.py     # Subclustering workflow
+│   │   ├── chat_service.py   # AI chat assistant (OpenAI GPT-4o)
+│   │   ├── job_manager.py    # Background job tracking
+│   │   └── utils.py          # Helper functions
+│   ├── CaDRReS-Sc/           # Drug response prediction module
+│   ├── db/                    # Reference databases
+│   ├── models/               # Pre-trained drug response models
+│   └── output/               # Analysis results
+├── my-app/                    # Electron + React frontend
+│   ├── src/renderer/
+│   │   ├── components/
+│   │   │   ├── visualization/ # UMAP, heatmaps, volcano plots, chat
+│   │   │   └── wizard/        # 4-step analysis wizard
+│   │   ├── forms/             # Configuration forms
+│   │   ├── services/api.ts    # Backend API client
+│   │   └── types/             # TypeScript definitions
+│   └── package.json
+├── data/                      # Sample datasets & input files
+├── environment.yml            # Conda environment specification
+├── launch_cellpilot.sh        # Main launch script
+└── CLAUDE.md
+```
 
 ## Development Commands
 
@@ -26,38 +52,8 @@ CellPilot is a comprehensive single-cell RNA-seq analysis platform with three ma
 conda env create -f environment.yml
 conda activate CellPilot-dev
 
-# Install frontend dependencies  
+# Install frontend dependencies
 cd my-app && npm install
-```
-
-### ✅ Setup Validation Status (June 2025)
-
-**Launch Script**: `./launch_cellpilot.sh` works correctly for any user following README setup
-- ✅ Properly activates conda environment before starting backend
-- ✅ Validates all critical Python dependencies (omicverse, scanpy, cellphonedb, fastapi)
-- ✅ Installs frontend dependencies if missing
-- ✅ Starts backend in conda environment with all dependencies loaded
-- ✅ Backend runs successfully on http://127.0.0.1:8000
-
-**Backend API**: All endpoints verified and functional
-- ✅ `/ping` - Health check works
-- ✅ `/annotate` - Cell type annotation with manual marker support
-- ✅ `/cellphonedb` - Cell-cell communication analysis  
-- ✅ `/inferCNV` - Tumor prediction and drug response
-- ✅ All preview endpoints working
-- ✅ FastAPI validation and error handling operational
-
-**Frontend**: TypeScript compilation successful
-- ✅ All components compile without errors
-- ✅ Manual annotation feature fully integrated
-- ✅ UI optimized for compact layouts
-- ✅ File upload and validation working
-
-**Dependencies**: All required files and databases present
-- ✅ `db/cellphonedb.zip` - CellPhoneDB database
-- ✅ `db/gencode.v47.annotation.gtf.gz` - Gene annotations
-- ✅ `models/` directory - Drug response models
-- ✅ Sample data available for testing
 
 # Make launch script executable
 chmod +x launch_cellpilot.sh
@@ -90,68 +86,163 @@ cd my-app && npm run package
 ## Core Analysis Pipelines
 
 ### 1. Cell Annotation Pipeline
-- **Entry point**: `backend/app/annotate.py`
-- **Function**: `annotate()`
-- Uses reference databases (CellMarker, PanglaoDB, Cancer Single Cell Atlas)
-- Outputs annotated `.h5ad` files with cell type predictions
+- **Entry point**: `backend/app/annotate.py:annotate()`
+- **Reference databases**: CellMarker (OmicVerse), PanglaoDB, Cancer Single Cell Atlas, CellTypist, Manual markers
+- **Features**: QC analysis, preprocessing (normalization, HVG, PCA, UMAP, Leiden), marker gene detection, confidence scoring
+- **Output**: Annotated `.h5ad` files with cell type predictions
 
 ### 2. Cell-Cell Communication Analysis
 - **Entry point**: `backend/app/analysis.py:run_cell_phone_db()`
-- Uses CellPhoneDB for ligand-receptor interaction analysis
-- Generates network visualizations and statistical results
+- **Analysis**: Ligand-receptor interaction statistics
+- **Visualizations**: Chord diagrams, interaction networks, dot plots
 
 ### 3. Tumor Prediction & Drug Response
 - **Entry point**: `backend/app/analysis.py:run_inferncnv()`
-- Uses inferCNV for copy number variation detection
-- Integrates CaDRReS-Sc model for drug sensitivity prediction
-- Outputs CNV profiles and drug response predictions
+- **Analysis**: Copy number variation detection, tumor vs. normal classification
+- **Drug prediction**: CaDRReS-Sc model for drug sensitivity (GDSC and PRISM datasets)
+- **Output**: CNV profiles, tumor annotations, drug response predictions per cluster
 
-## Data Flow Architecture
+### 4. Subclustering Workflow
+- **Entry point**: `backend/app/subcluster.py:run_subclustering_workflow()`
+- **Features**: Extract cells, re-normalize, re-cluster, re-annotate
+- **Supports**: Nested subclustering, label merging back to parent
 
-1. **Input**: Raw single-cell data (10X Cell Ranger format, `.h5ad` files)
-2. **Preprocessing**: Quality control, normalization, dimensionality reduction (PCA/UMAP)
-3. **Clustering**: Leiden algorithm for community detection
-4. **Annotation**: Cell type assignment using reference databases
-5. **Analysis**: Cell communication, tumor detection, drug response prediction
+### 5. AI Bioinformatics Assistant (NEW)
+- **Entry point**: `backend/app/chat_service.py:get_chat_response()`
+- **Integration**: OpenAI GPT-4o API
+- **Context modes**: Global dataset, cluster-specific, custom lasso selection
+- **Features**: QC interpretation, marker analysis, heterogeneity detection, blind analysis mode
+- **Requires**: `OPENAI_API_KEY` environment variable
+
+## API Endpoints
+
+### Health & Data Management
+- `GET /ping` - Health check
+- `POST /adata_upload` - Upload and validate h5ad/h5 files
+- `GET /available_datasets` - List all analysis outputs
+- `GET /analysis_files` - Get output files for a dataset
+
+### Main Analysis Pipelines
+- `POST /annotate` - Cell type annotation
+- `POST /cellphonedb` - Cell-cell interaction analysis
+- `POST /inferCNV` - Tumor prediction + drug response
+- `POST /start_analysis` - Run complete pipeline (background job)
+- `POST /subcluster` - Run subclustering on selected cells
+- `GET /subclusters` - List subclusters for a parent dataset
+- `POST /merge_subcluster_labels` - Merge labels back to parent
+
+### Visualization & Data Access
+- `GET /visualization_data` - Extract embeddings, clusters, QC metrics
+- `POST /gene_expression` - Gene expression values
+- `GET /marker_genes` - Top marker genes per cluster
+- `GET /celltype_markers` - Curated biological markers
+- `POST /get_obs_columns` - Available metadata columns
+- `POST /differential_expression` - DE analysis on selections
+
+### Annotation Management
+- `POST /create_annotation_layer` - Create new metadata column
+- `POST /update_annotation_layer` - Modify annotations
+- `GET /annotation_details` - Annotation confidence scores
+- `GET /annotation_confidence` - Structured confidence JSON
+
+### AI Assistant
+- `POST /chat` - AI-powered bioinformatics assistant
+
+### File Preview
+- `GET /preview_img` - Stream image files
+- `GET /preview_txt` - Stream text files
+- `GET /preview_csv` - Stream CSV files
+- `GET /preview_csv_data` - CSV as JSON (with drug response handling)
+
+### Utility
+- `GET /job_status/{job_id}` - Track background job progress
+- `GET /celltypist/models` - Available CellTypist models
+
+## Frontend Components
+
+### Visualization Dashboard (`my-app/src/renderer/components/visualization/`)
+- `VisualizationDashboard.tsx` - Main interactive explorer
+- `UMAPExplorer.tsx` - Interactive UMAP with lasso selection
+- `ClusterAnnotationTable.tsx` - Cluster metadata & annotations
+- `AnnotationManager.tsx` - Interactive annotation editor
+- `MarkerGenesHeatmap.tsx` - Top markers per cluster
+- `QCViolin.tsx` - Quality control violin plots
+- `DrugResponseTable.tsx` - Drug sensitivity heatmap
+- `VolcanoPlot.tsx` - Differential expression plots
+- `SubclusterConfigModal.tsx` - Subclustering parameters
+- `ChatAgent.tsx` - AI assistant chat interface
+
+### Analysis Wizard (`my-app/src/renderer/components/wizard/`)
+- `AnalysisWizard.tsx` - Main wizard controller
+- `Step1UploadDefine.tsx` - Data upload & validation
+- `Step3ConfigureLaunch.tsx` - Select analysis modules
+- `Step3CellPhoneDBConfig.tsx` - CellPhoneDB parameters
+- `Step3InferCNVConfig.tsx` - InferCNV/drug response parameters
+
+### Forms (`my-app/src/renderer/forms/`)
+- `AnnotationOptions.tsx` - Reference database selection
+- `ManualAnnotationConfig.tsx` - Custom marker gene input
 
 ## Key Dependencies
 
 ### Python Environment (Conda)
-- Core: `scanpy`, `pandas`, `numpy`, `scipy`
-- Deep Learning: `tensorflow`, `pytorch`
-- Single-cell: `cellphonedb`, `infercnvpy`
-- API: `fastapi`, `uvicorn`
+- **Core**: scanpy 1.10.3, anndata 0.10.9, pandas 2.2.3, numpy 1.26.4
+- **Analysis**: omicverse 1.6.10, cellphonedb 5.0.1, infercnvpy 0.4.5, celltypist 1.7.1
+- **API**: fastapi 0.115.12, uvicorn 0.34.2
+- **ML**: pytorch 2.2.2, tensorflow 2.19.0, scikit-learn 1.6.1
+- **AI**: openai (for chat service)
+- **Visualization**: matplotlib 3.6.3, plotly 6.0.1, seaborn 0.13.2
 
-### Frontend Dependencies
-- Framework: `electron`, `react`, `typescript`
-- UI: `@mui/material`, `@emotion/react`
-- Build: `electron-forge`, `vite`
+### Frontend (Node.js)
+- **React**: react 19.1.0, react-dom 19.1.0
+- **UI**: @mui/material 7.0.0-rc.0, tailwindcss 3.4.17
+- **Desktop**: electron 36.1.0, electron-forge 7.8.0
+- **Build**: vite 5.4.19, typescript 4.5.4
+- **Visualization**: plotly.js, chart.js, react-plotly.js
+- **Utilities**: react-markdown, lucide-react
+
+## Reference Databases
+
+Located in `backend/db/`:
+- `cellphonedb.zip` - CellPhoneDB ligand-receptor database
+- `gencode.v47.annotation.gtf.gz` - Human gene annotations (for CNV)
+- `pySCSA_2024_v1_plus.db` - Cancer Single Cell Atlas
+
+## Pre-trained Models
+
+Located in `backend/models/`:
+- `cadrres-wo-sample-bias_*.pickle` - CaDRReS drug response models
+- `GDSC_exp.tsv.gz` - GDSC drug response training data
+- `masked_drugs.csv` - Reference drug list
 
 ## File Structure Conventions
 
 - **Input data**: Place in `/data/` directory
-- **Analysis outputs**: Saved to `/output/` with timestamped subdirectories
-- **Models**: Pre-trained models stored in `/models/`
-- **Temp files**: Use `/temp/` for intermediate processing
+- **Analysis outputs**: Saved to `/output/` with format `{type}_{name}_{YYYYMMDD_HHMM}/`
+- **Models**: Pre-trained models in `/backend/models/`
+- **Backend logs**: Written to `backend.log`
 
-## API Endpoints
+## Current Development Status
 
-- `POST /adata_upload` - Upload and validate input files
-- `POST /annotate` - Run cell type annotation pipeline
-- `POST /cellphonedb` - Analyze cell-cell communication
-- `POST /inferCNV` - Tumor prediction and drug response analysis
-- `GET /preview_img` - Preview generated visualizations
+### Stable Features
+- Core annotation with 5 reference databases
+- CellPhoneDB cell-cell communication
+- InferCNV tumor prediction
+- CaDRReS drug response prediction
+- Interactive UMAP visualization
+- Subclustering with re-annotation
+- Annotation layer management
+- QC filtering and metrics
 
-## Testing
-
-The application includes mock data for development:
-- Mock responses in `my-app/src/renderer/mock/`
-- Test data can be found in existing `/output/test_run/` directory
-- Backend can be tested directly by running `python backend/app/main.py`
+### In Development
+- AI bioinformatics assistant (chat_service.py, ChatAgent.tsx)
+- Manual marker annotation UI (ManualAnnotationConfig.tsx)
 
 ## Important Notes
 
-- Backend logs are written to `backend.log`
-- All analysis outputs include timestamp formatting: `YYYYMMDD_HHMM`
-- Large files (models, databases) are pre-downloaded and cached
-- The application requires significant computational resources for analysis pipelines
+- Backend requires conda environment with all dependencies
+- AI chat requires `OPENAI_API_KEY` environment variable
+- Large h5ad files (500MB+) supported with lazy loading
+- GPU acceleration optional (NVIDIA drivers required)
+- CellTypist models download on first use
+- macOS fork safety handled in analysis.py

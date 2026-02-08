@@ -1,6 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { UploadData } from './Step1UploadDefine';
 import { api, APIError, JobStatusResponse } from '../../services/api';
+import ManualAnnotationConfig from '../../components/ManualAnnotationConfig';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { ChevronRight, ChevronLeft, Check, Beaker, Layers, Tag, Play, AlertCircle } from 'lucide-react';
+
+const muiTheme = createTheme({
+  palette: {
+    primary: {
+      main: '#2563eb',
+    },
+  },
+});
 
 interface Step3Props {
   uploadData: UploadData;
@@ -10,14 +21,14 @@ interface Step3Props {
 }
 
 export interface AnalysisData {
-  // Quality Control - matching backend defaults
+  // Quality Control
   mitoPrefix: string;
-  mitoThreshold: number; // percentage (0.05 = 5%)
+  mitoThreshold: number;
   minGenes: number;
   minCounts: number;
-  maxGenesPerCell: number; // frontend-only for doublet filtering
+  maxGenesPerCell: number;
 
-  // Normalization & Scaling (these are handled by omicverse internally)
+  // Normalization & Scaling
   normalizationMethod: string;
   scaleFactor: number;
   logTransform: boolean;
@@ -35,11 +46,19 @@ export interface AnalysisData {
   resolution: number;
   clusteringMethod: string;
 
-  // Annotation Options - matching backend
+  // Annotation Options
   runAnnotation: boolean;
   useCellmarker: boolean;
   usePanglao: boolean;
   useCancerSingleCellAtlas: boolean;
+  useCellTypist: boolean;
+  cellTypistModels: string[];
+
+  // Manual Annotation
+  useManualAnnotation: boolean;
+  manualMarkerFile: string | null;
+  manualMarkerText: string;
+  manualInputType: 'file' | 'text';
 
   // Other Analysis types
   runCellPhone: boolean;
@@ -53,34 +72,37 @@ export interface AnalysisData {
   annotatedDatasetPath?: string;
 }
 
-const NORMALIZATION_METHODS = [
-  { value: 'shiftlog|pearson', label: 'Shiftlog + Pearson (OmicVerse default)' },
-  { value: 'log1p', label: 'Log1p normalization' },
-  { value: 'cpm', label: 'Counts per million (CPM)' },
-  { value: 'tpm', label: 'Transcripts per million (TPM)' }
-];
+type WizardStep = 'quality-control' | 'clustering' | 'annotation' | 'review';
 
-const HVG_METHODS = [
-  { value: 'seurat', label: 'Seurat method (recommended)' },
-  { value: 'cell_ranger', label: 'Cell Ranger method' },
-  { value: 'seurat_v3', label: 'Seurat v3 method' }
-];
-
-const CLUSTERING_METHODS = [
-  { value: 'leiden', label: 'Leiden algorithm (recommended)' },
-  { value: 'louvain', label: 'Louvain algorithm' }
+const WIZARD_STEPS: { id: WizardStep; label: string; icon: React.ReactNode }[] = [
+  { id: 'quality-control', label: 'Quality Control', icon: <Beaker size={18} /> },
+  { id: 'clustering', label: 'Clustering', icon: <Layers size={18} /> },
+  { id: 'annotation', label: 'Annotation', icon: <Tag size={18} /> },
+  { id: 'review', label: 'Review & Launch', icon: <Play size={18} /> },
 ];
 
 export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, analysisData }: Step3Props) {
+  const [currentWizardStep, setCurrentWizardStep] = useState<WizardStep>('quality-control');
+  const [cellTypistModels, setCellTypistModels] = useState<{name: string, description: string}[]>([]);
+
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const models = await api.getCellTypistModels();
+        setCellTypistModels(models);
+      } catch (e) {
+        console.error("Failed to fetch CellTypist models", e);
+      }
+    };
+    fetchModels();
+  }, []);
+
   const [config, setConfig] = useState<AnalysisData>({
-    // QC defaults - matching backend default_params()
     mitoPrefix: analysisData?.mitoPrefix || 'MT-',
-    mitoThreshold: analysisData?.mitoThreshold || 5, // 5% (backend uses 0.05)
+    mitoThreshold: analysisData?.mitoThreshold || 5,
     minGenes: analysisData?.minGenes || 250,
     minCounts: analysisData?.minCounts || 500,
     maxGenesPerCell: analysisData?.maxGenesPerCell || 5000,
-
-    // Analysis defaults (omicverse handles these internally)
     normalizationMethod: analysisData?.normalizationMethod || 'shiftlog|pearson',
     scaleFactor: analysisData?.scaleFactor || 10000,
     logTransform: analysisData?.logTransform ?? true,
@@ -89,16 +111,18 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     numPCs: analysisData?.numPCs || 50,
     pcaMethod: analysisData?.pcaMethod || 'auto',
     numNeighbors: analysisData?.numNeighbors || 15,
-    resolution: analysisData?.resolution || 0.8, // backend default
+    resolution: analysisData?.resolution || 0.8,
     clusteringMethod: analysisData?.clusteringMethod || 'leiden',
-
-    // Annotation options - matching backend defaults
     runAnnotation: analysisData?.runAnnotation ?? true,
-    useCellmarker: analysisData?.useCellmarker ?? false,
+    useCellmarker: analysisData?.useCellmarker ?? true,
     usePanglao: analysisData?.usePanglao ?? false,
     useCancerSingleCellAtlas: analysisData?.useCancerSingleCellAtlas ?? false,
-
-    // Other analysis types - disabled by default for annotation-only workflow
+    useCellTypist: analysisData?.useCellTypist ?? false,
+    cellTypistModels: analysisData?.cellTypistModels || [],
+    useManualAnnotation: analysisData?.useManualAnnotation ?? false,
+    manualMarkerFile: analysisData?.manualMarkerFile || null,
+    manualMarkerText: analysisData?.manualMarkerText || '',
+    manualInputType: analysisData?.manualInputType || 'file',
     runCellPhone: analysisData?.runCellPhone ?? false,
     runInferCNV: analysisData?.runInferCNV ?? false,
     status: analysisData?.status || 'pending'
@@ -108,27 +132,10 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState('');
   const [error, setError] = useState<string | null>(null);
-
-  const [expandedSections, setExpandedSections] = useState({
-    qc: true,
-    normalization: false,
-    features: false,
-    dimensionality: false,
-    clustering: false,
-    modules: false
-  });
-
-  const toggleSection = (section: keyof typeof expandedSections) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [section]: !prev[section]
-    }));
-  };
-
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
 
-  // Poll job status when analysis is running
+  // Poll job status
   useEffect(() => {
     if (!jobId || !running) return;
 
@@ -140,20 +147,12 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
         setCurrentStep(status.current_step);
 
         if (status.status === 'completed') {
-          // Fetch the actual dataset list from backend to get the real path
           try {
             const datasetsResponse = await api.getAvailableDatasets();
-            console.log('[Step3ConfigureLaunch] Available datasets after completion:', datasetsResponse.datasets);
-
-            // Find the annotation dataset that matches our analysis
-            // Look for the most recent annotation dataset
             const annotationDatasets = datasetsResponse.datasets
               .filter(d => d.analysis_type === 'annotation')
-              .sort((a, b) => b.date.localeCompare(a.date)); // Sort by date descending
-
+              .sort((a, b) => b.date.localeCompare(a.date));
             const realDatasetPath = annotationDatasets.length > 0 ? annotationDatasets[0].path : '';
-
-            console.log('[Step3ConfigureLaunch] Using real dataset path:', realDatasetPath);
 
             const completedAnalysis: AnalysisData = {
               ...config,
@@ -167,20 +166,18 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
             setRunning(false);
             clearInterval(pollInterval);
           } catch (error) {
-            console.error('[Step3ConfigureLaunch] Error fetching datasets:', error);
-            // Fallback to old behavior
+            console.error('[Step3] Error fetching datasets:', error);
             let annotatedDatasetPath = '';
             if (status.result?.annotation?.[0]?.data?.adata_output_file) {
               annotatedDatasetPath = status.result.annotation[0].data.adata_output_file;
             }
-
             const completedAnalysis: AnalysisData = {
               ...config,
               analysisId: jobId,
               status: 'completed',
               progress: 100,
               currentStep: 'Analysis Complete!',
-              annotatedDatasetPath: annotatedDatasetPath
+              annotatedDatasetPath
             };
             onComplete(completedAnalysis);
             setRunning(false);
@@ -195,83 +192,90 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
       } catch (error) {
         console.error('Error polling job status:', error);
       }
-    }, 2000); // Poll every 2 seconds
+    }, 2000);
 
     return () => clearInterval(pollInterval);
   }, [jobId, running, config, onComplete]);
 
-  const validateForm = (): string | null => {
-    // Check if running annotation
-    if (config.runAnnotation) {
-      if (!config.useCellmarker && !config.usePanglao && !config.useCancerSingleCellAtlas) {
-        return 'At least one annotation method must be selected (CellMarker, PanglaoDB, or CancerSEA)';
+  const updateConfig = (updates: Partial<AnalysisData>) => {
+    setConfig(prev => ({ ...prev, ...updates }));
+  };
+
+  const validateCurrentStep = (): string | null => {
+    if (currentWizardStep === 'annotation') {
+      if (!config.useCellmarker && !config.usePanglao && !config.useCancerSingleCellAtlas && !config.useCellTypist && !config.useManualAnnotation) {
+        return 'Please select at least one annotation method';
+      }
+      if (config.useManualAnnotation) {
+        if (config.manualInputType === 'file' && !config.manualMarkerFile) {
+          return 'Please select a marker file for manual annotation';
+        }
+        if (config.manualInputType === 'text' && !config.manualMarkerText.trim()) {
+          return 'Please enter marker text for manual annotation';
+        }
       }
     }
-    
-    // Check if any analysis is selected
-    if (!config.runAnnotation && !config.runCellPhone && !config.runInferCNV) {
-      return 'At least one analysis type must be enabled (Annotation, CellPhoneDB, or InferCNV)';
-    }
-    
-    // Validate QC thresholds
-    if (config.minGenes <= 0) {
-      return 'Minimum genes per cell must be greater than 0';
-    }
-    if (config.minCounts <= 0) {
-      return 'Minimum counts per cell must be greater than 0';
-    }
-    if (config.mitoThreshold <= 0 || config.mitoThreshold > 100) {
-      return 'Mitochondrial threshold must be between 0 and 100%';
-    }
-    
     return null;
   };
 
-  const handleStartAnalysis = async () => {
-    // Clear any previous errors
-    setError(null);
-    
-    // Validate form
-    const validationError = validateForm();
+  const goToNextStep = () => {
+    const validationError = validateCurrentStep();
     if (validationError) {
       setError(validationError);
       return;
     }
-    
+    setError(null);
+    const currentIndex = WIZARD_STEPS.findIndex(s => s.id === currentWizardStep);
+    if (currentIndex < WIZARD_STEPS.length - 1) {
+      setCurrentWizardStep(WIZARD_STEPS[currentIndex + 1].id);
+    }
+  };
+
+  const goToPreviousStep = () => {
+    setError(null);
+    const currentIndex = WIZARD_STEPS.findIndex(s => s.id === currentWizardStep);
+    if (currentIndex > 0) {
+      setCurrentWizardStep(WIZARD_STEPS[currentIndex - 1].id);
+    } else {
+      onBack();
+    }
+  };
+
+  const handleStartAnalysis = async () => {
+    setError(null);
     setRunning(true);
     setProgress(0);
     setCurrentStep('Starting analysis...');
 
     try {
-      // Create output directory path
       const outputDir = `annotation_${uploadData.datasetName}`;
-      // Start the analysis job
       const response = await api.startAnalysis({
         name: uploadData.datasetName,
         input_path: uploadData.filePath,
         dir_name: outputDir,
         qc_params: {
-          // Map frontend parameters to backend parameter names
           mito_prefix: config.mitoPrefix,
-          mito_threshold: config.mitoThreshold / 100, // convert percentage to decimal
+          mito_threshold: config.mitoThreshold / 100,
           min_genes: config.minGenes,
           min_counts: config.minCounts,
-          max_genes: config.maxGenesPerCell // frontend-only parameter
+          max_genes: config.maxGenesPerCell
         },
         analysis_params: {
           runAnnotation: config.runAnnotation,
           runCellPhone: config.runCellPhone,
           runInferCNV: config.runInferCNV,
-          // Annotation options
           use_cellmarker: config.useCellmarker,
           use_panglao: config.usePanglao,
           use_cancer_single_cell_atlas: config.useCancerSingleCellAtlas,
-          // Preprocessing parameters (these match backend default_params)
+          use_celltypist: config.useCellTypist,
+          celltypist_models: config.cellTypistModels,
+          use_manual_annotation: config.useManualAnnotation,
+          manual_marker_file: config.manualMarkerFile,
+          manual_marker_text: config.manualMarkerText,
           n_hvgs: config.numHVGs,
           n_pcs: config.numPCs,
           n_neighbors: config.numNeighbors,
           resolution: config.resolution,
-          // Additional frontend parameters
           normalizationMethod: config.normalizationMethod,
           scaleFactor: config.scaleFactor,
           logTransform: config.logTransform,
@@ -285,13 +289,11 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     } catch (error) {
       console.error('Failed to start analysis:', error);
       let errorMessage = 'An unexpected error occurred. Please try again.';
-      
       if (error instanceof APIError) {
         errorMessage = `Backend Error: ${error.message}`;
       } else if (error instanceof Error) {
         errorMessage = error.message;
       }
-      
       setError(errorMessage);
       setCurrentStep('');
       setConfig(prev => ({ ...prev, status: 'failed' }));
@@ -299,10 +301,7 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     }
   };
 
-  const updateConfig = (updates: Partial<AnalysisData>) => {
-    setConfig(prev => ({ ...prev, ...updates }));
-  };
-
+  // Running state UI
   if (running) {
     return (
       <div className="flex h-screen bg-gray-50">
@@ -310,88 +309,25 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
           <div className="max-w-md w-full">
             <div className="bg-white rounded-lg shadow-lg p-8">
               <h1 className="text-2xl font-bold text-gray-900 mb-6">Running Analysis</h1>
-
               <div className="flex items-center mb-4">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
-                <h2 className="text-lg font-medium text-gray-900">
-                  Analyzing "{uploadData.datasetName}"
-                </h2>
-                {jobId && (
-                  <span className="ml-auto text-xs text-gray-500 font-mono">
-                    Job ID: {jobId.slice(0, 8)}
-                  </span>
-                )}
+                <h2 className="text-lg font-medium text-gray-900">Analyzing "{uploadData.datasetName}"</h2>
               </div>
-
               <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
-                <div
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                ></div>
+                <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
               </div>
-
               <p className="text-gray-600 mb-6">{currentStep}</p>
-
-              {jobStatus && (
-                <div className="mb-4 p-3 bg-gray-50 rounded text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Status:</span>
-                    <span className={`font-medium ${
-                      jobStatus.status === 'running' ? 'text-blue-600' :
-                      jobStatus.status === 'completed' ? 'text-green-600' :
-                      jobStatus.status === 'failed' ? 'text-red-600' : 'text-gray-600'
-                    }`}>
-                      {jobStatus.status.charAt(0).toUpperCase() + jobStatus.status.slice(1)}
-                    </span>
-                  </div>
-                  {jobStatus.message && (
-                    <div className="mt-2 text-gray-600">
-                      Message: {jobStatus.message}
-                    </div>
-                  )}
-
-                  {/* Show View Visualizations button when completed */}
-                  {jobStatus.status === 'completed' && jobStatus.result?.annotation?.[0]?.data?.adata_output_file && (
-                    <div className="mt-4">
-                      <button
-                        onClick={() => {
-                          const datasetPath = jobStatus.result.annotation[0].data.adata_output_file;
-                          window.dispatchEvent(new CustomEvent('switchToVisualizations', {
-                            detail: { datasetPath }
-                          }));
-                        }}
-                        className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-                      >
-                        <span>🎯</span>
-                        Analysis Complete - View Visualizations
-                      </button>
-                    </div>
-                  )}
-                </div>
+              {jobStatus?.status === 'completed' && jobStatus.result?.annotation?.[0]?.data?.adata_output_file && (
+                <button
+                  onClick={() => {
+                    const datasetPath = jobStatus.result.annotation[0].data.adata_output_file;
+                    window.dispatchEvent(new CustomEvent('switchToVisualizations', { detail: { datasetPath } }));
+                  }}
+                  className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg"
+                >
+                  Analysis Complete - View Visualizations
+                </button>
               )}
-
-              <div className="flex gap-2 flex-wrap">
-                <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">
-                  Dataset: {uploadData.summary?.n_obs || 'Unknown'} cells
-                </span>
-                <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">
-                  {config.numHVGs} HVGs
-                </span>
-                <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">
-                  {config.numPCs} PCs
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <div className="flex">
-                <svg className="w-5 h-5 text-blue-400 mt-0.5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-blue-800 text-sm">
-                  This may take several minutes depending on your dataset size. You can monitor progress here.
-                </p>
-              </div>
             </div>
           </div>
         </div>
@@ -399,441 +335,619 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     );
   }
 
-  return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Main Content Area */}
-      <div className="flex-1 p-8 overflow-y-auto">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Configure & Launch Analysis</h1>
-          <p className="text-gray-600 mb-8">
-            Review and customize analysis parameters, then launch your single-cell analysis pipeline.
-          </p>
+  const renderStepIndicator = () => (
+    <div className="flex items-center justify-center mb-8">
+      {WIZARD_STEPS.map((step, index) => {
+        const isActive = step.id === currentWizardStep;
+        const isPast = WIZARD_STEPS.findIndex(s => s.id === currentWizardStep) > index;
+        return (
+          <React.Fragment key={step.id}>
+            <button
+              onClick={() => {
+                const currentIndex = WIZARD_STEPS.findIndex(s => s.id === currentWizardStep);
+                if (index <= currentIndex) {
+                  setCurrentWizardStep(step.id);
+                  setError(null);
+                }
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                isActive
+                  ? 'bg-blue-600 text-white'
+                  : isPast
+                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                  : 'bg-gray-100 text-gray-400'
+              }`}
+            >
+              {isPast ? <Check size={16} /> : step.icon}
+              <span className="hidden sm:inline">{step.label}</span>
+            </button>
+            {index < WIZARD_STEPS.length - 1 && (
+              <ChevronRight className="mx-2 text-gray-300" size={20} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
 
-          {/* Summary Card */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-            <div className="flex items-center mb-4">
-              <svg className="w-6 h-6 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <h2 className="text-xl font-semibold text-gray-900">Analysis Summary</h2>
+  const renderQualityControlStep = () => (
+    <div className="space-y-6">
+      <div className="text-center mb-8">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Quality Control</h2>
+        <p className="text-gray-600">Filter low-quality cells to ensure accurate downstream analysis</p>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+        {/* Mitochondrial filtering */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Mitochondrial Gene Threshold</h3>
+              <p className="text-xs text-gray-500">Remove cells with high mitochondrial content (dying cells)</p>
             </div>
-            <div className="flex gap-3 flex-wrap">
-              <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
-                Dataset: {uploadData.datasetName}
-              </span>
-              <span className="px-3 py-1 bg-green-100 text-green-800 text-sm rounded-full">
-                Species: {uploadData.species}
-              </span>
-              <span className="px-3 py-1 bg-purple-100 text-purple-800 text-sm rounded-full">
-                {uploadData.summary?.n_obs?.toLocaleString() || 'Unknown'} cells
-              </span>
-              <span className="px-3 py-1 bg-orange-100 text-orange-800 text-sm rounded-full">
-                QC filters: {config.minGenes}-{config.maxGenesPerCell} genes, &gt;{config.minCounts} counts, &lt;{config.mitoThreshold}% {config.mitoPrefix}
-              </span>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={config.mitoThreshold}
+                onChange={(e) => updateConfig({ mitoThreshold: Number(e.target.value) })}
+                className="w-20 px-3 py-2 text-right border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <span className="text-gray-500">%</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500 w-8">5%</span>
+            <input
+              type="range"
+              min="1"
+              max="30"
+              value={config.mitoThreshold}
+              onChange={(e) => updateConfig({ mitoThreshold: Number(e.target.value) })}
+              className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <span className="text-xs text-gray-500 w-8">30%</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">Prefix:</span>
+            <input
+              type="text"
+              value={config.mitoPrefix}
+              onChange={(e) => updateConfig({ mitoPrefix: e.target.value })}
+              className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+              placeholder="MT-"
+            />
+            <span className="text-xs text-gray-400">(MT- for human, mt- for mouse)</span>
+          </div>
+        </div>
+
+        <hr className="border-gray-200" />
+
+        {/* Gene count filtering */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Genes per Cell</h3>
+              <p className="text-xs text-gray-500">Filter cells with too few or too many genes</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Minimum</label>
+              <input
+                type="number"
+                value={config.minGenes}
+                onChange={(e) => updateConfig({ minGenes: Number(e.target.value) })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-xs text-gray-400 mt-1">Remove empty droplets</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Maximum</label>
+              <input
+                type="number"
+                value={config.maxGenesPerCell}
+                onChange={(e) => updateConfig({ maxGenesPerCell: Number(e.target.value) })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-xs text-gray-400 mt-1">Remove doublets</p>
+            </div>
+          </div>
+        </div>
+
+        <hr className="border-gray-200" />
+
+        {/* UMI count filtering */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Minimum UMI Counts</h3>
+              <p className="text-xs text-gray-500">Remove cells with very low read depth</p>
+            </div>
+            <input
+              type="number"
+              value={config.minCounts}
+              onChange={(e) => updateConfig({ minCounts: Number(e.target.value) })}
+              className="w-24 px-3 py-2 text-right border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="flex gap-3">
+          <AlertCircle className="text-blue-500 flex-shrink-0" size={20} />
+          <div className="text-sm text-blue-800">
+            <p className="font-medium mb-1">Recommended settings</p>
+            <p className="text-blue-700">For most datasets: 5% mito threshold, 250-5000 genes per cell, 500+ UMI counts</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderClusteringStep = () => (
+    <div className="space-y-6">
+      <div className="text-center mb-8">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Clustering</h2>
+        <p className="text-gray-600">Group similar cells together to identify cell populations</p>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+        {/* Clustering method */}
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-gray-900">Clustering Method</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => updateConfig({ clusteringMethod: 'leiden' })}
+              className={`p-4 rounded-lg border-2 text-left transition-all ${
+                config.clusteringMethod === 'leiden'
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                  config.clusteringMethod === 'leiden' ? 'border-blue-500' : 'border-gray-300'
+                }`}>
+                  {config.clusteringMethod === 'leiden' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                </div>
+                <span className="font-medium text-gray-900">Leiden</span>
+                <span className="text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded">Recommended</span>
+              </div>
+              <p className="text-xs text-gray-500 ml-6">Fast, scalable, better modularity</p>
+            </button>
+            <button
+              onClick={() => updateConfig({ clusteringMethod: 'louvain' })}
+              className={`p-4 rounded-lg border-2 text-left transition-all ${
+                config.clusteringMethod === 'louvain'
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                  config.clusteringMethod === 'louvain' ? 'border-blue-500' : 'border-gray-300'
+                }`}>
+                  {config.clusteringMethod === 'louvain' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                </div>
+                <span className="font-medium text-gray-900">Louvain</span>
+              </div>
+              <p className="text-xs text-gray-500 ml-6">Classic algorithm, widely used</p>
+            </button>
+          </div>
+        </div>
+
+        <hr className="border-gray-200" />
+
+        {/* Resolution */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Resolution</h3>
+              <p className="text-xs text-gray-500">Higher values = more clusters</p>
+            </div>
+            <input
+              type="number"
+              step="0.1"
+              value={config.resolution}
+              onChange={(e) => updateConfig({ resolution: Number(e.target.value) })}
+              className="w-20 px-3 py-2 text-right border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500 w-12">Fewer</span>
+            <input
+              type="range"
+              min="0.1"
+              max="2.0"
+              step="0.1"
+              value={config.resolution}
+              onChange={(e) => updateConfig({ resolution: Number(e.target.value) })}
+              className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <span className="text-xs text-gray-500 w-12 text-right">More</span>
+          </div>
+          <div className="flex justify-between text-xs text-gray-400">
+            <span>~5-10 clusters</span>
+            <span>~20-40 clusters</span>
+          </div>
+        </div>
+
+        <hr className="border-gray-200" />
+
+        {/* Advanced settings (collapsed) */}
+        <details className="group">
+          <summary className="cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900 flex items-center gap-2">
+            <ChevronRight size={16} className="group-open:rotate-90 transition-transform" />
+            Advanced Settings
+          </summary>
+          <div className="mt-4 pl-6 space-y-4">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">HVGs</label>
+                <input
+                  type="number"
+                  value={config.numHVGs}
+                  onChange={(e) => updateConfig({ numHVGs: Number(e.target.value) })}
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">PCs</label>
+                <input
+                  type="number"
+                  value={config.numPCs}
+                  onChange={(e) => updateConfig({ numPCs: Number(e.target.value) })}
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Neighbors</label>
+                <input
+                  type="number"
+                  value={config.numNeighbors}
+                  onChange={(e) => updateConfig({ numNeighbors: Number(e.target.value) })}
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+        <div className="flex gap-3">
+          <AlertCircle className="text-amber-500 flex-shrink-0" size={20} />
+          <div className="text-sm text-amber-800">
+            <p className="font-medium mb-1">Choosing resolution</p>
+            <p className="text-amber-700">Start with 0.5-0.8 for most datasets. You can always recluster later in the visualization dashboard.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderAnnotationStep = () => (
+    <div className="space-y-6">
+      <div className="text-center mb-8">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Cell Type Annotation</h2>
+        <p className="text-gray-600">Select methods to automatically identify cell types</p>
+      </div>
+
+      {/* Marker-Based Databases */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+            <Layers size={18} className="text-green-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Marker-Based Databases</h3>
+            <p className="text-xs text-gray-500">Z-score enrichment analysis</p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {/* CellMarker */}
+          <label className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
+            config.useCellmarker ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'
+          }`}>
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={config.useCellmarker}
+                onChange={(e) => updateConfig({ useCellmarker: e.target.checked })}
+                className="mt-1 h-4 w-4 text-green-600 rounded border-gray-300 focus:ring-green-500"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-gray-900">CellMarker 2.0</span>
+                  <span className="text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded">Recommended</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">13,605 markers for 467 cell types across human/mouse tissues</p>
+              </div>
+            </div>
+          </label>
+
+          {/* PanglaoDB */}
+          <label className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
+            config.usePanglao ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+          }`}>
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={config.usePanglao}
+                onChange={(e) => updateConfig({ usePanglao: e.target.checked })}
+                className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+              />
+              <div className="flex-1">
+                <span className="font-medium text-gray-900">PanglaoDB</span>
+                <p className="text-xs text-gray-500 mt-1">178 cell types with experimentally validated markers</p>
+              </div>
+            </div>
+          </label>
+
+          {/* CancerSEA */}
+          <label className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
+            config.useCancerSingleCellAtlas ? 'border-red-500 bg-red-50' : 'border-gray-200 hover:border-gray-300'
+          }`}>
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={config.useCancerSingleCellAtlas}
+                onChange={(e) => updateConfig({ useCancerSingleCellAtlas: e.target.checked })}
+                className="mt-1 h-4 w-4 text-red-600 rounded border-gray-300 focus:ring-red-500"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-gray-900">CancerSEA</span>
+                  <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">Cancer</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">14 functional states: stemness, EMT, metastasis, etc.</p>
+              </div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      {/* Machine Learning Models */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+            <Tag size={18} className="text-purple-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Machine Learning Models</h3>
+            <p className="text-xs text-gray-500">Pre-trained deep learning classifiers</p>
+          </div>
+        </div>
+
+        <label className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
+          config.useCellTypist ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-gray-300'
+        }`}>
+          <div className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={config.useCellTypist}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                updateConfig({ useCellTypist: checked });
+                if (checked && config.cellTypistModels.length === 0 && cellTypistModels.length > 0) {
+                  updateConfig({ cellTypistModels: ['Immune_All_Low.pkl'] });
+                }
+              }}
+              className="mt-1 h-4 w-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">CellTypist</span>
+                <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">AI</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Deep learning classifier with probability-based predictions</p>
             </div>
           </div>
 
-          {/* Error Alert */}
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-              <div className="flex">
-                <svg className="w-5 h-5 text-red-400 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-                <div className="flex-1">
-                  <h3 className="text-sm font-medium text-red-800">Error</h3>
-                  <p className="text-sm text-red-700 mt-1">{error}</p>
-                </div>
-                <button
-                  onClick={() => setError(null)}
-                  className="ml-3 text-red-400 hover:text-red-600"
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
-                </button>
+          {config.useCellTypist && (
+            <div className="mt-4 pt-4 border-t border-purple-200">
+              <p className="text-xs font-medium text-gray-700 mb-2">Select models:</p>
+              <div className="max-h-40 overflow-y-auto space-y-1">
+                {cellTypistModels.map((m) => (
+                  <label key={m.name} className="flex items-start gap-2 p-2 rounded hover:bg-purple-100/50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.cellTypistModels.includes(m.name)}
+                      onChange={(e) => {
+                        const isChecked = e.target.checked;
+                        const newModels = isChecked
+                          ? [...config.cellTypistModels, m.name]
+                          : config.cellTypistModels.filter(name => name !== m.name);
+                        updateConfig({ cellTypistModels: newModels });
+                      }}
+                      className="mt-0.5 h-3.5 w-3.5 text-purple-600 rounded border-gray-300 focus:ring-purple-500"
+                    />
+                    <div className="text-xs">
+                      <span className="font-medium text-gray-900">{m.name.replace('.pkl', '')}</span>
+                      <span className="text-gray-500 block">{m.description}</span>
+                    </div>
+                  </label>
+                ))}
               </div>
+              {config.cellTypistModels.length > 0 && (
+                <p className="text-xs text-purple-600 mt-2 font-medium">{config.cellTypistModels.length} model(s) selected</p>
+              )}
+            </div>
+          )}
+        </label>
+      </div>
+
+      {/* Custom Markers */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center">
+            <Tag size={18} className="text-orange-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Custom Markers</h3>
+            <p className="text-xs text-gray-500">Use your own marker gene lists</p>
+          </div>
+        </div>
+
+        <ThemeProvider theme={muiTheme}>
+          <ManualAnnotationConfig
+            useManualAnnotation={config.useManualAnnotation}
+            onToggle={(checked) => updateConfig({ useManualAnnotation: checked })}
+            markerFile={config.manualMarkerFile}
+            onFileSelect={(path) => updateConfig({ manualMarkerFile: path })}
+            onClearFile={() => updateConfig({ manualMarkerFile: null })}
+            markerText={config.manualMarkerText}
+            onTextChange={(text) => updateConfig({ manualMarkerText: text })}
+            inputType={config.manualInputType}
+            onInputTypeChange={(type) => updateConfig({ manualInputType: type })}
+          />
+        </ThemeProvider>
+      </div>
+    </div>
+  );
+
+  const renderReviewStep = () => (
+    <div className="space-y-6">
+      <div className="text-center mb-8">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Review & Launch</h2>
+        <p className="text-gray-600">Confirm your settings before starting the analysis</p>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 divide-y divide-gray-100">
+        {/* Dataset Info */}
+        <div className="p-4">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Dataset</h3>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+              <Beaker size={20} className="text-blue-600" />
+            </div>
+            <div>
+              <p className="font-medium text-gray-900">{uploadData.datasetName}</p>
+              <p className="text-sm text-gray-500">{uploadData.summary?.n_obs?.toLocaleString()} cells • {uploadData.species}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* QC Summary */}
+        <div className="p-4">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Quality Control</h3>
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p className="text-gray-500">Mito threshold</p>
+              <p className="font-medium text-gray-900">{config.mitoThreshold}%</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Genes/cell</p>
+              <p className="font-medium text-gray-900">{config.minGenes} - {config.maxGenesPerCell}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Min counts</p>
+              <p className="font-medium text-gray-900">{config.minCounts}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Clustering Summary */}
+        <div className="p-4">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Clustering</h3>
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p className="text-gray-500">Method</p>
+              <p className="font-medium text-gray-900 capitalize">{config.clusteringMethod}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Resolution</p>
+              <p className="font-medium text-gray-900">{config.resolution}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">HVGs / PCs</p>
+              <p className="font-medium text-gray-900">{config.numHVGs} / {config.numPCs}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Annotation Summary */}
+        <div className="p-4">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Annotation Methods</h3>
+          <div className="flex flex-wrap gap-2">
+            {config.useCellmarker && <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">CellMarker</span>}
+            {config.usePanglao && <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">PanglaoDB</span>}
+            {config.useCancerSingleCellAtlas && <span className="px-2 py-1 text-xs font-medium bg-red-100 text-red-700 rounded-full">CancerSEA</span>}
+            {config.useCellTypist && (
+              <span className="px-2 py-1 text-xs font-medium bg-purple-100 text-purple-700 rounded-full">
+                CellTypist ({config.cellTypistModels.length} models)
+              </span>
+            )}
+            {config.useManualAnnotation && <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">Custom Markers</span>}
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={handleStartAnalysis}
+        className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-lg flex items-center justify-center gap-3 transition-colors shadow-lg shadow-green-200"
+      >
+        <Play size={24} />
+        Start Analysis
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen bg-gray-50">
+      <div className="flex-1 p-8 overflow-y-auto">
+        <div className="max-w-2xl mx-auto">
+          {renderStepIndicator()}
+
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+              <AlertCircle className="text-red-500 flex-shrink-0" size={20} />
+              <div>
+                <p className="text-sm font-medium text-red-800">Error</p>
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+              <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">×</button>
             </div>
           )}
 
-          {/* Configuration Sections */}
-          <div className="space-y-4 mb-8">
-            {/* Quality Control */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          {currentWizardStep === 'quality-control' && renderQualityControlStep()}
+          {currentWizardStep === 'clustering' && renderClusteringStep()}
+          {currentWizardStep === 'annotation' && renderAnnotationStep()}
+          {currentWizardStep === 'review' && renderReviewStep()}
+
+          {/* Navigation */}
+          {currentWizardStep !== 'review' && (
+            <div className="flex justify-between mt-8">
               <button
-                onClick={() => toggleSection('qc')}
-                className="w-full px-6 py-4 text-left flex items-center justify-between hover:bg-gray-50"
+                onClick={goToPreviousStep}
+                className="flex items-center gap-2 px-6 py-3 text-gray-700 hover:text-gray-900 font-medium"
               >
-                <h3 className="text-lg font-medium text-gray-900">Quality Control</h3>
-                <svg
-                  className={`w-5 h-5 text-gray-500 transition-transform ${expandedSections.qc ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+                <ChevronLeft size={20} />
+                {currentWizardStep === 'quality-control' ? 'Back to Upload' : 'Previous'}
               </button>
-              {expandedSections.qc && (
-                <div className="px-6 pb-6 space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Mitochondrial Gene Prefix</label>
-                    <input
-                      type="text"
-                      value={config.mitoPrefix}
-                      onChange={(e) => updateConfig({ mitoPrefix: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Prefix for mitochondrial genes (MT- for human, mt- for mouse)</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Min Genes per Cell</label>
-                    <input
-                      type="number"
-                      value={config.minGenes}
-                      onChange={(e) => updateConfig({ minGenes: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Minimum genes required per cell (backend default: 250)</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Min Counts per Cell</label>
-                    <input
-                      type="number"
-                      value={config.minCounts}
-                      onChange={(e) => updateConfig({ minCounts: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Minimum UMI counts per cell (backend default: 500)</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Max Genes per Cell</label>
-                    <input
-                      type="number"
-                      value={config.maxGenesPerCell}
-                      onChange={(e) => updateConfig({ maxGenesPerCell: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Maximum genes per cell to filter doublets (typically 5000-7500)</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Max Mitochondrial %</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={config.mitoThreshold}
-                      onChange={(e) => updateConfig({ mitoThreshold: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Maximum mitochondrial gene percentage (backend default: 5%)</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Normalization & Scaling */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
               <button
-                onClick={() => toggleSection('normalization')}
-                className="w-full px-6 py-4 text-left flex items-center justify-between hover:bg-gray-50"
+                onClick={goToNextStep}
+                className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg"
               >
-                <h3 className="text-lg font-medium text-gray-900">Normalization & Scaling</h3>
-                <svg
-                  className={`w-5 h-5 text-gray-500 transition-transform ${expandedSections.normalization ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+                Continue
+                <ChevronRight size={20} />
               </button>
-              {expandedSections.normalization && (
-                <div className="px-6 pb-6 space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Normalization Method</label>
-                    <select
-                      value={config.normalizationMethod}
-                      onChange={(e) => updateConfig({ normalizationMethod: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      {NORMALIZATION_METHODS.map((method) => (
-                        <option key={method.value} value={method.value}>
-                          {method.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Scale Factor</label>
-                    <input
-                      type="number"
-                      value={config.scaleFactor}
-                      onChange={(e) => updateConfig({ scaleFactor: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Scaling factor for normalization (typically 10,000)</p>
-                  </div>
-
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="logTransform"
-                      checked={config.logTransform}
-                      onChange={(e) => updateConfig({ logTransform: e.target.checked })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="logTransform" className="ml-2 text-sm text-gray-700">
-                      Apply log transformation
-                    </label>
-                  </div>
-                </div>
-              )}
             </div>
+          )}
 
-            {/* Feature Selection */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+          {currentWizardStep === 'review' && (
+            <div className="flex justify-start mt-8">
               <button
-                onClick={() => toggleSection('features')}
-                className="w-full px-6 py-4 text-left flex items-center justify-between hover:bg-gray-50"
+                onClick={goToPreviousStep}
+                className="flex items-center gap-2 px-6 py-3 text-gray-700 hover:text-gray-900 font-medium"
               >
-                <h3 className="text-lg font-medium text-gray-900">Feature Selection</h3>
-                <svg
-                  className={`w-5 h-5 text-gray-500 transition-transform ${expandedSections.features ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+                <ChevronLeft size={20} />
+                Previous
               </button>
-              {expandedSections.features && (
-                <div className="px-6 pb-6 space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Number of Highly Variable Genes</label>
-                    <input
-                      type="number"
-                      value={config.numHVGs}
-                      onChange={(e) => updateConfig({ numHVGs: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Number of highly variable genes to select (typically 2000-4000)</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">HVG Selection Method</label>
-                    <select
-                      value={config.hvgMethod}
-                      onChange={(e) => updateConfig({ hvgMethod: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      {HVG_METHODS.map((method) => (
-                        <option key={method.value} value={method.value}>
-                          {method.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
             </div>
-
-            {/* Dimensionality Reduction */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-              <button
-                onClick={() => toggleSection('dimensionality')}
-                className="w-full px-6 py-4 text-left flex items-center justify-between hover:bg-gray-50"
-              >
-                <h3 className="text-lg font-medium text-gray-900">Dimensionality Reduction</h3>
-                <svg
-                  className={`w-5 h-5 text-gray-500 transition-transform ${expandedSections.dimensionality ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {expandedSections.dimensionality && (
-                <div className="px-6 pb-6 space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Number of Principal Components</label>
-                    <input
-                      type="number"
-                      value={config.numPCs}
-                      onChange={(e) => updateConfig({ numPCs: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Number of PCs to compute (typically 30-50)</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Clustering */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-              <button
-                onClick={() => toggleSection('clustering')}
-                className="w-full px-6 py-4 text-left flex items-center justify-between hover:bg-gray-50"
-              >
-                <h3 className="text-lg font-medium text-gray-900">Clustering</h3>
-                <svg
-                  className={`w-5 h-5 text-gray-500 transition-transform ${expandedSections.clustering ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {expandedSections.clustering && (
-                <div className="px-6 pb-6 space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Number of Neighbors</label>
-                    <input
-                      type="number"
-                      value={config.numNeighbors}
-                      onChange={(e) => updateConfig({ numNeighbors: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Number of neighbors for UMAP and clustering (typically 10-30)</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Clustering Resolution</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={config.resolution}
-                      onChange={(e) => updateConfig({ resolution: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Clustering resolution (higher = more clusters, typically 0.3-1.0)</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Clustering Method</label>
-                    <select
-                      value={config.clusteringMethod}
-                      onChange={(e) => updateConfig({ clusteringMethod: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    >
-                      {CLUSTERING_METHODS.map((method) => (
-                        <option key={method.value} value={method.value}>
-                          {method.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Annotation Models */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-              <button
-                onClick={() => toggleSection('modules')}
-                className="w-full px-6 py-4 text-left flex items-center justify-between hover:bg-gray-50"
-              >
-                <h3 className="text-lg font-medium text-gray-900">Annotation Models</h3>
-                <svg
-                  className={`w-5 h-5 text-gray-500 transition-transform ${expandedSections.modules ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {expandedSections.modules && (
-                <div className="px-6 pb-6 space-y-4">
-                  <p className="text-sm text-gray-600 mb-4">Select cell type annotation databases to use:</p>
-
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="useCellmarker"
-                      checked={config.useCellmarker}
-                      onChange={(e) => updateConfig({ useCellmarker: e.target.checked })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="useCellmarker" className="ml-2 text-sm text-gray-700">
-                      <span className="font-medium">CellMarker</span> - Recommended for normal cell types
-                    </label>
-                  </div>
-
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="usePanglao"
-                      checked={config.usePanglao}
-                      onChange={(e) => updateConfig({ usePanglao: e.target.checked })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="usePanglao" className="ml-2 text-sm text-gray-700">
-                      <span className="font-medium">PanglaoDB</span> - Comprehensive cell type database
-                    </label>
-                  </div>
-
-                  <div className="flex items-center">
-                    <input
-                      type="checkbox"
-                      id="useCancerSingleCellAtlas"
-                      checked={config.useCancerSingleCellAtlas}
-                      onChange={(e) => updateConfig({ useCancerSingleCellAtlas: e.target.checked })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="useCancerSingleCellAtlas" className="ml-2 text-sm text-gray-700">
-                      <span className="font-medium">CancerSEA</span> - Specialized for cancer cell types
-                    </label>
-                  </div>
-
-                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                    <p className="text-xs text-blue-800">
-                      <span className="font-medium">Note:</span> At least one annotation model must be selected. CellMarker is recommended for most datasets.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Info Alert */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8">
-            <div className="flex">
-              <svg className="w-5 h-5 text-blue-400 mt-0.5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <p className="text-blue-800 text-sm">
-                All parameters are pre-filled with recommended values. Advanced users can customize these settings,
-                while beginners can proceed with the defaults for optimal results.
-              </p>
-            </div>
-          </div>
-
-          {/* Navigation & Launch */}
-          <div className="flex justify-between items-center">
-            <button
-              onClick={onBack}
-              className="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 font-medium"
-            >
-              Back
-            </button>
-
-            <button
-              onClick={handleStartAnalysis}
-              className="px-8 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 font-medium text-lg flex items-center"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Start Analysis
-            </button>
-          </div>
+          )}
         </div>
       </div>
     </div>

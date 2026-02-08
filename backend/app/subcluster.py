@@ -4,7 +4,7 @@ import omicverse as ov
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from .annotate import annotate_with_scsa, count_marker_gene_expression, save_marker_gene_expression, save_annotation_confidence
+from .annotate import annotate_with_scsa, annotate_with_celltypist, count_marker_gene_expression, save_marker_gene_expression, save_annotation_confidence
 from .utils import summarize_h5ad
 
 def run_subclustering_workflow(
@@ -117,24 +117,45 @@ def run_subclustering_workflow(
     use_cellmarker = annotation_params.get('use_cellmarker', True)
     use_panglao = annotation_params.get('use_panglao', False)
     use_cancersea = annotation_params.get('use_cancer_single_cell_atlas', False)
-    
+    use_celltypist = annotation_params.get('use_celltypist', False)
+    celltypist_model = annotation_params.get('celltypist_model')  # Legacy single model
+    celltypist_models = annotation_params.get('celltypist_models')  # New multiple models
+
     used_annotators = []
-    
+
     # Reuse annotation logic from annotate.py
     if use_cellmarker:
         print("Annotating with CellMarker...")
         adata = annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarker', name=name, data=data_tracker)
         used_annotators.append('cellmarker')
-        
+
     if use_panglao:
         print("Annotating with PanglaoDB...")
         adata = annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='panglaodb', name=name, data=data_tracker)
         used_annotators.append('panglaodb')
-        
+
     if use_cancersea:
         print("Annotating with CancerSEA...")
         adata = annotate_with_scsa(adata, output_dir, cell_type='cancer', db_type='cancersea', name=name, data=data_tracker)
         used_annotators.append('cancersea')
+
+    if use_celltypist:
+        print("Annotating with CellTypist...")
+        # Support multiple models (new) or single model (legacy)
+        models_to_run = []
+        if celltypist_models and len(celltypist_models) > 0:
+            models_to_run = celltypist_models
+        elif celltypist_model:
+            models_to_run = [celltypist_model]
+        else:
+            models_to_run = ['Immune_All_Low.pkl']  # Default
+
+        for model_name in models_to_run:
+            print(f"Running CellTypist with model: {model_name}")
+            adata = annotate_with_celltypist(adata, output_dir, model_name=model_name, name=name, data=data_tracker)
+
+        if 'celltypist_prediction' in adata.obs.columns:
+            used_annotators.append('celltypist_prediction')
         
     # Apply first available annotation to 'cell_type' column as default
     if used_annotators:

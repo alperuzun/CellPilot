@@ -1,21 +1,33 @@
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from .models import AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams, Response, AnalysisJobRequest, AnalysisJobResponse, JobStatusResponse, CreateLayerRequest, UpdateLayerRequest, DifferentialExpressionRequest, SubclusterRequest, MergeSubclusterRequest
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
+
+from .models import AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams, Response, AnalysisJobRequest, AnalysisJobResponse, JobStatusResponse, CreateLayerRequest, UpdateLayerRequest, DifferentialExpressionRequest, SubclusterRequest, MergeSubclusterRequest, ChatRequest, DotPlotRequest, DotPlotResponse
 from .tasks import spawn_process
 from .utils import summarize_h5ad
 from .analysis import run_cell_phone_db, run_inferncnv
 from .annotate import annotate
 from .job_manager import job_manager
-from .visualization import extract_visualization_data, get_gene_expression, get_marker_genes_by_cluster, get_celltype_markers_by_column
+from .visualization import extract_visualization_data, get_gene_expression, get_marker_genes_by_cluster, get_celltype_markers_by_column, get_dot_plot_data
 from .analysis_utils import perform_differential_expression
+from .chat_service import get_chat_response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
+from dotenv import load_dotenv
 import asyncio
 import json
 import os
 from datetime import datetime
 from pathlib import Path
+
+# Load environment variables
+load_dotenv()
+
 app = FastAPI(title="CellPilot API")
 
 class FileLockManager:
@@ -87,6 +99,9 @@ async def annotate_api(params: AnnotationParams):
             params.use_cellmarker,
             params.use_panglao,
             params.use_cancer_single_cell_atlas,
+            params.use_celltypist,
+            params.celltypist_model,
+            params.celltypist_models,
             params.use_manual_annotation,
             params.manual_marker_file
         )
@@ -458,6 +473,9 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
                 use_cellmarker=request.analysis_params.get('use_cellmarker', True),
                 use_panglao=request.analysis_params.get('use_panglao', False),
                 use_cancer_single_cell_atlas=request.analysis_params.get('use_cancer_single_cell_atlas', False),
+                use_celltypist=request.analysis_params.get('use_celltypist', False),
+                celltypist_model=request.analysis_params.get('celltypist_model', None),
+                celltypist_models=request.analysis_params.get('celltypist_models', None),
                 use_manual_annotation=request.analysis_params.get('use_manual_annotation', False),
                 manual_marker_file=request.analysis_params.get('manual_marker_file')
             )
@@ -473,6 +491,9 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
                     annotation_params.use_cellmarker,
                     annotation_params.use_panglao,
                     annotation_params.use_cancer_single_cell_atlas,
+                    annotation_params.use_celltypist,
+                    annotation_params.celltypist_model,
+                    annotation_params.celltypist_models,
                     annotation_params.use_manual_annotation,
                     annotation_params.manual_marker_file
                 )
@@ -619,6 +640,29 @@ async def get_job_status(job_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/celltypist/models")
+async def get_celltypist_models():
+    """Get list of available CellTypist models"""
+    try:
+        import celltypist
+        # This returns a pandas DataFrame with model info
+        models_df = celltypist.models.models_description()
+        # Convert to list of dicts for frontend
+        models_list = []
+        for index, row in models_df.iterrows():
+            models_list.append({
+                "name": row['model'],
+                "description": row['description']
+            })
+        return models_list
+    except ImportError:
+        print("CellTypist not installed")
+        return []
+    except Exception as e:
+        print(f"Error fetching CellTypist models: {e}")
+        # Return empty list on error instead of 500 to not break frontend
+        return []
+
 # --------------------------- Visualization Endpoints ---------------------------
 @app.get("/visualization_data")
 async def get_visualization_data(h5ad_path: str):
@@ -682,6 +726,32 @@ async def get_celltype_markers(h5ad_path: str, cluster_column: str = "cellmarker
         async with lock:
             marker_data = await run_in_threadpool(get_celltype_markers_by_column, h5ad_path, cluster_column)
         return marker_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/dot_plot")
+async def get_dot_plot(request: DotPlotRequest) -> DotPlotResponse:
+    """
+    Get dot plot data for marker gene visualization.
+
+    Returns percent expressing and mean expression for each gene across clusters.
+    Used for the standard "sanity check" dot plot figure.
+    """
+    try:
+        if not os.path.exists(request.input_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {request.input_path}")
+
+        lock = await lock_manager.get_lock(request.input_path)
+        async with lock:
+            dot_plot_data = await run_in_threadpool(
+                get_dot_plot_data,
+                request.input_path,
+                request.gene_names,
+                request.cluster_column
+            )
+        return DotPlotResponse(**dot_plot_data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1043,8 +1113,8 @@ async def get_subclusters(parent_path: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/merge_subcluster")
-async def merge_subcluster(request: MergeSubclusterRequest):
+@app.post("/merge_subcluster_labels")
+async def merge_subcluster_labels(request: MergeSubclusterRequest):
     """Merge labels from a subcluster back into the parent dataset"""
     try:
         def _merge():
@@ -1108,4 +1178,42 @@ async def merge_subcluster(request: MergeSubclusterRequest):
             return await run_in_threadpool(_merge)
             
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --------------------------- Chat Assistant ---------------------------
+
+@app.post("/chat")
+async def chat_with_agent(request: ChatRequest):
+    """
+    Chat with the Context-Aware Bioinformatician.
+    """
+    try:
+        if not request.input_path or not os.path.exists(request.input_path):
+             raise HTTPException(status_code=404, detail="Dataset path not found")
+
+        # Load adata (cached via file lock manager concepts or just direct load for now)
+        # Since we need read-only access, we can just load it.
+        # Ideally we use a caching mechanism for performance.
+        # For this implementation, we'll load it freshly but rely on OS caching.
+        # Warning: Large files will be slow.
+        
+        import scanpy as sc
+        adata = sc.read_h5ad(request.input_path)
+        
+        response_text = get_chat_response(
+            user_message=request.message,
+            adata=adata,
+            selection_id=request.selection_id,
+            dataset_path=request.input_path,
+            history=request.history,
+            model=request.model,
+            mode=request.mode,
+            cell_ids=request.cell_ids,
+            hide_labels=request.hide_labels
+        )
+        
+        return {"response": response_text}
+        
+    except Exception as e:
+        print(f"Chat endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

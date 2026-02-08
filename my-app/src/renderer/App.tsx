@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import AnalysisWizard from './components/wizard/AnalysisWizard';
 import VisualizationDashboard from './components/visualization/VisualizationDashboard';
-import OutputsPage from './components/outputs/OutputsPage';
 import cellpilotLogo from '../assets/cellpilot_logo.png';
 
 export default function App() {

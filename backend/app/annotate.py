@@ -325,8 +325,12 @@ def annotate(
     use_cellmarker=True,
     use_panglao=False,
     use_cancer_single_cell_atlas=False,
+    use_celltypist=False,
+    celltypist_model=None,  # Deprecated, use celltypist_models
+    celltypist_models=None,  # List of model names to run
     use_manual_annotation=False,
     manual_marker_file=None,
+    manual_marker_text=None,
 ):
     """
     Analyze clusters and annotate cell types
@@ -404,10 +408,31 @@ def annotate(
         adata = annotate_with_scsa(adata, output_dir, cell_type='cancer',db_type='cancersea', name=name, data=data)
         used_annotators.append('cancersea')
 
-    if use_manual_annotation and manual_marker_file:
+    if use_celltypist:
+        print("Running CellTypist annotation...")
+        # Support multiple models (new) or single model (legacy)
+        models_to_run = []
+        if celltypist_models and len(celltypist_models) > 0:
+            models_to_run = celltypist_models
+        elif celltypist_model:
+            models_to_run = [celltypist_model]
+        else:
+            models_to_run = ['Immune_All_Low.pkl']  # Default
+
+        for model_name in models_to_run:
+            print(f"Running CellTypist with model: {model_name}")
+            adata = annotate_with_celltypist(adata, output_dir, model_name=model_name, name=name, data=data)
+
+        # Use the first model's prediction column as the cell type source
+        # Note: annotate_with_celltypist adds 'celltypist_prediction' column (overwritten by last model)
+        # and model-specific columns like 'celltypist_ModelName_prediction'
+        if 'celltypist_prediction' in adata.obs.columns:
+            used_annotators.append('celltypist_prediction')
+
+    if use_manual_annotation and (manual_marker_file or manual_marker_text):
         print("Running manual annotation with custom marker genes...")
         try:
-            manual_markers = load_manual_markers(manual_marker_file)
+            manual_markers = load_manual_markers(marker_file_path=manual_marker_file, marker_text=manual_marker_text)
             adata = annotate_with_manual_markers(adata, manual_markers, output_dir, name, timestamp, data=data)
             used_annotators.append('manual_annotation')
         except Exception as e:
@@ -662,19 +687,34 @@ def save_marker_gene_expression(adata, output_dir, name, cluster_column, timesta
     print(f"Marker gene expression saved to {output_dir}/{name}_marker_dict_{timestamp}.txt")
     return f'{output_dir}/{filename}', marker_dict
 
-def load_manual_markers(marker_file_path):
+def load_manual_markers(marker_file_path=None, marker_text=None):
     """
-    Load custom marker genes from a CSV/TSV file.
+    Load custom marker genes from a CSV/TSV file OR raw text string.
     Expected format: columns 'cell_type' and 'gene'
     """
     import pandas as pd
+    import io
     
     try:
-        # Try different separators
-        if marker_file_path.endswith('.csv'):
-            df = pd.read_csv(marker_file_path)
-        else:  # TSV or TXT
-            df = pd.read_csv(marker_file_path, sep='\t')
+        if marker_text:
+            # Parse from string
+            # We assume CSV format if text provided
+            # Check if header exists by looking for 'cell_type' or 'gene' in first line
+            first_line = marker_text.strip().split('\n')[0].lower()
+            if 'cell_type' in first_line or 'gene' in first_line:
+                 df = pd.read_csv(io.StringIO(marker_text))
+            else:
+                 # Assume no header: cell_type, gene
+                 df = pd.read_csv(io.StringIO(marker_text), header=None, names=['cell_type', 'gene'])
+                 
+        elif marker_file_path:
+            # Try different separators
+            if marker_file_path.endswith('.csv'):
+                df = pd.read_csv(marker_file_path)
+            else:  # TSV or TXT
+                df = pd.read_csv(marker_file_path, sep='\t')
+        else:
+            raise ValueError("No marker file or text provided")
         
         # Validate required columns
         required_cols = ['cell_type', 'gene']
@@ -879,3 +919,247 @@ def count_marker_gene_expression(adata, marker_dict, timestamp, annotation_colum
     results_df.to_csv(f'{output_dir}/{filename}', index=False)
     
     return f'{output_dir}/{filename}'
+
+def annotate_with_celltypist(adata, output_dir, model_name='Immune_All_Low.pkl', name='', data={}):
+    """Annotate cells using CellTypist"""
+    print(f"Running CellTypist annotation with model: {model_name}...")
+    try:
+        import celltypist
+    except ImportError:
+        print("CellTypist not installed. Skipping.")
+        return adata
+
+    import pandas as pd
+    import numpy as np
+    import os
+    import scanpy as sc
+    from datetime import datetime
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+    
+    # 1. Load Model
+    try:
+        # celltypist.models.Model.load() automatically downloads if not locally present
+        model = celltypist.models.Model.load(model_name)
+    except Exception as e:
+        print(f"Error loading CellTypist model {model_name}: {e}")
+        # Fallback or re-raise? Let's try to proceed or fail gracefully.
+        raise ValueError(f"Failed to load CellTypist model: {e}")
+
+    # 2. Predict
+    # majority_voting=True uses clustering to refine predictions, which is usually desired
+    print("Predicting cell types...")
+    predictions = celltypist.annotate(adata, model=model, majority_voting=True)
+    
+    # 3. Save Per-Cell Annotations
+    # 'predicted_labels' is the raw prediction
+    # 'majority_voting' is the refined prediction (if enabled)
+    # We'll save the refined labels as the primary prediction
+    adata.obs['celltypist_prediction'] = predictions.predicted_labels['majority_voting']
+
+    # Also save model-specific column for multi-model support
+    model_short_name = model_name.replace('.pkl', '').replace(' ', '_')
+    model_col = f'celltypist_{model_short_name}'
+    adata.obs[model_col] = predictions.predicted_labels['majority_voting']
+    
+    # 4. Aggregate Probabilities by Cluster (Leiden)
+    # We want mean probability for each cell type within each cluster
+    prob_df = predictions.probability_matrix
+    
+    cluster_key = 'leiden'
+    if cluster_key not in adata.obs:
+        # Try to find another cluster key if leiden missing
+        possible_keys = [k for k in adata.obs.columns if 'cluster' in k.lower() or 'leiden' in k.lower()]
+        if possible_keys:
+            cluster_key = possible_keys[0]
+        else:
+            print("Warning: No cluster column found for aggregation.")
+            cluster_key = None
+            
+    anno_rows = []
+    
+    if cluster_key:
+        print(f"Aggregating probabilities by {cluster_key}...")
+        clusters = adata.obs[cluster_key].unique()
+        for cluster in clusters:
+            cells_in_cluster = adata.obs.index[adata.obs[cluster_key] == cluster]
+            
+            # Filter for cells that exist in probability matrix (should be all)
+            valid_cells = [c for c in cells_in_cluster if c in prob_df.index]
+            
+            if not valid_cells:
+                continue
+                
+            cluster_probs = prob_df.loc[valid_cells]
+            
+            # Mean probability for each cell type
+            mean_probs = cluster_probs.mean(axis=0)
+            
+            # Sort and take top candidates (e.g. top 5)
+            top_probs = mean_probs.sort_values(ascending=False).head(5)
+            
+            for cell_type, prob in top_probs.items():
+                anno_rows.append({
+                    'Cluster': cluster,
+                    'Cell Type': cell_type,
+                    'Score': prob  # This replaces Z-score
+                })
+    
+    anno_df = pd.DataFrame(anno_rows)
+    
+    # 4b. Create Cluster-Level Annotation Column
+    # Map the consensus label (highest probability) to all cells in the cluster
+    if not anno_df.empty and cluster_key:
+        print(f"Creating cluster-level annotation column based on {cluster_key}...")
+        # Sort by Cluster and Score (descending) to ensure top score is first
+        anno_df_sorted = anno_df.sort_values(['Cluster', 'Score'], ascending=[True, False])
+        # Take top 1 candidate per cluster
+        top_annos = anno_df_sorted.drop_duplicates('Cluster', keep='first')
+
+        # Create mapping dictionary: {cluster_id: cell_type}
+        cluster_map = dict(zip(top_annos['Cluster'], top_annos['Cell Type']))
+
+        # Map to new column in adata.obs (generic and model-specific)
+        new_col = 'celltypist_cluster_annotation'
+        adata.obs[new_col] = adata.obs[cluster_key].map(cluster_map)
+
+        # Also save model-specific cluster annotation
+        model_cluster_col = f'{model_col}_cluster'
+        adata.obs[model_cluster_col] = adata.obs[cluster_key].map(cluster_map)
+
+        # Convert to category for efficiency and plotting
+        adata.obs[new_col] = adata.obs[new_col].astype('category')
+        adata.obs[model_cluster_col] = adata.obs[model_cluster_col].astype('category')
+        print(f"Added columns '{new_col}' and '{model_cluster_col}' to adata.obs")
+
+    # 5. Save Confidence Report
+    if not anno_df.empty:
+        try:
+            save_celltypist_confidence(anno_df, output_dir, name, model_name, timestamp, data)
+        except Exception as e:
+            print(f"Error saving annotation confidence: {e}")
+
+    # 6. Visualizations
+    try:
+        import omicverse as ov
+
+        # Plot CellTypist Predictions using model-specific column
+        ct_col = model_col  # Use model-specific column
+        counts = adata.obs[ct_col].value_counts().to_dict()
+        new_cats = {cat: f"{cat} (n={counts.get(cat, 0)})" for cat in adata.obs[ct_col].astype('category').cat.categories}
+        annot_col = f"{ct_col}_cnt"
+        adata.obs[annot_col] = adata.obs[ct_col].astype('category').cat.rename_categories(new_cats)
+
+        fig, ax = ov.utils.plot_embedding(
+            adata,
+            basis='X_mde',
+            color=annot_col,
+            legend_loc='on data',
+            frameon='small',
+            legend_fontoutline=2,
+            palette=ov.utils.palette()[:len(new_cats)],
+            title=f'CellTypist ({model_name})'
+        )
+        # Use model-specific filename to avoid overwriting
+        fig_path = os.path.join(output_dir, f'{name}_celltypist_{model_short_name}_{timestamp}.png')
+        fig.savefig(fig_path, dpi=300)
+        data['figs'].append((fig_path, f'CellTypist ({model_name})'))
+
+    except Exception as e:
+        print(f"Error generating CellTypist plot: {e}")
+    
+    return adata
+
+def save_celltypist_confidence(anno_df, output_dir, name, model_name, timestamp, data={}):
+    """Save confidence for CellTypist (Probability based 0-1)"""
+    import json
+    
+    confidence_results = {
+        "metadata": {
+            "name": name,
+            "db_type": f"CellTypist ({model_name})",
+            "timestamp": timestamp,
+            "logic": {
+                "high": "Top > 0.8 OR (Top - RunnerUp > 0.3)",
+                "medium": "Top > 0.5",
+                "ambiguous": "Top < 0.5 OR (Top - RunnerUp < 0.1)",
+                "unknown": "Top < 0.3"
+            }
+        },
+        "clusters": {}
+    }
+    
+    clusters = sorted(anno_df['Cluster'].unique())
+    
+    for cluster in clusters:
+        cluster_df = anno_df[anno_df['Cluster'] == cluster].sort_values('Score', ascending=False)
+        
+        if len(cluster_df) == 0:
+            continue
+            
+        top_cand = cluster_df.iloc[0]
+        top_score = float(top_cand['Score'])
+        top_name = top_cand['Cell Type']
+        
+        confidence = "Unknown"
+        runner_up = None
+        alternatives = []
+        
+        if len(cluster_df) > 1:
+            runner_cand = cluster_df.iloc[1]
+            runner_score = float(runner_cand['Score'])
+            runner_name = runner_cand['Cell Type']
+            
+            runner_up = {
+                "cell_type": runner_name,
+                "z_score": runner_score # Keeping key 'z_score' for frontend compatibility
+            }
+            
+            # Logic for Probabilities (0-1)
+            diff = top_score - runner_score
+            
+            if top_score < 0.3:
+                confidence = "Unknown"
+            elif top_score > 0.8:
+                confidence = "High"
+            elif diff > 0.3:
+                confidence = "High" # Distinct enough
+            elif top_score > 0.5:
+                confidence = "Medium"
+            else:
+                confidence = "Ambiguous"
+                
+            # Alternatives
+            alt_df = cluster_df[
+                (cluster_df['Score'] >= (top_score - 0.2)) & 
+                (cluster_df['Cell Type'] != top_name)
+            ]
+            for _, row in alt_df.iterrows():
+                alternatives.append({
+                    "cell_type": row['Cell Type'],
+                    "z_score": float(row['Score']),
+                    "diff_from_top": round(top_score - float(row['Score']), 3)
+                })
+        else:
+            if top_score > 0.5:
+                confidence = "High"
+            else:
+                confidence = "Unknown"
+                
+        confidence_results["clusters"][str(cluster)] = {
+            "top_candidate": {
+                "cell_type": top_name,
+                "z_score": top_score
+            },
+            "runner_up": runner_up,
+            "confidence": confidence,
+            "alternatives": alternatives
+        }
+        
+    # Save JSON with model-specific filename
+    model_short_name = model_name.replace('.pkl', '').replace(' ', '_')
+    json_path = os.path.join(output_dir, f'{name}_celltypist_{model_short_name}_confidence_{timestamp}.json')
+    with open(json_path, 'w') as f:
+        json.dump(confidence_results, f, indent=2)
+
+    data['files'].append((json_path, f'CellTypist Confidence ({model_name})'))

@@ -180,8 +180,8 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
     
     # Define known categories to help classification
     known_cluster_cols = ['leiden', 'louvain', 'cluster', 'seurat_clusters']
-    known_annotation_cols = ['cellmarker', 'panglaodb', 'cancersea', 'cell_type', 'manual_annotation', 'celltype', 'annotation']
-
+    known_annotation_cols = ['cellmarker', 'panglaodb', 'cancersea', 'cell_type', 'manual_annotation', 'celltype', 'annotation', 'celltypist']
+    
     for col in adata.obs.columns:
         # Skip QC columns
         if col in qc_metrics:
@@ -400,3 +400,92 @@ def get_celltype_markers_by_column(h5ad_path: str, cluster_column: str = 'cellma
     except Exception as e:
         print(f"ERROR in get_celltype_markers_by_column: {e}")
         return {}
+
+
+def get_dot_plot_data(h5ad_path: str, gene_names: List[str], cluster_column: str = 'leiden') -> Dict[str, Any]:
+    """
+    Calculate dot plot metrics for given genes across clusters.
+
+    For each gene in each cluster, computes:
+    - percent_expressing: percentage of cells with expression > 0
+    - mean_expression: average expression across all cells in cluster
+
+    Parameters:
+    -----------
+    h5ad_path : str
+        Path to h5ad file
+    gene_names : List[str]
+        List of gene names to include in dot plot
+    cluster_column : str
+        Column name for cluster assignments (default: 'leiden')
+
+    Returns:
+    --------
+    Dict containing:
+        - clusters: list of cluster names
+        - genes: list of gene names (validated)
+        - percent_expressing: 2D list [clusters x genes]
+        - mean_expression: 2D list [clusters x genes]
+        - cell_counts: list of cell counts per cluster
+    """
+    adata = sc.read_h5ad(h5ad_path)
+
+    # Validate cluster column exists
+    if cluster_column not in adata.obs.columns:
+        raise ValueError(f"Cluster column '{cluster_column}' not found in dataset")
+
+    # Get cluster assignments
+    clusters = adata.obs[cluster_column].astype(str)
+    unique_clusters = sorted(clusters.unique().tolist(), key=lambda x: (x.isdigit(), int(x) if x.isdigit() else x))
+
+    # Validate genes - only keep genes that exist in the dataset
+    valid_genes = [g for g in gene_names if g in adata.var.index]
+    if not valid_genes:
+        return {
+            'clusters': unique_clusters,
+            'genes': [],
+            'percent_expressing': [[] for _ in unique_clusters],
+            'mean_expression': [[] for _ in unique_clusters],
+            'cell_counts': [int((clusters == c).sum()) for c in unique_clusters]
+        }
+
+    # Extract expression matrix for selected genes
+    gene_indices = [adata.var.index.get_loc(g) for g in valid_genes]
+
+    # Handle sparse matrices
+    if hasattr(adata.X, 'toarray'):
+        expr_matrix = adata.X[:, gene_indices].toarray()
+    else:
+        expr_matrix = adata.X[:, gene_indices]
+
+    # Calculate metrics per cluster
+    percent_expressing = []
+    mean_expression = []
+    cell_counts = []
+
+    for cluster in unique_clusters:
+        mask = (clusters == cluster).values
+        cluster_expr = expr_matrix[mask, :]
+        n_cells = mask.sum()
+        cell_counts.append(int(n_cells))
+
+        if n_cells == 0:
+            percent_expressing.append([0.0] * len(valid_genes))
+            mean_expression.append([0.0] * len(valid_genes))
+            continue
+
+        # Percent expressing: cells with expression > 0
+        pct_expr = ((cluster_expr > 0).sum(axis=0) / n_cells * 100).tolist()
+        percent_expressing.append([round(p, 2) for p in pct_expr])
+
+        # Mean expression across all cells in cluster
+        mean_expr = cluster_expr.mean(axis=0).tolist()
+        mean_expression.append([round(m, 4) for m in mean_expr])
+
+    return {
+        'clusters': unique_clusters,
+        'genes': valid_genes,
+        'percent_expressing': percent_expressing,
+        'mean_expression': mean_expression,
+        'cell_counts': cell_counts
+    }

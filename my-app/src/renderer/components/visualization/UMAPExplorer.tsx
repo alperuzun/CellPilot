@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  DatasetInfo, 
-  VisualizationData, 
-  api, 
-  GeneExpressionData, 
+import {
+  DatasetInfo,
+  VisualizationData,
+  api,
+  GeneExpressionData,
   MarkerGenesData,
-  AnnotationDetail,
   DifferentialExpressionResponse,
   AnalysisFile
 } from '../../services/api';
@@ -16,26 +15,30 @@ import AnnotationManager from './AnnotationManager';
 import VolcanoPlot from './VolcanoPlot';
 import MarkerGenesHeatmap from './MarkerGenesHeatmap';
 import AnnotationResults from './AnnotationResults';
-import { 
-  Settings, 
-  Search, 
-  MousePointer2, 
-  Move, 
+import {
+  Settings,
+  Search,
+  MousePointer2,
+  Move,
   BarChart3,
   Dna,
   Activity,
-  Maximize2,
   Layers,
   Lasso,
   ShieldAlert,
-  CheckCircle,
   RotateCcw,
   Split,
-  FolderOpen
+  FolderOpen,
+  MessageSquare,
+  Circle,
+  X,
+  ArrowLeftRight
 } from 'lucide-react';
 import { Select } from './Shared';
 import SubclusterConfigModal from './SubclusterConfigModal';
-import { Modal } from './Shared';
+import ChatAgent from './ChatAgent';
+import ClusterDetailsPopup from './ClusterDetailsPopup';
+import DotPlot from './DotPlot';
 
 // Import newly created modals (placeholders for now, will implement next)
 // import MergeSubclusterModal from './MergeSubclusterModal';
@@ -83,6 +86,7 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
   const [showGeneExpression, setShowGeneExpression] = useState(false);
   const [selectedGene, setSelectedGene] = useState<string>('');
   const [selectedCells, setSelectedCells] = useState<string[]>([]);
+  const [selectedClusterName, setSelectedClusterName] = useState<string | null>(null);
   const [customLabels, setCustomLabels] = useState<Record<string, string>>({});
   
   // Cached Data
@@ -94,7 +98,8 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
   const [activeTool, setActiveTool] = useState<'select' | 'pan' | 'lasso'>('select');
   const [searchQuery, setSearchQuery] = useState('');
   const [showMarkerHeatmap, setShowMarkerHeatmap] = useState(false);
-  
+  const [showDotPlot, setShowDotPlot] = useState(false);
+
   // Panel Visibility
   const [panels, setPanels] = useState({
     markers: true,
@@ -104,8 +109,9 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
     annotations: false,
     selected_analysis: false,
     confidence: true,
-    subclusters: false, // New panel
+    subclusters: false,
     files: false,
+    chat: false,
   });
 
   // State for DGE
@@ -118,6 +124,19 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
   const [assignLayer, setAssignLayer] = useState<string>('');
   const [assignCategory, setAssignCategory] = useState<string>('');
   const [isAssigning, setIsAssigning] = useState(false);
+
+  // Cluster Details Popup State
+  const [showClusterDetails, setShowClusterDetails] = useState(false);
+  const [clusterDetailsPosition, setClusterDetailsPosition] = useState<{ x: number; y: number } | null>(null);
+
+  // Compare Mode State
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareStep, setCompareStep] = useState<'idle' | 'select-a' | 'select-b'>('idle');
+  const [selectionA, setSelectionA] = useState<string[]>([]);
+  const [selectionAName, setSelectionAName] = useState<string>('');
+  const [comparisonResults, setComparisonResults] = useState<DifferentialExpressionResponse | null>(null);
+  const [showComparisonResults, setShowComparisonResults] = useState(false);
+  const [selectionBName, setSelectionBName] = useState<string>('');
 
   // Initialize assignment layer when selection opens
   useEffect(() => {
@@ -132,6 +151,45 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
         setSelectionCoords(null);
     }
   }, [selectedCells.length, data]);
+
+  // Handle selection updates
+  useEffect(() => {
+    // If selectedCells change manually (length > 0) and we have a selectedClusterName,
+    // we need to verify if the selection matches the cluster. 
+    // If not (e.g. Lasso tool usage), clear the cluster name to switch to "Selection" mode.
+    
+    // We assume if selectedCells is empty, we are not in selection mode.
+    // If selectedCells is NOT empty, we check if it was set by selectCluster.
+    // Since we don't have a flag for "source of selection", we can rely on 
+    // the fact that selectCluster sets both.
+    // BUT: UMAPPlot's onSelected only sets selectedCells.
+    
+    // So: If selectedCells changes, we can't easily know if it was Lasso or Cluster 
+    // unless we track it.
+    // Ideally, we clear cluster name in the onSelected handler.
+  }, [selectedCells]);
+
+  const handleSelection = (cellIds: string[]) => {
+    // Handle compare mode selections
+    if (compareMode && cellIds.length > 0) {
+      if (compareStep === 'select-a') {
+        setSelectionA(cellIds);
+        setSelectionAName(`Lasso Selection (${cellIds.length} cells)`);
+        setCompareStep('select-b');
+        return; // Don't show normal selection UI
+      } else if (compareStep === 'select-b') {
+        // Run comparison between selectionA and this selection
+        runComparison(selectionA, cellIds, selectionAName, `Lasso Selection (${cellIds.length} cells)`);
+        return;
+      }
+    }
+
+    setSelectedCells(cellIds);
+    // If manually selecting (Lasso/Box), clear the cluster context
+    // This assumes handleSelection is called by UMAPPlot for manual interactions
+    setSelectedClusterName(null);
+    setSelectionCoords(null); // Reset popover position to default or calculate new
+  };
 
   const handleAssignSelection = async () => {
     if (!dataset || !assignLayer || !assignCategory.trim() || selectedCells.length === 0) return;
@@ -231,13 +289,13 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
     setDgeLoading(true);
     setDgeResults(null);
     if (!panels.selected_analysis) togglePanel('selected_analysis');
-    
+
     try {
         const res = await api.getDifferentialExpression({
             input_path: dataset.path,
             selected_cell_ids: selectedCells,
             mode: dgeMode,
-            n_genes: 50 
+            n_genes: 50
         });
         if (res.error) {
             alert(`Error: ${res.error}`);
@@ -247,6 +305,41 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
     } catch (e) {
         console.error("DGE Error", e);
         alert("Failed to compute differential expression");
+    } finally {
+        setDgeLoading(false);
+    }
+  };
+
+  // Cluster Comparison: Run DE between two groups
+  const runComparison = async (groupA: string[], groupB: string[], nameA: string, nameB: string) => {
+    if (!dataset) return;
+    setDgeLoading(true);
+    setComparisonResults(null);
+
+    try {
+        const res = await api.getDifferentialExpression({
+            input_path: dataset.path,
+            selected_cell_ids: groupA,
+            reference_cell_ids: groupB,
+            n_genes: 50
+        });
+        if (res.error) {
+            alert(`Error: ${res.error}`);
+            setCompareMode(false);
+            setCompareStep('idle');
+        } else {
+            setComparisonResults(res);
+            setSelectionAName(nameA);
+            setSelectionBName(nameB);
+            setShowComparisonResults(true);
+            setCompareMode(false);
+            setCompareStep('idle');
+        }
+    } catch (e) {
+        console.error("Comparison Error", e);
+        alert("Failed to compute cluster comparison");
+        setCompareMode(false);
+        setCompareStep('idle');
     } finally {
         setDgeLoading(false);
     }
@@ -363,9 +456,9 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
   // Helper function to select all cells in a cluster
   const selectCluster = (clusterValue: string) => {
     if (!data) return;
-    
+
     let foundCells: string[] = [];
-    
+
     const tryFindInLabels = (labelData: { labels: string[] } | undefined) => {
         if (!labelData) return [];
         const labels = labelData.labels;
@@ -398,12 +491,34 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
     }
 
     if (foundCells.length > 0) {
+        // Handle compare mode
+        if (compareMode) {
+            if (compareStep === 'select-a') {
+                setSelectionA(foundCells);
+                setSelectionAName(`Cluster ${clusterValue}`);
+                setCompareStep('select-b');
+                return; // Don't show normal cluster popup
+            } else if (compareStep === 'select-b') {
+                // Run comparison between selectionA and this cluster
+                runComparison(selectionA, foundCells, selectionAName, `Cluster ${clusterValue}`);
+                return;
+            }
+        }
+
+        // Normal mode: show cluster details
+        setSelectedClusterName(clusterValue);
         setSelectedCells(foundCells);
+
         // Position panel in center-right of screen for programmatic selections
-        setSelectionCoords({ 
-            x: window.innerWidth / 2, 
-            y: window.innerHeight / 3 
-        });
+        const coords = {
+            x: window.innerWidth / 2,
+            y: window.innerHeight / 3
+        };
+        setSelectionCoords(coords);
+
+        // Show cluster details popup
+        setClusterDetailsPosition(coords);
+        setShowClusterDetails(true);
     }
   };
 
@@ -619,14 +734,30 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
         </Tooltip>
 
         <Tooltip text="Lasso Selection">
-            <button 
+            <button
                 onClick={() => setActiveTool('lasso')}
                 className={`p-2 rounded-lg transition-all ${activeTool === 'lasso' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30' : 'text-gray-400 hover:bg-neutral-800 hover:text-white'}`}
             >
                 <Lasso size={20} />
             </button>
         </Tooltip>
-        
+
+        <Tooltip text="Compare Clusters">
+            <button
+                onClick={() => {
+                    setCompareMode(true);
+                    setCompareStep('select-a');
+                    setSelectionA([]);
+                    setSelectionAName('');
+                    setSelectedCells([]);
+                    setSelectedClusterName(null);
+                }}
+                className={`p-2 rounded-lg transition-all ${compareMode ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/30' : 'text-gray-400 hover:bg-neutral-800 hover:text-white'}`}
+            >
+                <ArrowLeftRight size={20} />
+            </button>
+        </Tooltip>
+
         <div className="h-px w-8 bg-neutral-800 my-2"></div>
 
         <Tooltip text="Toggle Markers">
@@ -644,6 +775,15 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
                 className={`p-2 rounded-lg transition-all ${panels.annotations ? 'text-blue-400 bg-blue-900/20' : 'text-gray-400 hover:bg-neutral-800 hover:text-white'}`}
             >
                 <Layers size={20} />
+            </button>
+        </Tooltip>
+
+        <Tooltip text="Chat Assistant">
+            <button 
+                onClick={() => togglePanel('chat')}
+                className={`p-2 rounded-lg transition-all ${panels.chat ? 'text-green-400 bg-green-900/20' : 'text-gray-400 hover:bg-neutral-800 hover:text-white'}`}
+            >
+                <MessageSquare size={20} />
             </button>
         </Tooltip>
 
@@ -666,7 +806,7 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
         </Tooltip>
 
         <Tooltip text="QC Metrics">
-            <button 
+            <button
                 onClick={() => togglePanel('qc')}
                 className={`p-2 rounded-lg transition-all ${panels.qc ? 'text-blue-400 bg-blue-900/20' : 'text-gray-400 hover:bg-neutral-800 hover:text-white'}`}
             >
@@ -749,6 +889,29 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
             </div>
         </div>
 
+        {/* Compare Mode Banner */}
+        {compareMode && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 bg-purple-900/90 border border-purple-700 rounded-lg px-4 py-2 flex items-center gap-3 shadow-xl">
+                <ArrowLeftRight size={18} className="text-purple-300" />
+                <span className="text-sm text-white">
+                    {compareStep === 'select-a'
+                        ? 'Step 1: Select first group (click cluster or use lasso)'
+                        : `Step 2: Select second group (vs ${selectionAName})`}
+                </span>
+                <button
+                    onClick={() => {
+                        setCompareMode(false);
+                        setCompareStep('idle');
+                        setSelectionA([]);
+                        setSelectionAName('');
+                    }}
+                    className="text-purple-300 hover:text-white transition-colors"
+                >
+                    <X size={16} />
+                </button>
+            </div>
+        )}
+
         {/* Visualization Canvas */}
         <div className="absolute inset-0 z-0">
             <UMAPPlot 
@@ -761,7 +924,7 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
                 geneExpression={geneExpression}
                 selectedCells={selectedCells}
                 customLabels={customLabels}
-                onCellSelection={setSelectedCells}
+                onCellSelection={handleSelection}
                 onSelectionCoordinates={setSelectionCoords}
                 activeTool={activeTool}
                 onClusterSelect={selectCluster}
@@ -784,21 +947,30 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
 
         {/* 1. Top Marker Genes (Left) */}
         {panels.markers && (
-            <DraggablePanel 
-                title="Top Marker Genes" 
-                icon={<Dna size={16}/>} 
+            <DraggablePanel
+                title="Top Marker Genes"
+                icon={<Dna size={16}/>}
                 style={{ left: 20, top: 100 }}
                 onClose={() => togglePanel('markers')}
             >
                 <div className="space-y-4">
-                    {/* Detailed Heatmap Button */}
-                    <button
-                        onClick={() => setShowMarkerHeatmap(true)}
-                        className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors"
-                    >
-                        <Maximize2 size={16} />
-                        View Detailed Heatmap
-                    </button>
+                    {/* Visualization Buttons */}
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setShowMarkerHeatmap(true)}
+                            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors"
+                        >
+                            <BarChart3 size={16} />
+                            Heatmap
+                        </button>
+                        <button
+                            onClick={() => setShowDotPlot(true)}
+                            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-cyan-700 hover:bg-cyan-600 text-white text-sm font-medium rounded-lg transition-colors"
+                        >
+                            <Circle size={16} />
+                            Dot Plot
+                        </button>
+                    </div>
 
                     {sortedMarkerGenes.map(([cluster, genes]) => (
                         <div key={cluster} className="bg-neutral-800/50 rounded-lg p-2 border border-neutral-800">
@@ -949,6 +1121,22 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
                         />
                     </div>
                 </div>
+            </DraggablePanel>
+        )}
+
+        {panels.chat && (
+            <DraggablePanel
+                title="AI Assistant"
+                icon={<MessageSquare size={16}/>}
+                style={{ right: 20, bottom: 20 }}
+                className="w-96 h-[500px]"
+                onClose={() => togglePanel('chat')}
+            >
+                <ChatAgent 
+                    datasetPath={dataset.path}
+                    selectedCluster={selectedClusterName}
+                    selectedCells={selectedCells}
+                />
             </DraggablePanel>
         )}
 
@@ -1152,6 +1340,181 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
             </DraggablePanel>
         )}
 
+        {/* Dot Plot Fullscreen Modal */}
+        {showDotPlot && (
+            <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
+                <div className="flex items-center justify-between px-6 py-3 border-b border-neutral-800">
+                    <div className="flex items-center gap-3">
+                        <Circle size={20} className="text-cyan-400" />
+                        <h2 className="text-lg font-semibold text-white">Dot Plot - Marker Validation</h2>
+                    </div>
+                    <button
+                        onClick={() => setShowDotPlot(false)}
+                        className="p-2 hover:bg-neutral-800 rounded-lg transition-colors text-gray-400 hover:text-white"
+                    >
+                        <X size={20} />
+                    </button>
+                </div>
+                <div className="flex-1 p-6 overflow-hidden">
+                    <DotPlot
+                        h5adPath={dataset.path}
+                        availableGenes={data.available_genes}
+                        clusterColumns={[...Object.keys(data.clusters), ...Object.keys(data.cell_types)]}
+                        defaultClusterColumn={Object.keys(data.clusters)[0] || 'leiden'}
+                    />
+                </div>
+            </div>
+        )}
+
+        {/* Cluster Comparison Results Modal */}
+        {showComparisonResults && comparisonResults && (
+            <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
+                <div className="flex items-center justify-between px-6 py-3 border-b border-neutral-800">
+                    <div className="flex items-center gap-3">
+                        <ArrowLeftRight size={20} className="text-purple-400" />
+                        <h2 className="text-lg font-semibold text-white">
+                            Cluster Comparison: {selectionAName} vs {selectionBName}
+                        </h2>
+                        <span className="text-sm text-gray-400">
+                            ({comparisonResults.n_selected?.toLocaleString()} vs {comparisonResults.n_reference?.toLocaleString()} cells)
+                        </span>
+                    </div>
+                    <button
+                        onClick={() => {
+                            setShowComparisonResults(false);
+                            setComparisonResults(null);
+                        }}
+                        className="p-2 hover:bg-neutral-800 rounded-lg transition-colors text-gray-400 hover:text-white"
+                    >
+                        <X size={20} />
+                    </button>
+                </div>
+                <div className="flex-1 p-6 overflow-hidden flex gap-6">
+                    {/* Left side: Volcano Plot */}
+                    <div className="flex-1 bg-neutral-900/50 rounded-lg border border-neutral-800 p-4">
+                        <h3 className="text-sm font-semibold text-gray-300 mb-3">Volcano Plot</h3>
+                        <div className="h-[calc(100%-2rem)]">
+                            <VolcanoPlot
+                                data={comparisonResults.results}
+                                onGeneClick={(gene) => {
+                                    setSelectedGene(gene);
+                                    setShowGeneExpression(true);
+                                    if (!geneExpression[gene]) {
+                                        setLoadingGene(true);
+                                        api.getGeneExpression(dataset.path, [gene])
+                                            .then(res => setGeneExpression(prev => ({ ...prev, ...res })))
+                                            .finally(() => setLoadingGene(false));
+                                    }
+                                }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Right side: Results Table */}
+                    <div className="w-96 bg-neutral-900/50 rounded-lg border border-neutral-800 p-4 flex flex-col">
+                        <h3 className="text-sm font-semibold text-gray-300 mb-3">Differential Expression Results</h3>
+
+                        {/* Upregulated in Group A */}
+                        <div className="flex-1 overflow-hidden flex flex-col">
+                            <div className="text-xs text-green-400 font-medium mb-2 flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                Higher in {selectionAName}
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                <table className="w-full text-xs text-left">
+                                    <thead className="bg-neutral-800 text-gray-400 sticky top-0">
+                                        <tr>
+                                            <th className="p-2 font-medium">Gene</th>
+                                            <th className="p-2 font-medium text-right">Log2FC</th>
+                                            <th className="p-2 font-medium text-right">P-adj</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-neutral-800">
+                                        {comparisonResults.results
+                                            .filter(r => r.log2fc > 0 && r.pval_adj < 0.05)
+                                            .sort((a, b) => b.log2fc - a.log2fc)
+                                            .slice(0, 15)
+                                            .map((r) => (
+                                                <tr
+                                                    key={r.gene}
+                                                    onClick={() => {
+                                                        setSelectedGene(r.gene);
+                                                        setShowGeneExpression(true);
+                                                        if (!geneExpression[r.gene]) {
+                                                            setLoadingGene(true);
+                                                            api.getGeneExpression(dataset.path, [r.gene])
+                                                                .then(res => setGeneExpression(prev => ({ ...prev, ...res })))
+                                                                .finally(() => setLoadingGene(false));
+                                                        }
+                                                    }}
+                                                    className="cursor-pointer hover:bg-neutral-800 transition-colors"
+                                                >
+                                                    <td className="p-2 font-medium text-green-300">{r.gene}</td>
+                                                    <td className="p-2 text-right font-mono text-gray-300">+{r.log2fc.toFixed(2)}</td>
+                                                    <td className="p-2 text-right font-mono text-gray-500">
+                                                        {r.pval_adj < 0.001 ? '<0.001' : r.pval_adj.toFixed(3)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Divider */}
+                        <div className="my-3 border-t border-neutral-700"></div>
+
+                        {/* Downregulated in Group A (Higher in Group B) */}
+                        <div className="flex-1 overflow-hidden flex flex-col">
+                            <div className="text-xs text-red-400 font-medium mb-2 flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                Higher in {selectionBName}
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                <table className="w-full text-xs text-left">
+                                    <thead className="bg-neutral-800 text-gray-400 sticky top-0">
+                                        <tr>
+                                            <th className="p-2 font-medium">Gene</th>
+                                            <th className="p-2 font-medium text-right">Log2FC</th>
+                                            <th className="p-2 font-medium text-right">P-adj</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-neutral-800">
+                                        {comparisonResults.results
+                                            .filter(r => r.log2fc < 0 && r.pval_adj < 0.05)
+                                            .sort((a, b) => a.log2fc - b.log2fc)
+                                            .slice(0, 15)
+                                            .map((r) => (
+                                                <tr
+                                                    key={r.gene}
+                                                    onClick={() => {
+                                                        setSelectedGene(r.gene);
+                                                        setShowGeneExpression(true);
+                                                        if (!geneExpression[r.gene]) {
+                                                            setLoadingGene(true);
+                                                            api.getGeneExpression(dataset.path, [r.gene])
+                                                                .then(res => setGeneExpression(prev => ({ ...prev, ...res })))
+                                                                .finally(() => setLoadingGene(false));
+                                                        }
+                                                    }}
+                                                    className="cursor-pointer hover:bg-neutral-800 transition-colors"
+                                                >
+                                                    <td className="p-2 font-medium text-red-300">{r.gene}</td>
+                                                    <td className="p-2 text-right font-mono text-gray-300">{r.log2fc.toFixed(2)}</td>
+                                                    <td className="p-2 text-right font-mono text-gray-500">
+                                                        {r.pval_adj < 0.001 ? '<0.001' : r.pval_adj.toFixed(3)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* 5. Subclusters Panel (New) */}
         {panels.subclusters && !isSubcluster && (
             <DraggablePanel
@@ -1271,10 +1634,11 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
             </DraggablePanel>
         )}
 
+
       </div>
 
       {/* Subcluster Config Modal */}
-      <SubclusterConfigModal 
+      <SubclusterConfigModal
         isOpen={showSubclusterConfig}
         onClose={() => setShowSubclusterConfig(false)}
         datasetPath={dataset.path}
@@ -1294,6 +1658,53 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
             }
         }}
       />
+
+      {/* Cluster Details Popup */}
+      {data && (
+        <ClusterDetailsPopup
+          isOpen={showClusterDetails && selectedClusterName !== null}
+          onClose={() => {
+            setShowClusterDetails(false);
+          }}
+          clusterName={selectedClusterName || ''}
+          cellIds={selectedCells}
+          data={data}
+          annotationConfidence={annotationConfidence}
+          customLabels={customLabels}
+          position={clusterDetailsPosition || undefined}
+          onSubcluster={() => {
+            setShowClusterDetails(false);
+            setShowSubclusterConfig(true);
+          }}
+          onAccept={async (cellType) => {
+            // Accept the cluster as this cell type - update the annotation layer
+            try {
+              const targetLayer = Object.keys(data.cell_types)[0] || 'cell_type';
+              await api.updateAnnotationLayer({
+                input_path: dataset.path,
+                layer_name: targetLayer,
+                mapping_type: 'selection',
+                cell_ids: selectedCells,
+                new_label: cellType,
+              });
+              setRefreshTrigger(prev => prev + 1);
+              setShowClusterDetails(false);
+              setSelectedCells([]);
+              setSelectedClusterName(null);
+            } catch (e) {
+              console.error("Failed to accept annotation", e);
+              alert("Failed to update annotation");
+            }
+          }}
+          onManualEdit={() => {
+            // Open the annotation manager and focus on manual editing
+            setShowClusterDetails(false);
+            if (!panels.annotations) {
+              setPanels(prev => ({ ...prev, annotations: true }));
+            }
+          }}
+        />
+      )}
 
     </div>
   );

@@ -22,8 +22,12 @@ class AnnotationParams(BaseModel):
     use_cellmarker: bool
     use_panglao: bool
     use_cancer_single_cell_atlas: bool
+    use_celltypist: bool = False
+    celltypist_model: Optional[str] = "Immune_All_Low.pkl"  # Deprecated, use celltypist_models
+    celltypist_models: Optional[List[str]] = None  # List of model names to run
     use_manual_annotation: bool = False
     manual_marker_file: Optional[str] = None
+    manual_marker_text: Optional[str] = None
 
 class CellPhoneDBParams(BaseModel):
     input_path: str
@@ -130,6 +134,12 @@ class SubclusterAnnotationParams(BaseModel):
     use_cellmarker: bool = True
     use_panglao: bool = False
     use_cancer_single_cell_atlas: bool = False
+    use_celltypist: bool = False
+    celltypist_model: Optional[str] = None  # Deprecated, use celltypist_models
+    celltypist_models: Optional[List[str]] = None  # List of model names to run
+    use_manual_annotation: bool = False
+    manual_marker_file: Optional[str] = None
+    manual_marker_text: Optional[str] = None
 
 class SubclusterRequest(BaseModel):
     parent_path: str
@@ -143,3 +153,25 @@ class MergeSubclusterRequest(BaseModel):
     subcluster_path: str
     source_layer: str
     target_layer: str
+
+class ChatRequest(BaseModel):
+    message: str
+    selection_id: str
+    input_path: str
+    history: List[Dict[str, str]] = []
+    model: str = "gpt-4o"
+    mode: str = "cluster" # "global", "cluster", "selection"
+    cell_ids: List[str] = [] # For selection mode
+    hide_labels: bool = False
+
+class DotPlotRequest(BaseModel):
+    input_path: str
+    gene_names: List[str]
+    cluster_column: str = 'leiden'
+
+class DotPlotResponse(BaseModel):
+    clusters: List[str]
+    genes: List[str]
+    percent_expressing: List[List[float]]  # clusters x genes matrix
+    mean_expression: List[List[float]]      # clusters x genes matrix
+    cell_counts: List[int]

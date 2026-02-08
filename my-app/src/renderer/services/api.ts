@@ -65,8 +65,12 @@ export interface AnnotationParams {
   use_cellmarker: boolean;
   use_panglao: boolean;
   use_cancer_single_cell_atlas: boolean;
+  use_celltypist: boolean;
+  celltypist_model?: string;  // Deprecated, use celltypist_models
+  celltypist_models?: string[];  // List of model names to run
   use_manual_annotation?: boolean;
-  manual_marker_file?: string;
+  manual_marker_file?: string | null;
+  manual_marker_text?: string | null;
 }
 
 export interface CellPhoneDBParams {
@@ -191,6 +195,14 @@ export interface MarkerGenesData {
   [cluster: string]: string[];
 }
 
+export interface DotPlotData {
+  clusters: string[];
+  genes: string[];
+  percent_expressing: number[][]; // [cluster][gene]
+  mean_expression: number[][];    // [cluster][gene]
+  cell_counts: number[];
+}
+
 export interface CSVDataResponse {
   type: 'drug_response' | 'generic';
   // Drug response format
@@ -302,6 +314,21 @@ export interface DifferentialExpressionResponse {
   error?: string;
 }
 
+export interface ChatRequest {
+  message: string;
+  selection_id: string;
+  input_path: string;
+  history?: { role: string; content: string }[];
+  model?: string;
+  mode?: 'global' | 'cluster' | 'selection';
+  cell_ids?: string[];
+  hide_labels?: boolean;
+}
+
+export interface ChatResponse {
+  response: string;
+}
+
 // Subclustering Interfaces
 export interface PreprocessingParams {
   n_hvgs: number;
@@ -314,6 +341,12 @@ export interface SubclusterAnnotationParams {
   use_cellmarker: boolean;
   use_panglao: boolean;
   use_cancer_single_cell_atlas: boolean;
+  use_celltypist: boolean;
+  celltypist_model?: string;  // Deprecated, use celltypist_models
+  celltypist_models?: string[];  // List of model names to run
+  use_manual_annotation: boolean;
+  manual_marker_file?: string | null;
+  manual_marker_text?: string | null;
 }
 
 export interface SubclusterRequest {
@@ -461,6 +494,10 @@ export const api = {
     return apiRequest(`/job_status/${jobId}`);
   },
 
+  async getCellTypistModels(): Promise<{ name: string; description: string }[]> {
+    return apiRequest('/celltypist/models');
+  },
+
   // File preview endpoints
   getPreviewImageUrl(path: string): string {
     return `${API_BASE_URL}/preview_img?path=${encodeURIComponent(path)}`;
@@ -492,6 +529,17 @@ export const api = {
 
   async getCellTypeMarkers(h5adPath: string, clusterColumn = 'cellmarker'): Promise<MarkerGenesData> {
     return apiRequest(`/celltype_markers?h5ad_path=${encodeURIComponent(h5adPath)}&cluster_column=${clusterColumn}`);
+  },
+
+  async getDotPlotData(h5adPath: string, geneNames: string[], clusterColumn = 'leiden'): Promise<DotPlotData> {
+    return apiRequest('/dot_plot', {
+      method: 'POST',
+      body: JSON.stringify({
+        input_path: h5adPath,
+        gene_names: geneNames,
+        cluster_column: clusterColumn,
+      }),
+    });
   },
 
   async getAvailableDatasets(): Promise<AvailableDatasetsResponse> {
@@ -555,9 +603,16 @@ export const api = {
   },
 
   async mergeSubclusterLabels(params: MergeSubclusterRequest): Promise<{ status: string; updated_cells: number; target_layer: string }> {
-    return apiRequest('/merge_subcluster', {
+    return apiRequest('/merge_subcluster_labels', {
       method: 'POST',
       body: JSON.stringify(params),
+    });
+  },
+
+  async chat(request: ChatRequest): Promise<ChatResponse> {
+    return apiRequest('/chat', {
+      method: 'POST',
+      body: JSON.stringify(request),
     });
   },
 };

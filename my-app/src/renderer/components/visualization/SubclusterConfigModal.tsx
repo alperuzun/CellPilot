@@ -1,7 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { Modal, Button } from './Shared';
 import { Settings, Check, Activity, Database } from 'lucide-react';
+import ManualAnnotationConfig from '../ManualAnnotationConfig'; // Ensure correct path or move file to suitable location
+
+// Or, since ManualAnnotationConfig uses MUI and this modal uses Tailwind, 
+// we might need to wrap it or style it. 
+// However, ManualAnnotationConfig is built with MUI. SubclusterConfigModal is built with Tailwind.
+// Mixing them is fine but style might look different.
+// Ideally, we should have a Tailwind version or wrap it in a ThemeProvider if needed.
+// But for now let's try to use it directly, ensuring MUI dependencies are available.
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+  },
+});
 
 interface SubclusterConfigModalProps {
   isOpen: boolean;
@@ -32,6 +46,35 @@ export default function SubclusterConfigModal({
   const [useCellMarker, setUseCellMarker] = useState(true);
   const [usePanglao, setUsePanglao] = useState(false);
   const [useCancerSEA, setUseCancerSEA] = useState(false);
+  const [useCellTypist, setUseCellTypist] = useState(false);
+  const [selectedCellTypistModels, setSelectedCellTypistModels] = useState<string[]>([]);
+  const [availableCellTypistModels, setAvailableCellTypistModels] = useState<{name: string, description: string}[]>([]);
+  
+  // Manual Annotation Params
+  const [useManualAnnotation, setUseManualAnnotation] = useState(false);
+  const [manualMarkerFile, setManualMarkerFile] = useState<string | null>(null);
+  const [manualMarkerText, setManualMarkerText] = useState('');
+  const [manualInputType, setManualInputType] = useState<'file' | 'text'>('file');
+
+  // Load CellTypist models
+  useEffect(() => {
+    const fetchModels = async () => {
+        try {
+            const models = await api.getCellTypistModels();
+            setAvailableCellTypistModels(models);
+        } catch (e) {
+            console.error("Failed to fetch CellTypist models", e);
+        }
+    };
+    fetchModels();
+  }, []);
+
+  // Set default model if models loaded and none selected
+  useEffect(() => {
+    if (useCellTypist && selectedCellTypistModels.length === 0 && availableCellTypistModels.length > 0) {
+        setSelectedCellTypistModels(['Immune_All_Low.pkl']);
+    }
+  }, [useCellTypist, availableCellTypistModels]);
   
   const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +82,22 @@ export default function SubclusterConfigModal({
     if (!name.trim()) {
       setError("Please provide a name for the subcluster analysis.");
       return;
+    }
+
+    if (!useCellMarker && !usePanglao && !useCancerSEA && !useCellTypist && !useManualAnnotation) {
+        setError("Please select at least one annotation method.");
+        return;
+    }
+
+    if (useManualAnnotation) {
+        if (manualInputType === 'file' && !manualMarkerFile) {
+            setError("Please select a marker file for manual annotation.");
+            return;
+        }
+        if (manualInputType === 'text' && !manualMarkerText.trim()) {
+             setError("Please enter marker text for manual annotation.");
+             return;
+        }
     }
     
     setStep('submitting');
@@ -58,7 +117,12 @@ export default function SubclusterConfigModal({
         annotation_params: {
           use_cellmarker: useCellMarker,
           use_panglao: usePanglao,
-          use_cancer_single_cell_atlas: useCancerSEA
+          use_cancer_single_cell_atlas: useCancerSEA,
+          use_celltypist: useCellTypist,
+          celltypist_models: selectedCellTypistModels,
+          use_manual_annotation: useManualAnnotation,
+          manual_marker_file: manualMarkerFile,
+          manual_marker_text: manualMarkerText
         }
       });
       
@@ -152,33 +216,134 @@ export default function SubclusterConfigModal({
         <div className="space-y-4">
           <div className="flex items-center gap-2 border-b border-neutral-800 pb-1">
             <Database size={16} className="text-gray-400" />
-            <h4 className="text-sm font-medium text-gray-300">Automated Annotation</h4>
+            <h4 className="text-sm font-medium text-gray-300">Cell Type Annotation</h4>
           </div>
-          
+
+          {/* Marker-Based Databases */}
           <div className="space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer group">
-              <div className={`w-4 h-4 rounded border flex items-center justify-center ${useCellMarker ? 'bg-blue-600 border-blue-600' : 'border-neutral-600 bg-neutral-900'}`}>
-                {useCellMarker && <Check size={12} className="text-white" />}
-              </div>
-              <input type="checkbox" checked={useCellMarker} onChange={(e) => setUseCellMarker(e.target.checked)} className="hidden" />
-              <span className="text-sm text-gray-300 group-hover:text-white">CellMarker Database (General)</span>
-            </label>
-            
-            <label className="flex items-center gap-2 cursor-pointer group">
-              <div className={`w-4 h-4 rounded border flex items-center justify-center ${usePanglao ? 'bg-blue-600 border-blue-600' : 'border-neutral-600 bg-neutral-900'}`}>
-                {usePanglao && <Check size={12} className="text-white" />}
-              </div>
-              <input type="checkbox" checked={usePanglao} onChange={(e) => setUsePanglao(e.target.checked)} className="hidden" />
-              <span className="text-sm text-gray-300 group-hover:text-white">PanglaoDB (General)</span>
-            </label>
-            
-            <label className="flex items-center gap-2 cursor-pointer group">
-              <div className={`w-4 h-4 rounded border flex items-center justify-center ${useCancerSEA ? 'bg-blue-600 border-blue-600' : 'border-neutral-600 bg-neutral-900'}`}>
-                {useCancerSEA && <Check size={12} className="text-white" />}
-              </div>
-              <input type="checkbox" checked={useCancerSEA} onChange={(e) => setUseCancerSEA(e.target.checked)} className="hidden" />
-              <span className="text-sm text-gray-300 group-hover:text-white">CancerSEA (Cancer Specific)</span>
-            </label>
+            <p className="text-xs text-gray-500 mb-2">Marker-Based Databases (Z-score enrichment)</p>
+
+            <div className="bg-neutral-800/50 rounded-md p-2">
+              <label className="flex items-start gap-2 cursor-pointer group">
+                <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${useCellMarker ? 'bg-green-600 border-green-600' : 'border-neutral-600 bg-neutral-900'}`}>
+                  {useCellMarker && <Check size={12} className="text-white" />}
+                </div>
+                <input type="checkbox" checked={useCellMarker} onChange={(e) => setUseCellMarker(e.target.checked)} className="hidden" />
+                <div>
+                  <span className="text-sm text-gray-300 group-hover:text-white flex items-center gap-2">
+                    CellMarker 2.0
+                    <span className="px-1 py-0.5 text-[10px] bg-green-900/50 text-green-400 rounded">Recommended</span>
+                  </span>
+                  <span className="text-[10px] text-gray-500 block">13,605 markers for 467 cell types across human/mouse tissues</span>
+                </div>
+              </label>
+            </div>
+
+            <div className="bg-neutral-800/50 rounded-md p-2">
+              <label className="flex items-start gap-2 cursor-pointer group">
+                <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${usePanglao ? 'bg-blue-600 border-blue-600' : 'border-neutral-600 bg-neutral-900'}`}>
+                  {usePanglao && <Check size={12} className="text-white" />}
+                </div>
+                <input type="checkbox" checked={usePanglao} onChange={(e) => setUsePanglao(e.target.checked)} className="hidden" />
+                <div>
+                  <span className="text-sm text-gray-300 group-hover:text-white">PanglaoDB</span>
+                  <span className="text-[10px] text-gray-500 block">178 cell types with experimentally validated markers</span>
+                </div>
+              </label>
+            </div>
+
+            <div className="bg-neutral-800/50 rounded-md p-2">
+              <label className="flex items-start gap-2 cursor-pointer group">
+                <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${useCancerSEA ? 'bg-red-600 border-red-600' : 'border-neutral-600 bg-neutral-900'}`}>
+                  {useCancerSEA && <Check size={12} className="text-white" />}
+                </div>
+                <input type="checkbox" checked={useCancerSEA} onChange={(e) => setUseCancerSEA(e.target.checked)} className="hidden" />
+                <div>
+                  <span className="text-sm text-gray-300 group-hover:text-white flex items-center gap-2">
+                    CancerSEA
+                    <span className="px-1 py-0.5 text-[10px] bg-red-900/50 text-red-400 rounded">Cancer</span>
+                  </span>
+                  <span className="text-[10px] text-gray-500 block">14 functional states: stemness, EMT, metastasis, etc.</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* ML Models */}
+          <div className="space-y-2">
+            <p className="text-xs text-gray-500 mb-2">Machine Learning Models (Probability-based)</p>
+
+            <div className="bg-purple-900/20 rounded-md p-2 border border-purple-800/30">
+              <label className="flex items-start gap-2 cursor-pointer group mb-2">
+                <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${useCellTypist ? 'bg-purple-600 border-purple-600' : 'border-neutral-600 bg-neutral-900'}`}>
+                  {useCellTypist && <Check size={12} className="text-white" />}
+                </div>
+                <input type="checkbox" checked={useCellTypist} onChange={(e) => setUseCellTypist(e.target.checked)} className="hidden" />
+                <div>
+                  <span className="text-sm text-gray-300 group-hover:text-white flex items-center gap-2">
+                    CellTypist
+                    <span className="px-1 py-0.5 text-[10px] bg-purple-900/50 text-purple-400 rounded">AI</span>
+                  </span>
+                  <span className="text-[10px] text-gray-500 block">Deep learning classifier with majority voting. Select multiple models.</span>
+                </div>
+              </label>
+
+              {useCellTypist && (
+                <div className="ml-6 mt-2">
+                  {availableCellTypistModels.length === 0 ? (
+                    <p className="text-xs text-gray-500">Loading models...</p>
+                  ) : (
+                    <div className="max-h-32 overflow-y-auto border border-neutral-700 rounded-md p-2 space-y-1 bg-neutral-900">
+                      {availableCellTypistModels.map((m) => (
+                        <label key={m.name} className="flex items-start gap-2 cursor-pointer group hover:bg-neutral-800 rounded p-1">
+                          <div className={`w-3 h-3 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${selectedCellTypistModels.includes(m.name) ? 'bg-purple-600 border-purple-600' : 'border-neutral-600 bg-neutral-800'}`}>
+                            {selectedCellTypistModels.includes(m.name) && <Check size={10} className="text-white" />}
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={selectedCellTypistModels.includes(m.name)}
+                            onChange={(e) => {
+                              const isChecked = e.target.checked;
+                              setSelectedCellTypistModels(prev =>
+                                isChecked
+                                  ? [...prev, m.name]
+                                  : prev.filter(name => name !== m.name)
+                              );
+                            }}
+                            className="hidden"
+                          />
+                          <div className="text-xs">
+                            <span className="text-gray-300 group-hover:text-white">{m.name.replace('.pkl', '')}</span>
+                            <span className="text-gray-500 block text-[10px]">{m.description}</span>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {selectedCellTypistModels.length > 0 && (
+                    <p className="text-xs text-purple-400 mt-1 font-medium">{selectedCellTypistModels.length} model(s) selected</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Custom Markers */}
+          <div className="space-y-2">
+            <p className="text-xs text-gray-500 mb-2">Custom Markers</p>
+            <ThemeProvider theme={darkTheme}>
+              <ManualAnnotationConfig
+                useManualAnnotation={useManualAnnotation}
+                onToggle={setUseManualAnnotation}
+                markerFile={manualMarkerFile}
+                onFileSelect={setManualMarkerFile}
+                onClearFile={() => setManualMarkerFile(null)}
+                markerText={manualMarkerText}
+                onTextChange={setManualMarkerText}
+                inputType={manualInputType}
+                onInputTypeChange={setManualInputType}
+              />
+            </ThemeProvider>
           </div>
         </div>
 
