@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   DatasetInfo,
   VisualizationData,
@@ -6,7 +6,8 @@ import {
   GeneExpressionData,
   MarkerGenesData,
   DifferentialExpressionResponse,
-  AnalysisFile
+  AnalysisFile,
+  ResolutionInfo
 } from '../../services/api';
 import UMAPPlot from './UMAPPlot';
 import { DraggablePanel } from './DraggablePanel';
@@ -15,6 +16,7 @@ import AnnotationManager from './AnnotationManager';
 import VolcanoPlot from './VolcanoPlot';
 import MarkerGenesHeatmap from './MarkerGenesHeatmap';
 import AnnotationResults from './AnnotationResults';
+import ResolutionExplorer from './ResolutionExplorer';
 import {
   Settings,
   Search,
@@ -138,6 +140,11 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
   const [showComparisonResults, setShowComparisonResults] = useState(false);
   const [selectionBName, setSelectionBName] = useState<string>('');
 
+  // Multi-Resolution State
+  const [resolutionInfo, setResolutionInfo] = useState<ResolutionInfo | null>(null);
+  const [activeResolution, setActiveResolution] = useState<number | null>(null);
+  const [resolutionDataCache, setResolutionDataCache] = useState<Map<number, VisualizationData>>(new Map());
+
   // Initialize assignment layer when selection opens
   useEffect(() => {
     if (selectedCells.length > 0 && data) {
@@ -212,6 +219,54 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
     }
   };
 
+  // Handle resolution change (with caching)
+  const handleResolutionChange = useCallback(async (newResolution: number) => {
+    if (!dataset) return;
+
+    // Check cache first
+    if (resolutionDataCache.has(newResolution)) {
+      const cachedData = resolutionDataCache.get(newResolution)!;
+      setData(cachedData);
+      setActiveResolution(newResolution);
+      if (cachedData.resolution_info) {
+        setResolutionInfo(cachedData.resolution_info);
+      }
+      return;
+    }
+
+    // Fetch new data for this resolution
+    try {
+      setLoading(true);
+      const visData = await api.getVisualizationData(dataset.path, newResolution);
+
+      // Cache the data
+      setResolutionDataCache(prev => new Map(prev).set(newResolution, visData));
+
+      setData(visData);
+      setActiveResolution(newResolution);
+      if (visData.resolution_info) {
+        setResolutionInfo(visData.resolution_info);
+      }
+    } catch (err) {
+      console.error('Error loading resolution data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [dataset, resolutionDataCache]);
+
+  // Refresh resolution info (after annotation changes)
+  const refreshResolutionInfo = useCallback(async () => {
+    if (!dataset) return;
+    try {
+      const info = await api.getResolutionInfo(dataset.path);
+      setResolutionInfo(info);
+      // Also refresh the current data
+      setRefreshTrigger(prev => prev + 1);
+    } catch (err) {
+      console.warn('Failed to refresh resolution info:', err);
+    }
+  }, [dataset]);
+
   // Load Visualization Data when Dataset Changes
   useEffect(() => {
     if (!dataset) return;
@@ -220,9 +275,21 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
       try {
         setLoading(true);
         setError(null);
-        
+
+        // Clear resolution cache on dataset change
+        setResolutionDataCache(new Map());
+
         const visData = await api.getVisualizationData(dataset.path);
         setData(visData);
+
+        // Extract resolution info if available
+        if (visData.resolution_info) {
+          setResolutionInfo(visData.resolution_info);
+          setActiveResolution(visData.resolution_info.active_resolution);
+        } else {
+          setResolutionInfo(null);
+          setActiveResolution(null);
+        }
         
         // Set initial defaults
         if (visData.summary_stats.cell_types_available.length > 0) {
@@ -283,6 +350,24 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
     
     loadData();
   }, [dataset, refreshTrigger]);
+
+  // Refresh marker genes when resolution changes
+  useEffect(() => {
+    if (!dataset || activeResolution === null) return;
+
+    const fetchMarkers = async () => {
+      try {
+        // Use resolution-specific leiden column for marker genes
+        const clusterCol = `leiden_${activeResolution.toFixed(1)}`;
+        const markers = await api.getMarkerGenes(dataset.path, clusterCol, 5);
+        setMarkerGenes(markers);
+      } catch (e) {
+        console.warn("Failed to refresh marker genes for resolution", activeResolution, e);
+      }
+    };
+
+    fetchMarkers();
+  }, [dataset, activeResolution]);
 
   const handleComputeDGE = async () => {
     if (!dataset || selectedCells.length < 3) return;
@@ -548,8 +633,19 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
     if (name.includes('cellmarker')) return 'CellMarker';
     if (name.includes('panglao')) return 'PanglaoDB';
     if (name.includes('cancersea')) return 'CancerSEA';
-    // Extract from metadata if available
-    return file.name.replace(/_annotation_confidence.*/, '').split('_').pop() || 'Unknown';
+    // CellTypist files: format is {name}_celltypist_{model}_confidence_{timestamp}
+    if (name.includes('celltypist')) {
+      // Extract model name between 'celltypist_' and '_confidence'
+      const match = name.match(/celltypist_(.+?)_confidence/);
+      if (match && match[1]) {
+        // Clean up model name: replace underscores and capitalize
+        const modelName = match[1].replace(/_/g, ' ');
+        return `CellTypist (${modelName})`;
+      }
+      return 'CellTypist';
+    }
+    // Fallback: extract last part before confidence
+    return file.name.replace(/_annotation_confidence.*/, '').replace(/_confidence.*/, '').split('_').pop() || 'Unknown';
   };
 
   // Confidence Overlay Component
@@ -912,6 +1008,19 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
             </div>
         )}
 
+        {/* Resolution Explorer (for multi-resolution datasets) */}
+        {resolutionInfo && (
+            <div className="absolute top-16 left-20 z-20 w-80 pointer-events-auto">
+                <ResolutionExplorer
+                    h5adPath={dataset.path}
+                    resolutionInfo={resolutionInfo}
+                    onResolutionChange={handleResolutionChange}
+                    onAnnotationComplete={refreshResolutionInfo}
+                    disabled={loading}
+                />
+            </div>
+        )}
+
         {/* Visualization Canvas */}
         <div className="absolute inset-0 z-0">
             <UMAPPlot 
@@ -948,7 +1057,7 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
         {/* 1. Top Marker Genes (Left) */}
         {panels.markers && (
             <DraggablePanel
-                title="Top Marker Genes"
+                title={`Top Marker Genes${activeResolution !== null ? ` (res ${activeResolution.toFixed(1)})` : ''}`}
                 icon={<Dna size={16}/>}
                 style={{ left: 20, top: 100 }}
                 onClose={() => togglePanel('markers')}
@@ -1068,14 +1177,54 @@ export default function UMAPExplorer({ dataset, onBack, isSubcluster = false, on
                                 } else {
                                     setShowGeneExpression(false);
                                     setColorBy(e.target.value);
+                                    // Sync resolution if selecting a leiden_X.X column
+                                    if (e.target.value.startsWith('leiden_')) {
+                                        const res = parseFloat(e.target.value.replace('leiden_', ''));
+                                        if (!isNaN(res) && res !== activeResolution) {
+                                            handleResolutionChange(res);
+                                        }
+                                    }
                                 }
                             }}
                             options={[
                                 { label: 'Gene Expression', value: 'gene_expression' },
-                                { label: '--- Clustering ---', value: 'header-1', disabled: true },
-                                ...Object.keys(data.clusters).map(c => ({ label: `Cluster (${c})`, value: c })),
+                                // Active resolution cluster (alias)
+                                ...(data.clusters['leiden'] ? [
+                                    { label: '--- Active Clusters ---', value: 'header-active', disabled: true },
+                                    { label: `Leiden (res ${activeResolution?.toFixed(1) || '0.8'})`, value: 'leiden' }
+                                ] : []),
+                                // All resolution options
+                                { label: '--- All Resolutions ---', value: 'header-res', disabled: true },
+                                ...Object.keys(data.clusters)
+                                    .filter(c => c.startsWith('leiden_'))
+                                    .sort((a, b) => parseFloat(a.replace('leiden_', '')) - parseFloat(b.replace('leiden_', '')))
+                                    .map(c => {
+                                        const res = c.replace('leiden_', '');
+                                        return { label: `Leiden ${res}`, value: c };
+                                    }),
+                                // Other cluster columns (louvain, seurat_clusters, etc.)
+                                ...Object.keys(data.clusters)
+                                    .filter(c => c !== 'leiden' && !c.startsWith('leiden_'))
+                                    .map(c => ({ label: `Cluster (${c})`, value: c })),
+                                // Cell type annotations with resolution info
                                 { label: '--- Cell Types ---', value: 'header-2', disabled: true },
-                                ...Object.keys(data.cell_types).map(c => ({ label: `Cell Type (${c})`, value: c })),
+                                ...Object.entries(data.cell_types).map(([key, info]) => {
+                                    const res = info.resolution;
+                                    // Format annotation name nicely
+                                    let displayName = key
+                                        .replace(/_/g, ' ')
+                                        .replace(/celltypist/i, 'CellTypist')
+                                        .replace(/cellmarker/i, 'CellMarker')
+                                        .replace(/panglaodb/i, 'PanglaoDB')
+                                        .replace(/cancersea/i, 'CancerSEA');
+                                    // Capitalize first letter
+                                    displayName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+                                    const label = res !== undefined
+                                        ? `${displayName} (res ${res.toFixed(1)})`
+                                        : displayName;
+                                    return { label, value: key };
+                                }),
+                                // QC metrics
                                 { label: '--- QC Metrics ---', value: 'header-3', disabled: true },
                                 ...Object.keys(data.qc_metrics).map(c => ({ label: c, value: c })),
                             ]}

@@ -8,6 +8,8 @@ input/
 output/
 figures/
 cellranger_data/
+node_modules
+*.mod
 __pycache__/
 data/
 reference/

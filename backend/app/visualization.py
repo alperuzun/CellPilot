@@ -121,9 +121,21 @@ def to_builtin(val):
         return float(val)
     return val
 
-def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
+def normalize_resolution(res: float) -> str:
+    """Normalize resolution to consistent string format (one decimal place)."""
+    return f"{res:.1f}"
+
+def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = None) -> Dict[str, Any]:
     """
     Extract visualization data from h5ad file for interactive frontend plotting
+
+    Parameters:
+    -----------
+    h5ad_path : str
+        Path to h5ad file
+    resolution : Optional[float]
+        If provided, returns cluster data for this specific resolution.
+        The UMAP coordinates remain the same regardless of resolution.
 
     Returns:
     --------
@@ -133,9 +145,10 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
     - genes: available genes for expression overlay
     - cell_metadata: cell type annotations, QC metrics
     - summary_stats: dataset summary information
+    - resolution_info: information about available resolutions (if multi-resolution)
     """
 
-    print(f"DEBUG: Starting to load h5ad file: {h5ad_path}")
+    print(f"DEBUG: Starting to load h5ad file: {h5ad_path}, resolution: {resolution}")
 
     # Load the h5ad file
     adata = sc.read_h5ad(h5ad_path)
@@ -143,6 +156,55 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
     print(f"DEBUG: Successfully loaded h5ad file. Shape: {adata.shape}")
     print(f"DEBUG: Available obsm keys: {list(adata.obsm.keys())}")
     print(f"DEBUG: Available obs columns: {list(adata.obs.columns)}")
+
+    # ========== MULTI-RESOLUTION SUPPORT ==========
+    # Check if this is a multi-resolution dataset
+    is_multi_resolution = 'available_resolutions' in adata.uns
+
+    # Determine which resolution to use
+    active_resolution = None
+    if is_multi_resolution:
+        if resolution is not None:
+            active_resolution = resolution
+        elif 'active_resolution' in adata.uns:
+            active_resolution = adata.uns['active_resolution']
+        else:
+            # Fallback to first available resolution
+            active_resolution = adata.uns['available_resolutions'][0]
+        print(f"DEBUG: Multi-resolution dataset. Using resolution: {active_resolution}")
+
+    # Build resolution info for frontend
+    resolution_info = None
+    if is_multi_resolution:
+        # Convert numpy arrays/types to Python native types for JSON serialization
+        raw_available = adata.uns.get('available_resolutions', [])
+        available_resolutions = [float(r) for r in raw_available]
+
+        raw_annotated = adata.uns.get('annotated_resolutions', [])
+        annotated_resolutions = [float(r) for r in raw_annotated]
+
+        raw_counts = adata.uns.get('resolution_cluster_counts', {})
+        resolution_cluster_counts = {str(k): int(v) for k, v in dict(raw_counts).items()}
+
+        raw_propagated = adata.uns.get('propagated_annotations', {})
+        propagated_annotations = {str(k): (float(v) if v is not None else None) for k, v in dict(raw_propagated).items()}
+
+        resolution_details = {}
+        for res in available_resolutions:
+            res_key = normalize_resolution(res)
+            n_clusters = resolution_cluster_counts.get(res_key, 0)
+            resolution_details[res_key] = {
+                'n_clusters': int(n_clusters) if n_clusters else 0,
+                'annotated': res in annotated_resolutions,
+                'propagated_from': propagated_annotations.get(res_key, None)
+            }
+
+        resolution_info = {
+            'active_resolution': float(active_resolution) if active_resolution is not None else None,
+            'available_resolutions': available_resolutions,
+            'annotated_resolutions': annotated_resolutions,
+            'resolution_details': resolution_details
+        }
 
     # Extract embeddings (prioritize UMAP, fallback to others)
     embeddings = {}
@@ -177,16 +239,46 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
     # Extract clusters and cell types dynamically
     clusters = {}
     cell_types = {}
-    
+
     # Define known categories to help classification
     known_cluster_cols = ['leiden', 'louvain', 'cluster', 'seurat_clusters']
     known_annotation_cols = ['cellmarker', 'panglaodb', 'cancersea', 'cell_type', 'manual_annotation', 'celltype', 'annotation', 'celltypist']
-    
+
+    # ========== MULTI-RESOLUTION: Determine which columns to use ==========
+    # For multi-resolution datasets, identify the primary leiden column but include ALL leiden columns
+    primary_leiden_col = None
+    primary_annotation_cols = []
+
+    # Get annotation_resolutions mapping from adata.uns (maps annotator name to resolution)
+    annotation_resolutions = {}
+    if 'annotation_resolutions' in adata.uns:
+        raw_anno_res = adata.uns['annotation_resolutions']
+        annotation_resolutions = {str(k): float(v) for k, v in dict(raw_anno_res).items()}
+        print(f"DEBUG: Found annotation_resolutions: {annotation_resolutions}")
+
+    if is_multi_resolution and active_resolution is not None:
+        res_key = normalize_resolution(active_resolution)
+        primary_leiden_col = f"leiden_{res_key}"
+        # Look for resolution-specific annotation columns
+        for col in adata.obs.columns:
+            if col.startswith(f"annotation_leiden_{res_key}") or col.endswith(f"_leiden_{res_key}"):
+                primary_annotation_cols.append(col)
+        print(f"DEBUG: Multi-res mode - primary leiden: {primary_leiden_col}, annotations: {primary_annotation_cols}")
+
     for col in adata.obs.columns:
         # Skip QC columns
         if col in qc_metrics:
             continue
-            
+
+        # ========== MULTI-RESOLUTION: Include ALL leiden columns for Color By dropdown ==========
+        # Don't skip other resolution columns - we want to show all of them in the UI
+        # Only skip resolution-specific annotation columns for non-active resolutions
+        if is_multi_resolution:
+            # Skip annotation columns for other resolutions (keep only active resolution's annotations)
+            if 'annotation_leiden_' in col or '_leiden_' in col:
+                if col not in primary_annotation_cols and not col.startswith('leiden_'):
+                    continue
+
         # Check if categorical or low-cardinality string/int
         is_cat = False
         if hasattr(adata.obs[col], 'cat'):
@@ -194,7 +286,7 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
         elif adata.obs[col].dtype == 'object' or adata.obs[col].dtype.name == 'category':
             if adata.obs[col].nunique() < 200:
                 is_cat = True
-        
+
         if is_cat:
             try:
                 # Prepare data
@@ -204,14 +296,22 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
                     categories = adata.obs[col].cat.categories.tolist()
                 else:
                     categories = sorted(series.unique().tolist())
-                
+
                 # Create entry
                 entry = {
                     'labels': series.tolist(),
                     'categories': categories,
                     'counts': {str(k): int(v) for k, v in series.value_counts().to_dict().items()}
                 }
-                
+
+                # ========== MULTI-RESOLUTION: Map resolution-specific cols to standard names ==========
+                # For multi-resolution, expose resolution-specific leiden as "leiden" for frontend compatibility
+                if is_multi_resolution and col == primary_leiden_col:
+                    clusters['leiden'] = entry
+                    # Also keep the resolution-specific name for reference
+                    clusters[col] = entry
+                    continue
+
                 # Classify into clusters vs cell_types
                 col_lower = col.lower()
                 is_annotation = any(key in col_lower for key in known_annotation_cols)
@@ -219,12 +319,26 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
                 # If it has "manual" or "v1", treat as annotation
                 if "manual" in col_lower or "_v" in col_lower:
                     is_annotation = True
-                
+
                 if is_annotation:
+                    # Add resolution metadata if available
+                    # Check if this annotator is in annotation_resolutions mapping
+                    resolution_for_col = None
+                    for annotator_key, res_val in annotation_resolutions.items():
+                        if annotator_key in col_lower or col_lower in annotator_key:
+                            resolution_for_col = res_val
+                            break
+                    # Also check if it's the combined cell_type column (uses active resolution)
+                    if col == 'cell_type' and active_resolution is not None:
+                        resolution_for_col = float(active_resolution)
+
+                    if resolution_for_col is not None:
+                        entry['resolution'] = resolution_for_col
+
                     cell_types[col] = entry
                 else:
                     clusters[col] = entry
-                    
+
             except Exception as e:
                 print(f"DEBUG: Error processing column {col}: {e}")
 
@@ -289,13 +403,15 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
         'n_clusters': len(clusters.get('leiden', {}).get('categories', [])),
         'embeddings_available': list(embeddings.keys()),
         'cell_types_available': list(cell_types.keys()),
-        'qc_metrics_available': list(qc_metrics.keys())
+        'qc_metrics_available': list(qc_metrics.keys()),
+        'is_multi_resolution': is_multi_resolution,
+        'active_resolution': active_resolution
     }
 
     # Extract QC report data if available
     qc_report = extract_qc_report(h5ad_path, adata)
 
-    return {
+    result = {
         'embeddings': embeddings,
         'clusters': clusters,
         'cell_types': cell_types,
@@ -305,6 +421,12 @@ def extract_visualization_data(h5ad_path: str) -> Dict[str, Any]:
         'cell_ids': adata.obs.index.tolist(),
         'qc_report': qc_report
     }
+
+    # Include resolution info for multi-resolution datasets
+    if resolution_info is not None:
+        result['resolution_info'] = resolution_info
+
+    return result
 
 def get_gene_expression(h5ad_path: str, gene_names: List[str]) -> Dict[str, List[float]]:
     """

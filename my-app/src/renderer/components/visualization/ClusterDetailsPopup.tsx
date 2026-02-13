@@ -61,32 +61,30 @@ const ClusterDetailsPopup: React.FC<ClusterDetailsPopupProps> = ({
   position
 }) => {
   // Calculate cell type composition for this cluster
+  // Shows the distribution of cell types within the selected cells using the primary annotation column
   const composition = useMemo((): CellTypeComposition[] => {
     if (!data || cellIds.length === 0) return [];
 
-    // Get all cell type annotations for the selected cells
     const compositionMap: Record<string, number> = {};
 
-    // Check each cell type column
-    Object.entries(data.cell_types).forEach(([, typeData]) => {
-      cellIds.forEach((cellId) => {
-        const cellIndex = data.cell_ids.indexOf(cellId);
-        if (cellIndex !== -1) {
-          const cellType = typeData.labels[cellIndex];
-          const displayType = customLabels[cellType] || cellType;
-          compositionMap[displayType] = (compositionMap[displayType] || 0) + 1;
-        }
-      });
-    });
+    // Use only the primary cell type column (prefer 'cell_type', then first available)
+    let primaryColumn: { labels: string[] } | null = null;
+    if (data.cell_types['cell_type']) {
+      primaryColumn = data.cell_types['cell_type'];
+    } else if (Object.keys(data.cell_types).length > 0) {
+      // Use first cell_types column
+      primaryColumn = Object.values(data.cell_types)[0];
+    } else if (Object.keys(data.clusters).length > 0) {
+      // Fallback to first cluster column (e.g., leiden)
+      primaryColumn = Object.values(data.clusters)[0];
+    }
 
-    // If no cell_types, use first available column (could be leiden or annotation)
-    if (Object.keys(compositionMap).length === 0 && Object.keys(data.clusters).length > 0) {
-      const firstCluster = Object.values(data.clusters)[0];
+    if (primaryColumn) {
       cellIds.forEach((cellId) => {
         const cellIndex = data.cell_ids.indexOf(cellId);
         if (cellIndex !== -1) {
-          const label = firstCluster.labels[cellIndex];
-          const displayType = customLabels[label] || label;
+          const cellType = primaryColumn!.labels[cellIndex];
+          const displayType = customLabels[cellType] || cellType;
           compositionMap[displayType] = (compositionMap[displayType] || 0) + 1;
         }
       });

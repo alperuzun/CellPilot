@@ -7,7 +7,15 @@ import os
 # Load environment variables from .env file
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
-from .models import AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams, Response, AnalysisJobRequest, AnalysisJobResponse, JobStatusResponse, CreateLayerRequest, UpdateLayerRequest, DifferentialExpressionRequest, SubclusterRequest, MergeSubclusterRequest, ChatRequest, DotPlotRequest, DotPlotResponse
+from .models import (
+    AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams,
+    Response, AnalysisJobRequest, AnalysisJobResponse, JobStatusResponse,
+    CreateLayerRequest, UpdateLayerRequest, DifferentialExpressionRequest,
+    SubclusterRequest, MergeSubclusterRequest, ChatRequest, DotPlotRequest, DotPlotResponse,
+    ResolutionInfoResponse, ResolutionDetail, SetActiveResolutionRequest,
+    AddCustomResolutionRequest, AnnotateResolutionRequest, PropagateAnnotationsRequest,
+    PropagateAnnotationsResponse, PropagatedClusterInfo
+)
 from .tasks import spawn_process
 from .utils import summarize_h5ad
 from .analysis import run_cell_phone_db, run_inferncnv
@@ -303,8 +311,10 @@ async def get_analysis_files(h5ad_path: str):
             # Classify by content/filename patterns
             if 'dotplot' in name_lower:
                 return 'dotplot'
-            elif 'annotation_confidence' in name_lower and file_path.suffix == '.json':
-                return 'annotation_confidence' # New type
+            elif file_path.suffix == '.json' and ('annotation_confidence' in name_lower or 'celltypist' in name_lower and 'confidence' in name_lower):
+                # Matches: *_annotation_confidence_*.json (cellmarker, panglao)
+                # Matches: *_celltypist_*_confidence_*.json (celltypist)
+                return 'annotation_confidence'
             elif 'annotation_details' in name_lower:
                 return 'annotation_details'
             elif 'clusters_umap' in name_lower or 'cluster_plot' in name_lower:
@@ -464,12 +474,22 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
         if request.analysis_params.get('runAnnotation', False):
             job_manager.update_job(job_id, progress=0.3, current_step="Running cell type annotation...")
 
+            # Build preprocessing_params with clustering settings
+            preprocessing_params = {
+                'n_hvgs': request.analysis_params.get('n_hvgs', 2000),
+                'n_pcs': request.analysis_params.get('n_pcs', 50),
+                'n_neighbors': request.analysis_params.get('n_neighbors', 15),
+                'resolution': request.analysis_params.get('resolution', 0.8),
+                'enable_multi_resolution': request.analysis_params.get('enable_multi_resolution', False),
+                'resolutions': request.analysis_params.get('resolutions', None),
+            }
+
             annotation_params = AnnotationParams(
                 name=request.name,
                 input_path=processed_path,
                 dir_name=str(output_dir),
                 preprocessed=False,  # Let it run preprocessing
-                preprocessing_params={},
+                preprocessing_params=preprocessing_params,
                 use_cellmarker=request.analysis_params.get('use_cellmarker', True),
                 use_panglao=request.analysis_params.get('use_panglao', False),
                 use_cancer_single_cell_atlas=request.analysis_params.get('use_cancer_single_cell_atlas', False),
@@ -665,10 +685,14 @@ async def get_celltypist_models():
 
 # --------------------------- Visualization Endpoints ---------------------------
 @app.get("/visualization_data")
-async def get_visualization_data(h5ad_path: str):
-    """Extract visualization data from h5ad file for interactive plotting"""
+async def get_visualization_data(h5ad_path: str, resolution: float = None):
+    """Extract visualization data from h5ad file for interactive plotting.
+
+    If resolution is provided, returns cluster data for that specific resolution.
+    The UMAP coordinates remain the same regardless of resolution.
+    """
     try:
-        print(f"ENDPOINT DEBUG: Received request for h5ad_path: {h5ad_path}")
+        print(f"ENDPOINT DEBUG: Received request for h5ad_path: {h5ad_path}, resolution: {resolution}")
 
         # Validate file exists
         if not os.path.exists(h5ad_path):
@@ -676,11 +700,11 @@ async def get_visualization_data(h5ad_path: str):
             raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
 
         print(f"ENDPOINT DEBUG: File exists, starting threadpool execution...")
-        
+
         lock = await lock_manager.get_lock(h5ad_path)
         async with lock:
-            data = await run_in_threadpool(extract_visualization_data, h5ad_path)
-            
+            data = await run_in_threadpool(extract_visualization_data, h5ad_path, resolution)
+
         print(f"ENDPOINT DEBUG: Threadpool execution completed successfully")
         return data
     except Exception as e:
@@ -755,6 +779,446 @@ async def get_dot_plot(request: DotPlotRequest) -> DotPlotResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --------------------------- Multi-Resolution Clustering ---------------------------
+
+@app.get("/resolution_info")
+async def get_resolution_info(h5ad_path: str) -> ResolutionInfoResponse:
+    """
+    Get resolution metadata for a dataset.
+
+    Returns available resolutions, which are annotated, cluster counts per resolution.
+    """
+    try:
+        if not os.path.exists(h5ad_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
+
+        def _get_info():
+            import scanpy as sc
+            adata = sc.read_h5ad(h5ad_path)
+
+            # Handle legacy datasets without multi-resolution support
+            if 'available_resolutions' not in adata.uns:
+                # Single resolution mode - return just the leiden column info
+                n_clusters = adata.obs['leiden'].nunique() if 'leiden' in adata.obs.columns else 0
+                return {
+                    'active_resolution': 0.8,  # Default assumption
+                    'available_resolutions': [0.8],
+                    'annotated_resolutions': [0.8] if 'cell_type' in adata.obs.columns else [],
+                    'resolution_details': {
+                        '0.8': ResolutionDetail(
+                            n_clusters=n_clusters,
+                            annotated='cell_type' in adata.obs.columns,
+                            propagated_from=None
+                        )
+                    }
+                }
+
+            # Multi-resolution dataset - convert numpy arrays to Python types
+            active_res = float(adata.uns.get('active_resolution', 0.8))
+
+            raw_available = adata.uns.get('available_resolutions', [])
+            available_res = [float(r) for r in (list(raw_available) if hasattr(raw_available, 'tolist') else list(raw_available))]
+
+            raw_annotated = adata.uns.get('annotated_resolutions', [])
+            annotated_res = [float(r) for r in (list(raw_annotated) if hasattr(raw_annotated, 'tolist') else list(raw_annotated))]
+
+            raw_counts = adata.uns.get('resolution_cluster_counts', {})
+            cluster_counts = {str(k): int(v) for k, v in dict(raw_counts).items()}
+
+            raw_propagated = adata.uns.get('propagated_annotations', {})
+            propagated = {str(k): (float(v) if v is not None else None) for k, v in dict(raw_propagated).items()}
+
+            resolution_details = {}
+            for res in available_res:
+                res_key = f"{res:.1f}"
+                n_clusters = cluster_counts.get(res_key, 0)
+                is_annotated = res in annotated_res
+                prop_from = propagated.get(res_key)
+
+                resolution_details[res_key] = ResolutionDetail(
+                    n_clusters=n_clusters,
+                    annotated=is_annotated,
+                    propagated_from=prop_from
+                )
+
+            return {
+                'active_resolution': active_res,
+                'available_resolutions': available_res,
+                'annotated_resolutions': annotated_res,
+                'resolution_details': resolution_details
+            }
+
+        lock = await lock_manager.get_lock(h5ad_path)
+        async with lock:
+            info = await run_in_threadpool(_get_info)
+        return ResolutionInfoResponse(**info)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/set_active_resolution")
+async def set_active_resolution(request: SetActiveResolutionRequest):
+    """
+    Set the active resolution for a dataset.
+
+    This determines which clustering is used by default for downstream analyses.
+    """
+    try:
+        if not os.path.exists(request.input_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {request.input_path}")
+
+        def _set_resolution():
+            import scanpy as sc
+            adata = sc.read_h5ad(request.input_path)
+
+            # Validate resolution exists - convert numpy array to list if needed
+            raw_available = adata.uns.get('available_resolutions', [])
+            available = [float(r) for r in (list(raw_available) if hasattr(raw_available, 'tolist') else list(raw_available))]
+
+            if request.resolution not in available:
+                raise ValueError(f"Resolution {request.resolution} not in available resolutions: {available}")
+
+            # Update active resolution
+            adata.uns['active_resolution'] = request.resolution
+
+            # Also update the default 'leiden' column for backward compatibility
+            res_key = f"leiden_{request.resolution:.1f}"
+            if res_key in adata.obs.columns:
+                adata.obs['leiden'] = adata.obs[res_key].copy()
+
+            adata.write_h5ad(request.input_path)
+            return {"status": "success", "active_resolution": request.resolution}
+
+        lock = await lock_manager.get_lock(request.input_path)
+        async with lock:
+            result = await run_in_threadpool(_set_resolution)
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/add_custom_resolution")
+async def add_custom_resolution(request: AddCustomResolutionRequest):
+    """
+    Add a custom resolution to the dataset.
+
+    Runs Leiden clustering at the specified resolution and adds it to available resolutions.
+    This is fast (seconds) since it's just one Leiden call.
+    """
+    try:
+        if not os.path.exists(request.input_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {request.input_path}")
+
+        def _add_resolution():
+            import scanpy as sc
+            adata = sc.read_h5ad(request.input_path)
+
+            # Validate resolution
+            if request.resolution <= 0:
+                raise ValueError("Resolution must be positive")
+
+            res_key = f"{request.resolution:.1f}"
+            leiden_key = f"leiden_{res_key}"
+
+            # Check if already exists - convert numpy array to list if needed
+            raw_available = adata.uns.get('available_resolutions', [])
+            available = list(raw_available) if hasattr(raw_available, 'tolist') else list(raw_available)
+            available = [float(r) for r in available]  # Ensure Python floats
+
+            if request.resolution in available:
+                raise ValueError(f"Resolution {request.resolution} already exists")
+
+            # Run Leiden clustering
+            print(f"Computing Leiden clustering at resolution {request.resolution}...")
+            sc.tl.leiden(adata, resolution=request.resolution, key_added=leiden_key)
+            n_clusters = int(adata.obs[leiden_key].nunique())
+
+            # Update metadata
+            available.append(float(request.resolution))
+            available = sorted(available)
+            adata.uns['available_resolutions'] = available
+
+            if 'resolution_cluster_counts' not in adata.uns:
+                adata.uns['resolution_cluster_counts'] = {}
+            adata.uns['resolution_cluster_counts'][res_key] = n_clusters
+
+            adata.write_h5ad(request.input_path)
+
+            return {
+                "status": "success",
+                "resolution": request.resolution,
+                "n_clusters": n_clusters,
+                "available_resolutions": available
+            }
+
+        lock = await lock_manager.get_lock(request.input_path)
+        async with lock:
+            result = await run_in_threadpool(_add_resolution)
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/propagate_annotations")
+async def propagate_annotations(request: PropagateAnnotationsRequest) -> PropagateAnnotationsResponse:
+    """
+    Propagate annotations from one resolution to another using majority voting.
+
+    For each cluster at the target resolution, assigns the label that the majority
+    of its cells carry from the source resolution. Flags ambiguous clusters.
+    """
+    try:
+        if not os.path.exists(request.input_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {request.input_path}")
+
+        def _propagate():
+            import scanpy as sc
+            import pandas as pd
+            adata = sc.read_h5ad(request.input_path)
+
+            # Validate resolutions - convert numpy arrays to lists if needed
+            raw_available = adata.uns.get('available_resolutions', [])
+            available = [float(r) for r in (list(raw_available) if hasattr(raw_available, 'tolist') else list(raw_available))]
+
+            raw_annotated = adata.uns.get('annotated_resolutions', [])
+            annotated = [float(r) for r in (list(raw_annotated) if hasattr(raw_annotated, 'tolist') else list(raw_annotated))]
+
+            if request.source_resolution not in available:
+                raise ValueError(f"Source resolution {request.source_resolution} not available")
+            if request.target_resolution not in available:
+                raise ValueError(f"Target resolution {request.target_resolution} not available")
+            if request.source_resolution not in annotated:
+                raise ValueError(f"Source resolution {request.source_resolution} is not annotated")
+
+            source_res_key = f"{request.source_resolution:.1f}"
+            target_res_key = f"{request.target_resolution:.1f}"
+
+            source_anno_col = f"annotation_leiden_{source_res_key}"
+            target_leiden_col = f"leiden_{target_res_key}"
+            target_anno_col = f"annotation_leiden_{target_res_key}"
+
+            if source_anno_col not in adata.obs.columns:
+                raise ValueError(f"Source annotation column {source_anno_col} not found")
+            if target_leiden_col not in adata.obs.columns:
+                raise ValueError(f"Target Leiden column {target_leiden_col} not found")
+
+            # Get source annotations and target clusters
+            source_labels = adata.obs[source_anno_col].astype(str)
+            target_clusters = adata.obs[target_leiden_col].astype(str)
+
+            # Compute majority vote for each target cluster
+            cluster_results = []
+            propagated_labels = pd.Series(index=adata.obs.index, dtype=str)
+            ambiguous_count = 0
+
+            for cluster in sorted(target_clusters.unique(), key=lambda x: int(x) if x.isdigit() else x):
+                mask = target_clusters == cluster
+                cluster_source_labels = source_labels[mask]
+
+                # Count votes
+                vote_counts = cluster_source_labels.value_counts()
+                total_cells = len(cluster_source_labels)
+
+                if total_cells == 0:
+                    continue
+
+                # Calculate percentages
+                vote_breakdown = {label: round(count / total_cells * 100, 1) for label, count in vote_counts.items()}
+
+                # Determine winner and confidence
+                top_label = vote_counts.index[0]
+                top_pct = vote_counts.iloc[0] / total_cells * 100
+
+                if len(vote_counts) > 1:
+                    runner_up_pct = vote_counts.iloc[1] / total_cells * 100
+                    diff = top_pct - runner_up_pct
+                else:
+                    diff = 100.0
+
+                # Confidence logic
+                if top_pct >= 80:
+                    confidence = "High"
+                elif diff >= 20:
+                    confidence = "Medium"
+                else:
+                    confidence = "Ambiguous"
+                    ambiguous_count += 1
+
+                # Assign label
+                propagated_labels[mask] = top_label
+
+                cluster_results.append(PropagatedClusterInfo(
+                    cluster_id=str(cluster),
+                    assigned_label=top_label,
+                    confidence=confidence,
+                    vote_breakdown=vote_breakdown
+                ))
+
+            # Store propagated annotations
+            adata.obs[target_anno_col] = propagated_labels.astype('category')
+
+            # Track that this was propagated
+            if 'propagated_annotations' not in adata.uns:
+                adata.uns['propagated_annotations'] = {}
+            adata.uns['propagated_annotations'][target_res_key] = request.source_resolution
+
+            # Mark as annotated (propagated counts as annotated)
+            if 'annotated_resolutions' not in adata.uns:
+                adata.uns['annotated_resolutions'] = []
+            if request.target_resolution not in adata.uns['annotated_resolutions']:
+                adata.uns['annotated_resolutions'].append(request.target_resolution)
+
+            adata.write_h5ad(request.input_path)
+
+            return {
+                "status": "success",
+                "source_resolution": request.source_resolution,
+                "target_resolution": request.target_resolution,
+                "clusters": cluster_results,
+                "ambiguous_count": ambiguous_count
+            }
+
+        lock = await lock_manager.get_lock(request.input_path)
+        async with lock:
+            result = await run_in_threadpool(_propagate)
+        return PropagateAnnotationsResponse(**result)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/annotate_resolution")
+async def annotate_resolution(request: AnnotateResolutionRequest, background_tasks: BackgroundTasks):
+    """
+    Run annotation pipeline for a specific resolution.
+
+    This is a background job since annotation can take time.
+    """
+    try:
+        if not os.path.exists(request.input_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {request.input_path}")
+
+        job_id = job_manager.create_job(f"annotate_res_{request.resolution}")
+
+        async def run_annotation_task(jid, req):
+            try:
+                from .annotate import (
+                    annotate_with_scsa, annotate_with_celltypist,
+                    annotate_with_manual_markers, load_manual_markers, normalize_resolution
+                )
+                import scanpy as sc
+
+                job_manager.start_job(jid)
+                job_manager.update_job(jid, progress=0.1, current_step="Loading dataset...")
+
+                adata = sc.read_h5ad(req.input_path)
+
+                # Validate resolution
+                available = adata.uns.get('available_resolutions', [])
+                if req.resolution not in available:
+                    raise ValueError(f"Resolution {req.resolution} not available")
+
+                res_key = normalize_resolution(req.resolution)
+                leiden_col = f"leiden_{res_key}"
+
+                if leiden_col not in adata.obs.columns:
+                    raise ValueError(f"Leiden column {leiden_col} not found")
+
+                # Temporarily set this resolution as the clustering to use
+                original_leiden = adata.obs.get('leiden', None)
+                adata.obs['leiden'] = adata.obs[leiden_col].copy()
+
+                # Get output directory from input path
+                output_dir = os.path.dirname(req.input_path)
+                name = os.path.basename(req.input_path).replace('.h5ad', '')
+                data = {'figs': [], 'files': []}
+
+                used_annotators = []
+
+                # Run annotation methods
+                if req.use_cellmarker:
+                    job_manager.update_job(jid, progress=0.3, current_step="Running CellMarker annotation...")
+                    adata = annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarker', name=name, data=data)
+                    used_annotators.append('cellmarker')
+
+                if req.use_panglao:
+                    job_manager.update_job(jid, progress=0.5, current_step="Running PanglaoDB annotation...")
+                    adata = annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='panglaodb', name=name, data=data)
+                    used_annotators.append('panglaodb')
+
+                if req.use_cancer_single_cell_atlas:
+                    job_manager.update_job(jid, progress=0.6, current_step="Running CancerSEA annotation...")
+                    adata = annotate_with_scsa(adata, output_dir, cell_type='cancer', db_type='cancersea', name=name, data=data)
+                    used_annotators.append('cancersea')
+
+                if req.use_celltypist and req.celltypist_models:
+                    job_manager.update_job(jid, progress=0.7, current_step="Running CellTypist annotation...")
+                    for model_name in req.celltypist_models:
+                        adata = annotate_with_celltypist(adata, output_dir, model_name=model_name, name=name, data=data)
+                    if 'celltypist_prediction' in adata.obs.columns:
+                        used_annotators.append('celltypist_prediction')
+
+                if req.use_manual_annotation and (req.manual_marker_file or req.manual_marker_text):
+                    job_manager.update_job(jid, progress=0.8, current_step="Running manual annotation...")
+                    manual_markers = load_manual_markers(marker_file_path=req.manual_marker_file, marker_text=req.manual_marker_text)
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+                    adata = annotate_with_manual_markers(adata, manual_markers, output_dir, name, timestamp, data=data)
+                    used_annotators.append('manual_annotation')
+
+                job_manager.update_job(jid, progress=0.9, current_step="Saving results...")
+
+                # Set cell_type from first annotator
+                for annotator in used_annotators:
+                    if annotator in adata.obs.columns:
+                        adata.obs['cell_type'] = adata.obs[annotator]
+                        break
+
+                # Store in resolution-specific column
+                if 'cell_type' in adata.obs.columns:
+                    adata.obs[f'annotation_leiden_{res_key}'] = adata.obs['cell_type'].copy()
+
+                # Mark resolution as annotated
+                if 'annotated_resolutions' not in adata.uns:
+                    adata.uns['annotated_resolutions'] = []
+                if req.resolution not in adata.uns['annotated_resolutions']:
+                    adata.uns['annotated_resolutions'].append(req.resolution)
+
+                # Remove from propagated if it was there
+                if 'propagated_annotations' in adata.uns and res_key in adata.uns['propagated_annotations']:
+                    del adata.uns['propagated_annotations'][res_key]
+
+                # Restore original leiden if it existed
+                if original_leiden is not None:
+                    adata.obs['leiden'] = original_leiden
+
+                adata.write_h5ad(req.input_path)
+
+                job_manager.complete_job(jid, {
+                    "resolution": req.resolution,
+                    "annotators_used": used_annotators
+                })
+
+            except Exception as e:
+                print(f"Annotation job failed: {e}")
+                job_manager.fail_job(jid, str(e))
+
+        background_tasks.add_task(run_annotation_task, job_id, request)
+
+        return AnalysisJobResponse(
+            job_id=job_id,
+            status="pending",
+            message=f"Annotation job started for resolution {request.resolution}"
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/available_datasets")
 async def get_available_datasets():
     """Get list of available analysis output directories for visualization"""
@@ -775,7 +1239,7 @@ async def get_available_datasets():
             elif dir_name.startswith('infercnv_'):
                 return 'infercnv'
             else:
-                return None
+                return 'unknown'  # Still include but mark as unknown type
 
         if output_dir.exists():
             for analysis_dir in output_dir.iterdir():
@@ -789,14 +1253,10 @@ async def get_available_datasets():
 
                 analysis_type = detect_analysis_type(analysis_dir.name)
 
-                # Skip directories without our prefixes
-                if analysis_type is None:
-                    continue
-
-                # For annotation and cellphonedb, look for h5ad file
+                # For annotation, cellphonedb, and unknown types, look for h5ad file
                 # For infercnv, use the directory itself since it may not have h5ad
                 h5ad_path = None
-                if analysis_type in ['annotation', 'cellphonedb']:
+                if analysis_type in ['annotation', 'cellphonedb', 'unknown']:
                     # Find h5ad file in directory
                     h5ad_files = list(analysis_dir.glob("*.h5ad"))
                     # Filter out temp files
@@ -812,8 +1272,8 @@ async def get_available_datasets():
                     # InferCNV doesn't output h5ad files, use directory path for PNG visualizations
                     h5ad_path = str(analysis_dir.absolute())
 
-                # Skip if we couldn't find a valid path (only for annotation/cellphonedb)
-                if not h5ad_path and analysis_type in ['annotation', 'cellphonedb']:
+                # Skip if we couldn't find a valid h5ad path for types that need it
+                if not h5ad_path and analysis_type in ['annotation', 'cellphonedb', 'unknown']:
                     continue
 
                 stat = analysis_dir.stat()

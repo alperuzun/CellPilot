@@ -146,6 +146,7 @@ export interface VisualizationData {
       labels: string[];
       categories: string[];
       counts: { [key: string]: number };
+      resolution?: number;  // Which clustering resolution this annotation was computed at
     };
   };
   qc_metrics: {
@@ -159,6 +160,8 @@ export interface VisualizationData {
     embeddings_available: string[];
     cell_types_available: string[];
     qc_metrics_available: string[];
+    is_multi_resolution?: boolean;
+    active_resolution?: number | null;
   };
   cell_ids: string[];
   qc_report?: {
@@ -185,6 +188,7 @@ export interface VisualizationData {
     text_report?: string;
     report_path?: string;
   };
+  resolution_info?: ResolutionInfo;
 }
 
 export interface GeneExpressionData {
@@ -378,6 +382,65 @@ export interface MergeSubclusterRequest {
   target_layer: string;
 }
 
+// ========== MULTI-RESOLUTION CLUSTERING TYPES ==========
+
+export interface ResolutionDetail {
+  n_clusters: number;
+  annotated: boolean;
+  propagated_from?: number | null;
+}
+
+export interface ResolutionInfo {
+  active_resolution: number;
+  available_resolutions: number[];
+  annotated_resolutions: number[];
+  resolution_details: { [resolution: string]: ResolutionDetail };
+}
+
+export interface SetActiveResolutionRequest {
+  input_path: string;
+  resolution: number;
+}
+
+export interface AddCustomResolutionRequest {
+  input_path: string;
+  resolution: number;
+}
+
+export interface AnnotateResolutionRequest {
+  input_path: string;
+  resolution: number;
+  use_cellmarker?: boolean;
+  use_panglao?: boolean;
+  use_cancer_single_cell_atlas?: boolean;
+  use_celltypist?: boolean;
+  celltypist_models?: string[];
+  use_manual_annotation?: boolean;
+  manual_marker_file?: string | null;
+  manual_marker_text?: string | null;
+}
+
+export interface PropagateAnnotationsRequest {
+  input_path: string;
+  source_resolution: number;
+  target_resolution: number;
+}
+
+export interface PropagatedClusterInfo {
+  cluster_id: string;
+  assigned_label: string;
+  confidence: 'High' | 'Medium' | 'Ambiguous';
+  vote_breakdown: { [label: string]: number };
+}
+
+export interface PropagateAnnotationsResponse {
+  status: string;
+  source_resolution: number;
+  target_resolution: number;
+  clusters: PropagatedClusterInfo[];
+  ambiguous_count: number;
+}
+
 class APIError extends Error {
   constructor(message: string, public status?: number) {
     super(message);
@@ -512,8 +575,12 @@ export const api = {
   },
 
   // Visualization endpoints
-  async getVisualizationData(h5adPath: string): Promise<VisualizationData> {
-    return apiRequest(`/visualization_data?h5ad_path=${encodeURIComponent(h5adPath)}`);
+  async getVisualizationData(h5adPath: string, resolution?: number): Promise<VisualizationData> {
+    let url = `/visualization_data?h5ad_path=${encodeURIComponent(h5adPath)}`;
+    if (resolution !== undefined) {
+      url += `&resolution=${resolution}`;
+    }
+    return apiRequest(url);
   },
 
   async getGeneExpression(h5adPath: string, geneNames: string[]): Promise<GeneExpressionData> {
@@ -613,6 +680,40 @@ export const api = {
     return apiRequest('/chat', {
       method: 'POST',
       body: JSON.stringify(request),
+    });
+  },
+
+  // ========== MULTI-RESOLUTION CLUSTERING ENDPOINTS ==========
+
+  async getResolutionInfo(h5adPath: string): Promise<ResolutionInfo> {
+    return apiRequest(`/resolution_info?h5ad_path=${encodeURIComponent(h5adPath)}`);
+  },
+
+  async setActiveResolution(params: SetActiveResolutionRequest): Promise<{ status: string; active_resolution: number }> {
+    return apiRequest('/set_active_resolution', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async addCustomResolution(params: AddCustomResolutionRequest): Promise<{ status: string; resolution: number; n_clusters: number }> {
+    return apiRequest('/add_custom_resolution', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async propagateAnnotations(params: PropagateAnnotationsRequest): Promise<PropagateAnnotationsResponse> {
+    return apiRequest('/propagate_annotations', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  },
+
+  async annotateResolution(params: AnnotateResolutionRequest): Promise<{ job_id: string; status: string; message: string }> {
+    return apiRequest('/annotate_resolution', {
+      method: 'POST',
+      body: JSON.stringify(params),
     });
   },
 };

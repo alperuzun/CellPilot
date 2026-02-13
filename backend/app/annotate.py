@@ -32,6 +32,13 @@ def default_params():
         'resolution': 0.8
     }
 
+# Preset resolutions for multi-resolution clustering
+PRESET_RESOLUTIONS = [0.3, 0.5, 0.8, 1.0, 1.5, 2.0]
+
+def normalize_resolution(res: float) -> str:
+    """Normalize resolution to consistent string format (one decimal place)."""
+    return f"{res:.1f}"
+
 def analyze_qc_metrics(adata, params, output_dir, name, timestamp):
     """
     Analyze QC metrics before filtering to understand cell quality distribution.
@@ -286,11 +293,63 @@ def run_preprocessing(adata, output_dir, params, timestamp, name, data={}):
     print("Performing PCA...")
     ov.pp.pca(adata, layer='scaled', n_pcs=final_params['n_pcs'])
     print("Building neighborhood graph...")
-    sc.pp.neighbors(adata, n_neighbors=final_params['n_neighbors'], 
+    sc.pp.neighbors(adata, n_neighbors=final_params['n_neighbors'],
                    n_pcs=final_params['n_pcs'],
                    use_rep='scaled|original|X_pca')
-    print("Performing clustering...")
-    sc.tl.leiden(adata, resolution=final_params['resolution'])
+
+    # ========== MULTI-RESOLUTION CLUSTERING ==========
+    print("\n" + "="*60)
+    print("🔬 Multi-Resolution Leiden Clustering")
+    print("="*60)
+
+    # Build the set of resolutions to compute
+    user_resolution = final_params['resolution']
+    enable_multi_resolution = final_params.get('enable_multi_resolution', True)
+    custom_resolutions = final_params.get('resolutions', None)
+
+    if enable_multi_resolution:
+        # Multi-resolution mode: use custom resolutions if provided, else use presets
+        if custom_resolutions:
+            resolutions_to_compute = set(custom_resolutions)
+        else:
+            resolutions_to_compute = set(PRESET_RESOLUTIONS)
+        # Always include user's primary choice
+        resolutions_to_compute.add(user_resolution)
+    else:
+        # Single resolution mode: only compute the user's selected resolution
+        resolutions_to_compute = {user_resolution}
+
+    resolutions_to_compute = sorted(list(resolutions_to_compute))
+
+    resolution_cluster_counts = {}
+
+    print(f"   User's selected resolution: {user_resolution}")
+    print(f"   Multi-resolution mode: {'Enabled' if enable_multi_resolution else 'Disabled'}")
+    print(f"   Computing {len(resolutions_to_compute)} resolution(s): {resolutions_to_compute}")
+
+    for res in resolutions_to_compute:
+        res_key = f"leiden_{normalize_resolution(res)}"
+        print(f"   Clustering at resolution {res}...", end=" ")
+        sc.tl.leiden(adata, resolution=res, key_added=res_key)
+        n_clusters = adata.obs[res_key].nunique()
+        resolution_cluster_counts[normalize_resolution(res)] = n_clusters
+        print(f"→ {n_clusters} clusters")
+
+    # Also store in the default 'leiden' column for backward compatibility
+    primary_res_key = f"leiden_{normalize_resolution(user_resolution)}"
+    adata.obs['leiden'] = adata.obs[primary_res_key].copy()
+
+    # Store resolution metadata in adata.uns
+    adata.uns['active_resolution'] = user_resolution
+    adata.uns['available_resolutions'] = resolutions_to_compute
+    adata.uns['annotated_resolutions'] = []  # Will be populated during annotation
+    adata.uns['resolution_cluster_counts'] = resolution_cluster_counts
+    adata.uns['propagated_annotations'] = {}  # Track which annotations were propagated
+
+    print(f"\n   ✓ Active resolution set to: {user_resolution}")
+    print(f"   ✓ Resolution metadata stored in adata.uns")
+    print("="*60 + "\n")
+
     print("Generating visualization coordinates...")
     adata.obsm["X_mde"] = ov.utils.mde(adata.obsm["scaled|original|X_pca"])
     print("Generating UMAP...")
@@ -442,6 +501,30 @@ def annotate(
     for annotator in used_annotators:
         adata.obs['cell_type'] = adata.obs[annotator]
         break
+
+    # Track which resolution was annotated
+    if 'active_resolution' in adata.uns:
+        active_res = adata.uns['active_resolution']
+        res_key = normalize_resolution(active_res)
+
+        # Store annotation in resolution-specific column
+        if 'cell_type' in adata.obs.columns:
+            adata.obs[f'annotation_leiden_{res_key}'] = adata.obs['cell_type'].copy()
+
+        # Mark this resolution as annotated
+        if 'annotated_resolutions' not in adata.uns:
+            adata.uns['annotated_resolutions'] = []
+        if active_res not in adata.uns['annotated_resolutions']:
+            adata.uns['annotated_resolutions'].append(active_res)
+
+        # Track which annotators were used at which resolution
+        # This allows the frontend to show "(res 0.8)" next to annotation labels
+        if 'annotation_resolutions' not in adata.uns:
+            adata.uns['annotation_resolutions'] = {}
+        for annotator in used_annotators:
+            adata.uns['annotation_resolutions'][annotator] = active_res
+
+        print(f"   ✓ Stored annotation for resolution {active_res} in 'annotation_leiden_{res_key}'")
 
     # fig, ax = ov.utils.embedding(adata,
     #                basis='X_mde',
@@ -759,6 +842,12 @@ def annotate_with_manual_markers(adata, marker_dict, output_dir, name, timestamp
     Annotate cells using custom marker genes.
     """
     print("Running manual annotation with custom marker genes...")
+
+    # Ensure data dict has required keys
+    if 'files' not in data:
+        data['files'] = []
+    if 'figs' not in data:
+        data['figs'] = []
     
     # Calculate marker gene scores for each cell type
     import scanpy as sc

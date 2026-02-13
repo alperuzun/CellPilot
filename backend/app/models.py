@@ -175,3 +175,54 @@ class DotPlotResponse(BaseModel):
     percent_expressing: List[List[float]]  # clusters x genes matrix
     mean_expression: List[List[float]]      # clusters x genes matrix
     cell_counts: List[int]
+
+# ========== Multi-Resolution Clustering Models ==========
+
+class ResolutionDetail(BaseModel):
+    n_clusters: int
+    annotated: bool
+    propagated_from: Optional[float] = None  # If annotation was propagated from another resolution
+
+class ResolutionInfoResponse(BaseModel):
+    active_resolution: float
+    available_resolutions: List[float]
+    annotated_resolutions: List[float]
+    resolution_details: Dict[str, ResolutionDetail]
+
+class SetActiveResolutionRequest(BaseModel):
+    input_path: str
+    resolution: float
+
+class AddCustomResolutionRequest(BaseModel):
+    input_path: str
+    resolution: float
+
+class AnnotateResolutionRequest(BaseModel):
+    input_path: str
+    resolution: float
+    use_cellmarker: bool = True
+    use_panglao: bool = False
+    use_cancer_single_cell_atlas: bool = False
+    use_celltypist: bool = False
+    celltypist_models: Optional[List[str]] = None
+    use_manual_annotation: bool = False
+    manual_marker_file: Optional[str] = None
+    manual_marker_text: Optional[str] = None
+
+class PropagateAnnotationsRequest(BaseModel):
+    input_path: str
+    source_resolution: float
+    target_resolution: float
+
+class PropagatedClusterInfo(BaseModel):
+    cluster_id: str
+    assigned_label: str
+    confidence: str  # "High", "Medium", "Ambiguous"
+    vote_breakdown: Dict[str, float]  # label -> percentage
+
+class PropagateAnnotationsResponse(BaseModel):
+    status: str
+    source_resolution: float
+    target_resolution: float
+    clusters: List[PropagatedClusterInfo]
+    ambiguous_count: int

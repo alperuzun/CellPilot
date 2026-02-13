@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UploadData } from './Step1UploadDefine';
-import { api, APIError, JobStatusResponse } from '../../services/api';
+import { api, APIError } from '../../services/api';
 import ManualAnnotationConfig from '../../components/ManualAnnotationConfig';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { ChevronRight, ChevronLeft, Check, Beaker, Layers, Tag, Play, AlertCircle } from 'lucide-react';
@@ -45,6 +45,10 @@ export interface AnalysisData {
   numNeighbors: number;
   resolution: number;
   clusteringMethod: string;
+
+  // Multi-resolution clustering
+  enableMultiResolution: boolean;
+  resolutions: number[];  // Array of resolutions to compute
 
   // Annotation Options
   runAnnotation: boolean;
@@ -113,6 +117,8 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     numNeighbors: analysisData?.numNeighbors || 15,
     resolution: analysisData?.resolution || 0.8,
     clusteringMethod: analysisData?.clusteringMethod || 'leiden',
+    enableMultiResolution: analysisData?.enableMultiResolution ?? false,
+    resolutions: analysisData?.resolutions || [0.3, 0.5, 0.8, 1.0, 1.5, 2.0],
     runAnnotation: analysisData?.runAnnotation ?? true,
     useCellmarker: analysisData?.useCellmarker ?? true,
     usePanglao: analysisData?.usePanglao ?? false,
@@ -133,7 +139,7 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
   const [currentStep, setCurrentStep] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
+  const [completedDatasetPath, setCompletedDatasetPath] = useState<string | null>(null);
 
   // Poll job status
   useEffect(() => {
@@ -142,47 +148,40 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     const pollInterval = setInterval(async () => {
       try {
         const status = await api.getJobStatus(jobId);
-        setJobStatus(status);
         setProgress(status.progress * 100);
         setCurrentStep(status.current_step);
 
         if (status.status === 'completed') {
+          let datasetPath = '';
           try {
             const datasetsResponse = await api.getAvailableDatasets();
             const annotationDatasets = datasetsResponse.datasets
               .filter(d => d.analysis_type === 'annotation')
               .sort((a, b) => b.date.localeCompare(a.date));
-            const realDatasetPath = annotationDatasets.length > 0 ? annotationDatasets[0].path : '';
-
-            const completedAnalysis: AnalysisData = {
-              ...config,
-              analysisId: jobId,
-              status: 'completed',
-              progress: 100,
-              currentStep: 'Analysis Complete!',
-              annotatedDatasetPath: realDatasetPath
-            };
-            onComplete(completedAnalysis);
-            setRunning(false);
-            clearInterval(pollInterval);
+            datasetPath = annotationDatasets.length > 0 ? annotationDatasets[0].path : '';
           } catch (error) {
             console.error('[Step3] Error fetching datasets:', error);
-            let annotatedDatasetPath = '';
             if (status.result?.annotation?.[0]?.data?.adata_output_file) {
-              annotatedDatasetPath = status.result.annotation[0].data.adata_output_file;
+              datasetPath = status.result.annotation[0].data.adata_output_file;
             }
-            const completedAnalysis: AnalysisData = {
-              ...config,
-              analysisId: jobId,
-              status: 'completed',
-              progress: 100,
-              currentStep: 'Analysis Complete!',
-              annotatedDatasetPath
-            };
-            onComplete(completedAnalysis);
-            setRunning(false);
-            clearInterval(pollInterval);
           }
+
+          // Store the completed dataset path for the UI button
+          setCompletedDatasetPath(datasetPath);
+          setCurrentStep('Analysis Complete!');
+          setProgress(100);
+
+          const completedAnalysis: AnalysisData = {
+            ...config,
+            analysisId: jobId,
+            status: 'completed',
+            progress: 100,
+            currentStep: 'Analysis Complete!',
+            annotatedDatasetPath: datasetPath
+          };
+          onComplete(completedAnalysis);
+          setRunning(false);
+          clearInterval(pollInterval);
         } else if (status.status === 'failed') {
           setCurrentStep(`Analysis failed: ${status.message || 'Unknown error'}`);
           setConfig(prev => ({ ...prev, status: 'failed' }));
@@ -276,6 +275,8 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
           n_pcs: config.numPCs,
           n_neighbors: config.numNeighbors,
           resolution: config.resolution,
+          enable_multi_resolution: config.enableMultiResolution,
+          resolutions: config.enableMultiResolution ? config.resolutions : [config.resolution],
           normalizationMethod: config.normalizationMethod,
           scaleFactor: config.scaleFactor,
           logTransform: config.logTransform,
@@ -301,32 +302,59 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     }
   };
 
-  // Running state UI
-  if (running) {
+  // Running or Completed state UI
+  if (running || completedDatasetPath) {
+    const isCompleted = !!completedDatasetPath;
     return (
       <div className="flex h-screen bg-gray-50">
         <div className="flex-1 flex items-center justify-center">
           <div className="max-w-md w-full">
             <div className="bg-white rounded-lg shadow-lg p-8">
-              <h1 className="text-2xl font-bold text-gray-900 mb-6">Running Analysis</h1>
-              <div className="flex items-center mb-4">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
-                <h2 className="text-lg font-medium text-gray-900">Analyzing "{uploadData.datasetName}"</h2>
-              </div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-6">
+                {isCompleted ? 'Analysis Complete!' : 'Running Analysis'}
+              </h1>
+
+              {!isCompleted && (
+                <div className="flex items-center mb-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
+                  <h2 className="text-lg font-medium text-gray-900">Analyzing "{uploadData.datasetName}"</h2>
+                </div>
+              )}
+
+              {isCompleted && (
+                <div className="flex items-center mb-4">
+                  <div className="rounded-full h-6 w-6 bg-green-500 flex items-center justify-center mr-3">
+                    <Check size={16} className="text-white" />
+                  </div>
+                  <h2 className="text-lg font-medium text-gray-900">"{uploadData.datasetName}" ready</h2>
+                </div>
+              )}
+
               <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
-                <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+                <div
+                  className={`h-2 rounded-full transition-all duration-300 ${isCompleted ? 'bg-green-500' : 'bg-blue-600'}`}
+                  style={{ width: `${progress}%` }}
+                ></div>
               </div>
+
               <p className="text-gray-600 mb-6">{currentStep}</p>
-              {jobStatus?.status === 'completed' && jobStatus.result?.annotation?.[0]?.data?.adata_output_file && (
+
+              {isCompleted && completedDatasetPath && (
                 <button
                   onClick={() => {
-                    const datasetPath = jobStatus.result.annotation[0].data.adata_output_file;
-                    window.dispatchEvent(new CustomEvent('switchToVisualizations', { detail: { datasetPath } }));
+                    window.dispatchEvent(new CustomEvent('switchToVisualizations', { detail: { datasetPath: completedDatasetPath } }));
                   }}
-                  className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg"
+                  className="w-full px-4 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors"
                 >
-                  Analysis Complete - View Visualizations
+                  <Play size={20} />
+                  View Visualizations
                 </button>
+              )}
+
+              {isCompleted && !completedDatasetPath && (
+                <p className="text-amber-600 text-sm">
+                  Analysis completed but output path not found. Please check the Visualizations tab manually.
+                </p>
               )}
             </div>
           </div>
@@ -571,6 +599,101 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
             <span>~5-10 clusters</span>
             <span>~20-40 clusters</span>
           </div>
+        </div>
+
+        <hr className="border-gray-200" />
+
+        {/* Multi-Resolution Clustering */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Multi-Resolution Clustering</h3>
+              <p className="text-xs text-gray-500">Compute clusters at multiple resolutions for comparison</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config.enableMultiResolution}
+                onChange={(e) => updateConfig({ enableMultiResolution: e.target.checked })}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          {config.enableMultiResolution && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-lg space-y-4">
+              <p className="text-xs font-medium text-gray-700">Select resolutions to compute:</p>
+              <div className="flex flex-wrap gap-2">
+                {[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0].map((res) => {
+                  const isSelected = config.resolutions.includes(res);
+                  return (
+                    <button
+                      key={res}
+                      onClick={() => {
+                        const newResolutions = isSelected
+                          ? config.resolutions.filter(r => r !== res)
+                          : [...config.resolutions, res].sort((a, b) => a - b);
+                        updateConfig({ resolutions: newResolutions });
+                      }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-all ${
+                        isSelected
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white border border-gray-300 text-gray-700 hover:border-blue-400'
+                      }`}
+                    >
+                      {res.toFixed(1)}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Custom resolution input */}
+              <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
+                <span className="text-xs text-gray-500">Custom:</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="5.0"
+                  placeholder="e.g. 2.5"
+                  className="w-20 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const input = e.target as HTMLInputElement;
+                      const val = parseFloat(input.value);
+                      if (!isNaN(val) && val >= 0.1 && val <= 5.0 && !config.resolutions.includes(val)) {
+                        updateConfig({ resolutions: [...config.resolutions, val].sort((a, b) => a - b) });
+                        input.value = '';
+                      }
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    const input = document.querySelector('input[placeholder="e.g. 2.5"]') as HTMLInputElement;
+                    if (input) {
+                      const val = parseFloat(input.value);
+                      if (!isNaN(val) && val >= 0.1 && val <= 5.0 && !config.resolutions.includes(val)) {
+                        updateConfig({ resolutions: [...config.resolutions, val].sort((a, b) => a - b) });
+                        input.value = '';
+                      }
+                    }
+                  }}
+                  className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                >
+                  Add
+                </button>
+              </div>
+
+              {config.resolutions.length > 0 && (
+                <div className="text-xs text-gray-600">
+                  <span className="font-medium">{config.resolutions.length} resolution(s) selected:</span>{' '}
+                  {config.resolutions.map(r => r.toFixed(1)).join(', ')}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <hr className="border-gray-200" />
@@ -858,14 +981,23 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
               <p className="font-medium text-gray-900 capitalize">{config.clusteringMethod}</p>
             </div>
             <div>
-              <p className="text-gray-500">Resolution</p>
-              <p className="font-medium text-gray-900">{config.resolution}</p>
+              <p className="text-gray-500">{config.enableMultiResolution ? 'Resolutions' : 'Resolution'}</p>
+              <p className="font-medium text-gray-900">
+                {config.enableMultiResolution
+                  ? config.resolutions.map(r => r.toFixed(1)).join(', ')
+                  : config.resolution}
+              </p>
             </div>
             <div>
               <p className="text-gray-500">HVGs / PCs</p>
               <p className="font-medium text-gray-900">{config.numHVGs} / {config.numPCs}</p>
             </div>
           </div>
+          {config.enableMultiResolution && (
+            <div className="mt-2 text-xs text-blue-600">
+              Multi-resolution enabled: {config.resolutions.length} resolution(s)
+            </div>
+          )}
         </div>
 
         {/* Annotation Summary */}
