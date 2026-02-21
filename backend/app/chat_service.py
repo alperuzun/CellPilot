@@ -4,7 +4,6 @@ import scanpy as sc
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Any, Optional
-from openai import OpenAI
 
 # In-memory cache for contexts
 # Key: f"{dataset_path}:{mode}:{selection_id}"
@@ -302,6 +301,10 @@ def get_chat_response(
             CONTEXT_CACHE[cache_key] = specific_context
         
     # 2. Prepare OpenAI Messages
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return "The OpenAI package is not installed. Please run `pip install openai` to enable the AI assistant."
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     
     messages = [
