@@ -31,25 +31,16 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from .logging_config import setup_logging
+from .routers import (
+    health
+)
 
 # Load environment variables
 load_dotenv()
 
-app = FastAPI(title="CellPilot API")
-
-class FileLockManager:
-    def __init__(self):
-        self.locks = {}
-        self.global_lock = asyncio.Lock()
-
-    async def get_lock(self, path: str):
-        abs_path = os.path.abspath(path)
-        async with self.global_lock:
-            if abs_path not in self.locks:
-                self.locks[abs_path] = asyncio.Lock()
-            return self.locks[abs_path]
-
-lock_manager = FileLockManager()
+app = FastAPI(title="cellpilot")
+setup_logging()
 
 #  allow renderer → http://localhost:5173 or packaged file://
 app.add_middleware(
@@ -68,8 +59,7 @@ app.add_middleware(
     allow_credentials=True
 )
 
-@app.get("/ping")
-def ping(): return {"ok": True}
+app.include_router(health.router)
 
 
 @app.post("/adata_upload")

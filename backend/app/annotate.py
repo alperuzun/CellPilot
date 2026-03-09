@@ -26,7 +26,7 @@ def annotate(
     use_manual_annotation=False,
     manual_marker_file=None,
     manual_marker_text=None,
-):
+) -> tuple:
     """
     Analyze clusters and annotate cell types
     
