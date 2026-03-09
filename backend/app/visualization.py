@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import anndata as ad
 import omicverse as ov
+from .preprocessing import normalize_resolution
 
 # Curated list of common cell marker genes for quick visualization
 COMMON_CELL_MARKERS = [
@@ -120,10 +121,6 @@ def to_builtin(val):
     if isinstance(val, (np.floating,)):
         return float(val)
     return val
-
-def normalize_resolution(res: float) -> str:
-    """Normalize resolution to consistent string format (one decimal place)."""
-    return f"{res:.1f}"
 
 def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = None) -> Dict[str, Any]:
     """

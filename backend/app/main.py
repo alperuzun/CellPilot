@@ -8,7 +8,7 @@ import os
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
 
 from .models import (
-    AdataRequest, AdataResponse, AnnotationParams, CellPhoneDBParams, InferCNVParams,
+    AdataRequest, AdataResponse, AnnotationParams,
     Response, AnalysisJobRequest, AnalysisJobResponse, JobStatusResponse,
     CreateLayerRequest, UpdateLayerRequest, DifferentialExpressionRequest,
     SubclusterRequest, MergeSubclusterRequest, ChatRequest, DotPlotRequest, DotPlotResponse,
@@ -18,7 +18,6 @@ from .models import (
 )
 from .tasks import spawn_process
 from .utils import summarize_h5ad
-from .analysis import run_cell_phone_db, run_inferncnv
 from .annotate import annotate
 from .job_manager import job_manager
 from .visualization import extract_visualization_data, get_gene_expression, get_marker_genes_by_cluster, get_celltype_markers_by_column, get_dot_plot_data
@@ -125,81 +124,6 @@ async def annotate_api(params: AnnotationParams):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --------------------------- CellPhoneDB -------------------------
-@app.post("/cellphonedb")
-async def cellphonedb_api(params: CellPhoneDBParams):
-    try:
-        # If output_dir is provided use it, otherwise create one from name
-        if params.output_dir:
-            output_dir = params.output_dir
-        else:
-            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            project_root = os.path.dirname(script_dir)  # Get to SingleCell/
-            output_dir = os.path.join(project_root, 'output', f'cpdb_{params.name}')
-        
-        os.makedirs(output_dir, exist_ok=True)
-        output_dir = str(output_dir)
-        
-        data = await run_in_threadpool(
-            run_cell_phone_db,
-            params.input_path,          # input_file
-            output_dir,                  # output_dir
-            params.plot_column_names,   # plot_column_names
-            params.column_name,         # column_name in obs
-            params.cpdb_file_path,      # database zip
-            params.name,                # run name / prefix
-            params.counts_min,          # counts_min (now properly in the model)
-        )
-        # Use the h5ad output path for visualization
-        output_path = data.get('output_h5ad_path', output_dir)
-        return Response(
-            name=params.name,
-            type="cellphonedb",
-            input_path=params.input_path,
-            output_dir=output_path,
-            data=data,
-            timestamp=data['timestamp']
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# --------------------------- InferCNV ----------------------------
-@app.post("/inferCNV")
-async def inferCNV_api(params: InferCNVParams):
-    try:
-        # If output_dir is provided use it, otherwise create one from name
-        if params.output_dir:
-            output_dir = params.output_dir
-        else:
-            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            project_root = os.path.dirname(script_dir)  # Get to SingleCell/
-            output_dir = os.path.join(project_root, 'output', f'infercnv_{params.name}')
-        
-        os.makedirs(output_dir, exist_ok=True)
-        output_dir = str(output_dir)
-        
-        data = await run_in_threadpool(
-            run_inferncnv,
-            params.input_path,
-            params.output_dir,
-            params.name,
-            params.reference_key,
-            params.gtf_path,
-            params.reference_cat,
-            params.cnv_threshold
-        )
-        return Response(
-            name=params.name,
-            type="inferCNV",
-            input_path=params.input_path,
-            output_dir=output_dir,
-            data=data,
-            timestamp=data['timestamp']
-        )
-    except Exception as e:
-        print(e)
-        raise HTTPException(status_code=500, detail=str(e))
-    
 @app.get("/preview_img")
 def preview_img(path: str):
     return FileResponse(path, media_type="image/png")
@@ -222,38 +146,6 @@ async def preview_csv_data(path: str, max_rows: int = 1000):
             raise HTTPException(status_code=404, detail=f"File not found: {path}")
 
         # Read CSV with pandas
-        df = pd.read_csv(path, header=None)
-
-        # Detect drug response format (first row is numeric IDs, second row is drug names)
-        # This is specific to CaDRReS-Sc output format
-        try:
-            # Check if this looks like a drug response CSV
-            first_row_numeric = pd.to_numeric(df.iloc[0, 1:], errors='coerce').notna().sum() > 10
-
-            if first_row_numeric and len(df) >= 3:
-                # Drug response format detected
-                drug_ids = df.iloc[0, 1:].astype(str).tolist()
-                drug_names = df.iloc[1, 1:].astype(str).tolist()
-                cell_labels = df.iloc[2:, 0].astype(str).tolist()
-
-                # Convert values to float, handling any non-numeric values
-                values = []
-                for idx in range(2, len(df)):
-                    row_values = pd.to_numeric(df.iloc[idx, 1:], errors='coerce').fillna(0).tolist()
-                    values.append(row_values)
-
-                return {
-                    "type": "drug_response",
-                    "drug_ids": drug_ids,
-                    "drug_names": drug_names,
-                    "cells": cell_labels,
-                    "values": values,
-                    "shape": [len(cell_labels), len(drug_names)]
-                }
-        except Exception:
-            pass  # Fall through to generic handling
-
-        # Generic CSV handling (with proper headers)
         df_with_headers = pd.read_csv(path)
         return {
             "type": "generic",
@@ -275,26 +167,10 @@ async def get_analysis_files(h5ad_path: str):
         if not h5ad_file.exists():
             raise HTTPException(status_code=404, detail=f"Dataset file not found: {h5ad_path}")
 
-        # Determine if this is a directory (inferCNV) or file (annotation/cellphonedb)
-        is_directory = h5ad_file.is_dir()
-
-        # Look for analysis outputs in the appropriate directories
+        # Look for analysis outputs in the dataset directory
         analysis_files = []
-        if is_directory:
-            # InferCNV case: h5ad_path is a directory, search only in that directory (non-recursive)
-            search_dirs = [h5ad_file]
-        else:
-            # Annotation/CellPhoneDB case: h5ad_path is a file
-            search_dirs = [h5ad_file.parent]
-
-            # Add companion CellPhoneDB directory if it exists
-            base_dir_name = h5ad_file.parent.name
-            output_parent = h5ad_file.parent.parent
-            cellphonedb_dir_name = f"{base_dir_name}_cellphonedb"
-            cellphonedb_dir = output_parent / cellphonedb_dir_name
-
-            if cellphonedb_dir.exists() and cellphonedb_dir.is_dir():
-                search_dirs.append(cellphonedb_dir)
+        is_directory = h5ad_file.is_dir()
+        search_dirs = [h5ad_file.parent] if not is_directory else [h5ad_file]
 
         def classify_file_type(file_path: Path) -> str:
             """Classify file type based on name and extension"""
@@ -321,8 +197,6 @@ async def get_analysis_files(h5ad_path: str):
                 return 'cluster_plot'
             elif 'annotation' in name_lower and file_path.suffix == '.png':
                 return 'annotation_plot'
-            elif any(pattern in name_lower for pattern in ['network', 'cellphone', 'interaction']):
-                return 'network_plot'
             elif 'heatmap' in name_lower:
                 return 'heatmap'
             elif file_path.suffix == '.csv':
@@ -347,8 +221,8 @@ async def get_analysis_files(h5ad_path: str):
         for search_dir in search_dirs:
             if search_dir.exists():
                 for ext_pattern in file_extensions:
-                    # Use glob() for non-recursive search (inferCNV directories)
-                    # Use rglob() for recursive search (annotation/cellphonedb with subfolders)
+                    # Use glob() for non-recursive search (directory paths)
+                    # Use rglob() for recursive search (annotation with subfolders)
                     search_method = search_dir.glob if is_directory else search_dir.rglob
                     for file_path in search_method(ext_pattern):
                         # Skip files in subclusters directory ONLY when loading parent analysis files
@@ -532,73 +406,9 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
                 outputs = annotation_result[0]
                 processed_path = outputs.get('data', {}).get('adata_output_file', processed_path)
 
-        # Step 3: CellPhoneDB (if requested)
-        if request.analysis_params.get('runCellPhone', False):
-            job_manager.update_job(job_id, progress=0.6, current_step="Analyzing cell-cell communication...")
-
-            # Extract CellPhoneDB parameters from the request
-            cellphone_user_params = request.analysis_params.get('cellPhoneDBParams', {})
-
-            cellphone_params = CellPhoneDBParams(
-                input_path=processed_path,
-                name=request.name,
-                output_dir=str(output_dir),
-                plot_column_names=cellphone_user_params.get('plot_column_names', ["cell_type"]),
-                column_name=cellphone_user_params.get('column_name', "cell_type"),
-                cpdb_file_path=cellphone_user_params.get('cpdb_file_path', "db/cellphonedb.zip"),
-                counts_min=cellphone_user_params.get('counts_min', 10)
-            )
-
-            cellphone_result = await run_in_threadpool(
-                run_cell_phone_db,
-                cellphone_params.input_path,
-                cellphone_params.output_dir,
-                cellphone_params.plot_column_names,
-                cellphone_params.column_name,
-                cellphone_params.cpdb_file_path,
-                cellphone_params.name,
-                cellphone_params.counts_min
-            )
-            results['cellphonedb'] = cellphone_result
-
-        # Step 4: InferCNV (if requested)
-        if request.analysis_params.get('runInferCNV', False):
-            job_manager.update_job(job_id, progress=0.8, current_step="Running tumor prediction and drug response...")
-
-            # Extract InferCNV parameters from the request
-            infercnv_user_params = request.analysis_params.get('inferCNVParams', {})
-
-            infercnv_params = InferCNVParams(
-                input_path=processed_path,
-                name=request.name,
-                output_dir=str(output_dir),
-                reference_key=infercnv_user_params.get('reference_key'),
-                gtf_path=infercnv_user_params.get('gtf_path', 'db/gencode.v47.annotation.gtf.gz'),
-                reference_cat=infercnv_user_params.get('reference_cat'),
-                cnv_threshold=infercnv_user_params.get('cnv_threshold', 0.03)
-            )
-
-            infercnv_result = await run_in_threadpool(
-                run_inferncnv,
-                infercnv_params.input_path,
-                infercnv_params.output_dir,
-                infercnv_params.name,
-                infercnv_params.reference_key,
-                infercnv_params.gtf_path,
-                infercnv_params.reference_cat,
-                infercnv_params.cnv_threshold
-            )
-            results['infercnv'] = infercnv_result
-
         # Determine the output path for frontend navigation
-        # Priority: InferCNV directory > CellPhoneDB h5ad > annotation output > original path
         output_path = processed_path
-        if 'infercnv' in results:
-            # For InferCNV, use the output directory as the path
-            output_path = str(output_dir)
-        elif 'cellphonedb' in results and results['cellphonedb'].get('output_h5ad_path'):
-            output_path = results['cellphonedb']['output_h5ad_path']
-        elif 'annotation' in results:
+        if 'annotation' in results:
             outputs = results['annotation'][0] if results['annotation'] else {}
             output_path = outputs.get('data', {}).get('adata_output_file', output_path)
 
@@ -1232,14 +1042,10 @@ async def get_available_datasets():
 
         def detect_analysis_type(dir_name: str) -> str:
             """Detect analysis type based on directory name prefixes"""
-            if dir_name.startswith('cpdb_'):
-                return 'cellphonedb'
-            elif dir_name.startswith('annotation_'):
+            if dir_name.startswith('annotation_'):
                 return 'annotation'
-            elif dir_name.startswith('infercnv_'):
-                return 'infercnv'
             else:
-                return 'unknown'  # Still include but mark as unknown type
+                return 'unknown'
 
         if output_dir.exists():
             for analysis_dir in output_dir.iterdir():
@@ -1253,27 +1059,20 @@ async def get_available_datasets():
 
                 analysis_type = detect_analysis_type(analysis_dir.name)
 
-                # For annotation, cellphonedb, and unknown types, look for h5ad file
-                # For infercnv, use the directory itself since it may not have h5ad
+                # Find h5ad file in directory
                 h5ad_path = None
-                if analysis_type in ['annotation', 'cellphonedb', 'unknown']:
-                    # Find h5ad file in directory
-                    h5ad_files = list(analysis_dir.glob("*.h5ad"))
-                    # Filter out temp files
-                    h5ad_files = [f for f in h5ad_files if "temp" not in str(f) and "norm_log" not in str(f)]
-                    if h5ad_files:
-                        # Prioritize annotated files over preprocessed files
-                        annotated_files = [f for f in h5ad_files if "annotated_" in f.name]
-                        if annotated_files:
-                            h5ad_path = str(annotated_files[0].absolute())
-                        else:
-                            h5ad_path = str(h5ad_files[0].absolute())
-                else:  # infercnv
-                    # InferCNV doesn't output h5ad files, use directory path for PNG visualizations
-                    h5ad_path = str(analysis_dir.absolute())
+                h5ad_files = list(analysis_dir.glob("*.h5ad"))
+                # Filter out temp files
+                h5ad_files = [f for f in h5ad_files if "temp" not in str(f) and "norm_log" not in str(f)]
+                if h5ad_files:
+                    # Prioritize annotated files over preprocessed files
+                    annotated_files = [f for f in h5ad_files if "annotated_" in f.name]
+                    if annotated_files:
+                        h5ad_path = str(annotated_files[0].absolute())
+                    else:
+                        h5ad_path = str(h5ad_files[0].absolute())
 
-                # Skip if we couldn't find a valid h5ad path for types that need it
-                if not h5ad_path and analysis_type in ['annotation', 'cellphonedb', 'unknown']:
+                if not h5ad_path:
                     continue
 
                 stat = analysis_dir.stat()

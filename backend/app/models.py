@@ -29,24 +29,6 @@ class AnnotationParams(BaseModel):
     manual_marker_file: Optional[str] = None
     manual_marker_text: Optional[str] = None
 
-class CellPhoneDBParams(BaseModel):
-    input_path: str
-    name: str
-    output_dir: Optional[str] = None
-    plot_column_names: List[str]
-    column_name: str
-    cpdb_file_path: str
-    counts_min: int = 10  # Minimum number of interactions to display in network plots
-
-class InferCNVParams(BaseModel):
-    input_path: str
-    name: str
-    output_dir: Optional[str] = None
-    reference_key: Optional[str] = None
-    gtf_path: str = 'db/gencode.v47.annotation.gtf.gz'
-    reference_cat: Optional[List[str]] = None
-    cnv_threshold: float
-
 class Response(BaseModel):
     name: str
     input_path: str
