@@ -2,7 +2,7 @@ import logging
 import sys
 
 
-def setup_logging(log_file: str = "backend.log", level: str = "INFO"):
+def setup_logging(log_file: str = "backend.log", level: str = "INFO") -> None:
     """Call once at app startup (main.py). All modules then just do:
        import logging
        logger = logging.getLogger(__name__)

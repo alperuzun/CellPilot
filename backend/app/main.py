@@ -18,8 +18,9 @@ from .models import (
 )
 from .tasks import spawn_process
 from .utils import summarize_h5ad
-from .annotate import annotate
 from .job_manager import job_manager
+from .engine import AnnotationEngine, PipelineRequest
+from .preprocessing import PreprocessingParams
 from .visualization import extract_visualization_data, get_gene_expression, get_marker_genes_by_cluster, get_celltype_markers_by_column, get_dot_plot_data
 from .analysis_utils import perform_differential_expression
 from .chat_service import get_chat_response
@@ -81,36 +82,30 @@ def adata_upload(adata_request: AdataRequest):
 # --------------------------- Annotation ---------------------------
 @app.post("/annotate")
 async def annotate_api(params: AnnotationParams):
-    """Run the heavy, synchronous `annotate` pipeline inside the thread-pool
-    executor so that this *async* endpoint stays non-blocking. The function
-    returns exactly the structure required by the shared `Response` model.
-    """
+    """Run the annotation pipeline via AnnotationEngine."""
     try:
-        data, pre_params = await run_in_threadpool(
-            annotate,
-            params.name,
-            params.input_path,
-            params.dir_name,
-            params.preprocessed,
-            params.preprocessing_params,
-            params.use_cellmarker,
-            params.use_panglao,
-            params.use_cancer_single_cell_atlas,
-            params.use_celltypist,
-            params.celltypist_model,
-            params.celltypist_models,
-            params.use_manual_annotation,
-            params.manual_marker_file
-        )
-        return Response(
+        request = PipelineRequest(
             name=params.name,
-            type="annotate",
-            input_path=params.input_path,
-            output_dir=params.dir_name,
-            data=data['data'],
-            timestamp=data['timestamp'],
-            params=pre_params
+            input_file=params.input_path,
+            dir_name=params.dir_name,
+            preprocessed=params.preprocessed,
+            preprocessing_params=PreprocessingParams.from_dict(params.preprocessing_params),
+            methods=params.resolved_methods(),
+            method_options=params.resolved_method_options(),
         )
+        engine = AnnotationEngine()
+        result = await run_in_threadpool(engine.run, request)
+        return Response(
+            name=result.name,
+            type="annotate",
+            input_path=result.input_file,
+            output_dir=result.output_dir,
+            data=result.to_response_data(),
+            timestamp=result.timestamp,
+            params=result.preprocessing_params,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -352,55 +347,45 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest):
                 name=request.name,
                 input_path=processed_path,
                 dir_name=str(output_dir),
-                preprocessed=False,  # Let it run preprocessing
+                preprocessed=False,
                 preprocessing_params=preprocessing_params,
-                use_cellmarker=request.analysis_params.get('use_cellmarker', True),
-                use_panglao=request.analysis_params.get('use_panglao', False),
-                use_cancer_single_cell_atlas=request.analysis_params.get('use_cancer_single_cell_atlas', False),
-                use_celltypist=request.analysis_params.get('use_celltypist', False),
-                celltypist_model=request.analysis_params.get('celltypist_model', None),
-                celltypist_models=request.analysis_params.get('celltypist_models', None),
-                use_manual_annotation=request.analysis_params.get('use_manual_annotation', False),
-                manual_marker_file=request.analysis_params.get('manual_marker_file')
+                methods=request.analysis_params.get('methods', ['cellmarker']),
+                method_options=request.analysis_params.get('method_options', {}),
+                # Legacy bool fallbacks (AnnotationParams.resolved_methods handles these)
+                use_cellmarker=request.analysis_params.get('use_cellmarker'),
+                use_panglao=request.analysis_params.get('use_panglao'),
+                use_cancer_single_cell_atlas=request.analysis_params.get('use_cancer_single_cell_atlas'),
+                use_celltypist=request.analysis_params.get('use_celltypist'),
+                celltypist_model=request.analysis_params.get('celltypist_model'),
+                celltypist_models=request.analysis_params.get('celltypist_models'),
+                use_manual_annotation=request.analysis_params.get('use_manual_annotation'),
+                manual_marker_file=request.analysis_params.get('manual_marker_file'),
             )
 
             try:
-                annotation_result = await run_in_threadpool(
-                    annotate,
-                    annotation_params.name,
-                    annotation_params.input_path,
-                    annotation_params.dir_name,
-                    annotation_params.preprocessed,
-                    annotation_params.preprocessing_params,
-                    annotation_params.use_cellmarker,
-                    annotation_params.use_panglao,
-                    annotation_params.use_cancer_single_cell_atlas,
-                    annotation_params.use_celltypist,
-                    annotation_params.celltypist_model,
-                    annotation_params.celltypist_models,
-                    annotation_params.use_manual_annotation,
-                    annotation_params.manual_marker_file
+                pipe_request = PipelineRequest(
+                    name=annotation_params.name,
+                    input_file=annotation_params.input_path,
+                    dir_name=annotation_params.dir_name,
+                    preprocessed=annotation_params.preprocessed,
+                    preprocessing_params=PreprocessingParams.from_dict(annotation_params.preprocessing_params),
+                    methods=annotation_params.resolved_methods(),
+                    method_options=annotation_params.resolved_method_options(),
                 )
+                engine = AnnotationEngine()
+                pipe_result = await run_in_threadpool(engine.run, pipe_request)
+                annotation_result = pipe_result.to_response_data()
             except SystemExit as e:
-                print(f"SystemExit caught in annotation: {e}")
-                # SystemExit is raised by OmicVerse when database issues occur
-                # Try to continue without OmicVerse annotation
                 raise Exception(f"Annotation failed due to database issue: {e}")
             except Exception as e:
-                print(f"Error in annotation step: {e}")
                 raise
             results['annotation'] = annotation_result
-            # Use the annotated file path for next steps
-            if annotation_result and len(annotation_result) > 0:
-                # annotation_result is a tuple (outputs, params)
-                outputs = annotation_result[0]
-                processed_path = outputs.get('data', {}).get('adata_output_file', processed_path)
+            processed_path = annotation_result.get('adata_output_file', processed_path)
 
         # Determine the output path for frontend navigation
         output_path = processed_path
         if 'annotation' in results:
-            outputs = results['annotation'][0] if results['annotation'] else {}
-            output_path = outputs.get('data', {}).get('adata_output_file', output_path)
+            output_path = results['annotation'].get('adata_output_file', output_path)
 
         # Add outputPath to results for frontend navigation
         results['outputPath'] = output_path

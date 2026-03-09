@@ -1,1 +1,1 @@
-from .preprocessor import PreprocessingParams, PreprocessingResult, Preprocessor
+from .preprocessor import PreprocessingParams, PreprocessingResult, Preprocessor, normalize_resolution

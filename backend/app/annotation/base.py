@@ -3,9 +3,8 @@ from abc import ABC, abstractmethod
 import logging
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import ClassVar, Optional
-import anndata as ad
 from typing import Optional
+import anndata as ad
 
 
 class AnnotationCategory(str, Enum):
@@ -14,6 +13,7 @@ class AnnotationCategory(str, Enum):
     FOUNDATION_MODEL = "foundation_model"
     LLM_BASED = "llm_based"
     ENSEMBLE = "ensemble"
+
 
 @dataclass
 class AnnotationRequirements:
@@ -25,12 +25,22 @@ class AnnotationRequirements:
     min_cells: int = 50
     supported_organisms: list[str] = field(default_factory=lambda: ["human", "mouse"])
 
+
+@dataclass
+class OutputArtifact:
+    """A single output file produced by the pipeline."""
+    path: str
+    label: str
+    artifact_type: str  # "figure" or "file"
+
+
 @dataclass
 class AnnotationResult:
     labels: dict[str, str]
     confidence: dict[str, float]
     method_name: str
     obs_key: str
+    artifacts: list[OutputArtifact] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
 
@@ -40,19 +50,23 @@ class AnnotationRegistry:
     @classmethod
     def get(cls, name: str) -> type[AnnotationMethod]:
         return cls._methods[name]
-    
+
     @classmethod
     def all(cls) -> list[type[AnnotationMethod]]:
         return list(cls._methods.values())
 
 
-class AnnotationMethod(ABC): 
+class AnnotationMethod(ABC):
+    # Subclasses set these as class attributes (not __init_subclass__ kwargs,
+    # because ``name`` conflicts with the positional arg of ABCMeta.__new__
+    # on Python < 3.12).
+    name: str = ""
+    display_name: str = ""
 
-    def __init_subclass__(cls, name:str, display_name: str, **kwargs) -> None:
+    def __init_subclass__(cls, register: bool = True, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
-        cls.name = name
-        cls.display_name = display_name
-        AnnotationRegistry._methods[name] = cls
+        if register and cls.name:
+            AnnotationRegistry._methods[cls.name] = cls
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(f"cellpilot.annotation.{self.name}")
@@ -66,20 +80,20 @@ class AnnotationMethod(ABC):
     @abstractmethod
     def requirements(self) -> AnnotationRequirements:
         ...
+
     @classmethod
     @abstractmethod
     def check_available(cls) -> tuple[bool, str]:
         ...
 
     @abstractmethod
-    @classmethod
     def annotate(
-        cls,
-        adata : ad.AnnData,
+        self,
+        adata: ad.AnnData,
         *,
         reference: Optional[ad.AnnData] = None,
         tissue: Optional[str] = None,
-        organism: str = 'human',
-        **kwargs
+        organism: str = "human",
+        **kwargs,
     ) -> AnnotationResult:
         ...
