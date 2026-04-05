@@ -5,7 +5,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.9
+  - python=3.11
   - pip
   # PyTorch (conda for proper platform-specific binaries)
   - pytorch=2.2.2
@@ -25,6 +25,7 @@ dependencies:
   # Build dependencies (headers needed by pip packages)
   - xz
   - bzip2
+  - llvm-openmp  # Required by xgboost (PopV dependency) on macOS
   # Conda-only packages (better binary builds)
   - python-annoy
   - s_gd2
@@ -71,5 +72,8 @@ dependencies:
       - lifelines==0.30.0
       - h5py>=3.13
       - tqdm
-      # AI assistant
       - openai==2.11.0
+      - mllmcelltype
+      # Ensemble annotation (PopV)
+      - scvi-tools==1.1.6.post2
+      - popv>=0.6

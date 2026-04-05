@@ -12,7 +12,7 @@ export interface UploadData {
   fileSize: number;
   datasetName: string;
   species: string;
-  analysisType: 'annotation' | 'cellphonedb' | 'infercnv';
+  analysisType: 'annotation';
   summary?: any;
 }
 
@@ -303,73 +303,13 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-3">
-            Analysis Type *
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Analysis Type
           </label>
-          <div className="space-y-3">
-            <div className="flex items-start">
-              <input
-                type="radio"
-                id="annotation"
-                name="analysisType"
-                value="annotation"
-                checked={formData.analysisType === 'annotation'}
-                onChange={(e) => setFormData(prev => ({ ...prev, analysisType: e.target.value as 'annotation' | 'cellphonedb' | 'infercnv' }))}
-                className="mt-1 mr-3 text-blue-600 focus:ring-blue-500"
-              />
-              <div>
-                <label htmlFor="annotation" className="text-sm font-medium text-gray-900 cursor-pointer">
-                  Cell Type Annotation
-                </label>
-                <p className="text-sm text-gray-600 mt-1">
-                  Identify and annotate cell types using reference databases (CellMarker, PanglaoDB, Cancer Single Cell Atlas).
-                  Includes clustering, UMAP visualization, and marker gene analysis.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <input
-                type="radio"
-                id="cellphonedb"
-                name="analysisType"
-                value="cellphonedb"
-                checked={formData.analysisType === 'cellphonedb'}
-                onChange={(e) => setFormData(prev => ({ ...prev, analysisType: e.target.value as 'annotation' | 'cellphonedb' | 'infercnv' }))}
-                className="mt-1 mr-3 text-blue-600 focus:ring-blue-500"
-              />
-              <div>
-                <label htmlFor="cellphonedb" className="text-sm font-medium text-gray-900 cursor-pointer">
-                  CellPhoneDB Communication Analysis
-                </label>
-                <p className="text-sm text-gray-600 mt-1">
-                  Analyze cell-cell communication through ligand-receptor interactions. Generates network plots,
-                  interaction heatmaps, and detailed communication matrices between cell types.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start">
-              <input
-                type="radio"
-                id="infercnv"
-                name="analysisType"
-                value="infercnv"
-                checked={formData.analysisType === 'infercnv'}
-                onChange={(e) => setFormData(prev => ({ ...prev, analysisType: e.target.value as 'annotation' | 'cellphonedb' | 'infercnv' }))}
-                className="mt-1 mr-3 text-blue-600 focus:ring-blue-500"
-              />
-              <div>
-                <label htmlFor="infercnv" className="text-sm font-medium text-gray-900 cursor-pointer">
-                  InferCNV Tumor Detection & Drug Response
-                </label>
-                <p className="text-sm text-gray-600 mt-1">
-                  Detect copy number variations to identify tumor cells, followed by drug response prediction
-                  using CaDRReS-Sc models. Ideal for cancer research and therapeutic target identification.
-                </p>
-              </div>
-            </div>
-          </div>
+          <p className="text-sm text-gray-600">
+            Cell Type Annotation — Identify and annotate cell types using reference databases (CellMarker, PanglaoDB, Cancer Single Cell Atlas).
+            Includes clustering, UMAP visualization, and marker gene analysis.
+          </p>
         </div>
       </div>
 

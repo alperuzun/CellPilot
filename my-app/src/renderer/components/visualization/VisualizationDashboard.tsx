@@ -65,7 +65,7 @@ export default function VisualizationDashboard({ initialPath, onBack }: Visualiz
                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl">
-                    {datasets.filter(d => d.analysis_type === 'annotation').map(d => (
+                    {datasets.map(d => (
                         <button
                             key={d.path}
                             onClick={() => setPathStack([d.path])}
@@ -78,9 +78,9 @@ export default function VisualizationDashboard({ initialPath, onBack }: Visualiz
                             </div>
                         </button>
                     ))}
-                    {datasets.filter(d => d.analysis_type === 'annotation').length === 0 && (
+                    {datasets.length === 0 && (
                         <div className="col-span-full text-center text-gray-500">
-                            No annotated datasets found. Run an annotation analysis first.
+                            No datasets found. Run an analysis first.
                         </div>
                     )}
                 </div>

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 import os
 import json
 
@@ -7,7 +7,7 @@ import anndata as ad
 import pandas as pd
 import scanpy as sc
 
-def summarize_h5ad(path: Union[str, Path] = None, adata: ad.AnnData = None) -> Dict[str, Any]:
+def summarize_h5ad(path: Union[str, Path, None] = None, adata: Optional[ad.AnnData] = None) -> Dict[str, Any]:
     if path is None and adata is None:
         raise ValueError("Either path or adata must be provided")
     if path is not None:

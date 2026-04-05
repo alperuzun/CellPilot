@@ -16,7 +16,7 @@ def normalize_resolution(res: float) -> str:
     """Normalize resolution to consistent string format (one decimal place)."""
     return f"{res:.1f}"
 
-def test_multi_resolution():
+def test_multi_resolution() -> bool:
     """Test the multi-resolution preprocessing and visualization"""
 
     print("="*60)
@@ -90,7 +90,7 @@ def test_multi_resolution():
 
     # Test via API
     print("\n6. Testing visualization data extraction via API...")
-    import requests
+    import requests  # type: ignore[import-untyped]
     import json
 
     base_url = "http://127.0.0.1:8000"

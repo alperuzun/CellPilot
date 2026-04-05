@@ -3,12 +3,13 @@ import json
 import scanpy as sc
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Any, Optional
+import anndata as ad
+from typing import Any, Dict, List, Optional
 
 # In-memory cache for contexts
 # Key: f"{dataset_path}:{mode}:{selection_id}"
 # Value: Dict (JSON context)
-CONTEXT_CACHE = {}
+CONTEXT_CACHE: Dict[str, Any] = {}
 
 SYSTEM_PROMPT = """You are the Expert Bioinformatician AI for CellPilot. Your goal is to help researchers identify cell types, interpret data quality, and suggest next steps.
 
@@ -34,7 +35,7 @@ Instructions:
 
 5. **Format**: Be concise. Use bullet points. Cite genes/metrics as evidence."""
 
-def build_global_context(adata, hide_labels: bool = False) -> Dict[str, Any]:
+def build_global_context(adata: ad.AnnData, hide_labels: bool = False) -> Dict[str, Any]:
     """
     Extract global summary of the dataset.
     """
@@ -85,7 +86,7 @@ def build_global_context(adata, hide_labels: bool = False) -> Dict[str, Any]:
     
     return context
 
-def build_selection_context(adata, cell_ids: List[str], hide_labels: bool = False) -> Dict[str, Any]:
+def build_selection_context(adata: ad.AnnData, cell_ids: List[str], hide_labels: bool = False) -> Dict[str, Any]:
     """
     Extract context for a custom selection of cells.
     """
@@ -150,7 +151,7 @@ def build_selection_context(adata, cell_ids: List[str], hide_labels: bool = Fals
     
     return context
 
-def build_cluster_context(adata, cluster_id: str, hide_labels: bool = False) -> Dict[str, Any]:
+def build_cluster_context(adata: ad.AnnData, cluster_id: str, hide_labels: bool = False) -> Dict[str, Any]:
     """
     Extract biological context for a specific cluster.
     """
@@ -174,17 +175,18 @@ def build_cluster_context(adata, cluster_id: str, hide_labels: bool = False) -> 
 
     # 1. QC Metrics
     # Ensure QC metrics exist in obs
+    qc_metrics: Dict[str, Any] = {}
     if 'pct_counts_mt' not in adata.obs.columns or 'n_genes_by_counts' not in adata.obs.columns:
         qc_metrics = {"error": "QC metrics not found in adata.obs"}
     else:
         qc_metrics = {
             "mean_mito_pct": round(float(cluster_cells['pct_counts_mt'].mean()), 2),
             "mean_n_genes": int(cluster_cells['n_genes_by_counts'].mean()),
-            "n_cells": int(len(cluster_cells))
+            "n_cells": int(len(cluster_cells)),
         }
 
     # 2. Top Marker Genes
-    top_markers = []
+    top_markers: List[Dict[str, Any]] = []
     
     # Check if rank_genes_groups has been run
     if 'rank_genes_groups' not in adata.uns:
@@ -253,30 +255,35 @@ def build_cluster_context(adata, cluster_id: str, hide_labels: bool = False) -> 
     }
 
     if not hide_labels:
-        context["target_cluster"]["existing_annotations"] = existing_labels
-    
+        context["target_cluster"]["existing_annotations"] = existing_labels  # type: ignore[index]
+
     return context
 
 def get_chat_response(
-    user_message: str, 
-    adata, 
-    selection_id: str, 
+    user_message: str,
+    adata: ad.AnnData,
+    selection_id: str,
     dataset_path: str,
-    history: List[Dict[str, str]] = [],
+    history: Optional[List[Dict[str, str]]] = None,
     model: str = "gpt-4o",
-    mode: str = "cluster", # "global", "cluster", "selection"
-    cell_ids: List[str] = [],
-    hide_labels: bool = False
+    mode: str = "cluster",
+    cell_ids: Optional[List[str]] = None,
+    hide_labels: bool = False,
 ) -> str:
     """
     Generate a chat response using OpenAI, with context caching and history.
     """
     
+    if history is None:
+        history = []
+    if cell_ids is None:
+        cell_ids = []
+
     # 1. Get/Cache Context
     # Cache key depends on mode
     global_context = None
     specific_context = None
-    
+
     # Always fetch/cache Global Context
     global_cache_key = f"{dataset_path}:global:{hide_labels}"
     if global_cache_key in CONTEXT_CACHE:
@@ -326,12 +333,12 @@ def get_chat_response(
     
     try:
         response = client.chat.completions.create(
-            model=model, 
-            messages=messages,
+            model=model,
+            messages=messages,  # type: ignore[arg-type]
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=1000,
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
     except Exception as e:
         print(f"OpenAI API Error: {e}")
         return f"I'm sorry, I encountered an error communicating with the AI service: {str(e)}. Please check your API key."

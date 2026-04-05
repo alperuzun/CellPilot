@@ -8,7 +8,7 @@ router = APIRouter(
 
 
 @router.get("/ping")
-def ping() -> dict: 
+def ping() -> dict[str, bool]:
     logger = logging.getLogger("health_logger")
     logger.info("getting health")
     return {"ok": True}

@@ -294,13 +294,14 @@ class Preprocessor:
     def _reduce_dims(self, adata: ad.AnnData, params: PreprocessingParams) -> ad.AnnData:
         self.logger.info("Performing PCA (n_pcs=%d)...", params.n_pcs)
         sc.tl.pca(adata, n_comps=params.n_pcs)
-        pca_rep = 'X_pca' 
+        pca_rep = 'X_pca'
+        adata.obsm['pca_rep'] = adata.obsm[pca_rep]  # OmicVerse compatibility alias
         self.logger.info("Building neighborhood graph (n_neighbors=%d)...", params.n_neighbors)
         sc.pp.neighbors(
             adata,
             n_neighbors=params.n_neighbors,
             n_pcs=params.n_pcs,
-            use_rep='pca_rep',
+            use_rep=pca_rep,
         )
         return adata
 
@@ -316,7 +317,8 @@ class Preprocessor:
         else:
             resolutions_to_compute = {params.resolution}
 
-        resolutions_to_compute = sorted(resolutions_to_compute)
+        resolutions_to_compute_sorted: list[float] = sorted(resolutions_to_compute)
+        resolutions_to_compute = resolutions_to_compute_sorted  # type: ignore[assignment]
         resolution_cluster_counts: dict[str, int] = {}
 
         self.logger.info(
@@ -361,7 +363,7 @@ class Preprocessor:
         output_files: list[str],
     ) -> ad.AnnData:
         self.logger.info("Generating MDE visualization coordinates...")
-        adata.obsm["X_mde"] = ov.utils.mde(adata.obsm["scaled|original|X_pca"])
+        adata.obsm["X_mde"] = ov.utils.mde(adata.obsm["X_pca"])
 
         self.logger.info("Generating UMAP...")
         sc.tl.umap(adata)

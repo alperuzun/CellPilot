@@ -21,7 +21,6 @@ const AnnotationResults: React.FC<AnnotationResultsProps> = ({ analysisFiles }) 
       case 'dotplot': return 'Gene Expression Dotplot';
       case 'cluster_plot': return 'Cluster Visualization';
       case 'annotation_plot': return 'Annotation Plot';
-      case 'network_plot': return 'Network Plot';
       case 'heatmap': return 'Heatmap';
       case 'other_plot': return 'Analysis Plot';
       case 'csv_data': return 'CSV Data';
@@ -39,7 +38,6 @@ const AnnotationResults: React.FC<AnnotationResultsProps> = ({ analysisFiles }) 
       case 'dotplot': return 'bg-blue-900/30 text-blue-300 border border-blue-800';
       case 'cluster_plot': return 'bg-purple-900/30 text-purple-300 border border-purple-800';
       case 'annotation_plot': return 'bg-green-900/30 text-green-300 border border-green-800';
-      case 'network_plot': return 'bg-indigo-900/30 text-indigo-300 border border-indigo-800';
       case 'heatmap': return 'bg-orange-900/30 text-orange-300 border border-orange-800';
       case 'csv_data': return 'bg-teal-900/30 text-teal-300 border border-teal-800';
       case 'html_report': return 'bg-green-900/30 text-green-300 border border-green-800';
@@ -52,7 +50,7 @@ const AnnotationResults: React.FC<AnnotationResultsProps> = ({ analysisFiles }) 
 
   // Group files by category
   const groups = {
-    'Visualizations': analysisFiles.filter(f => ['dotplot', 'cluster_plot', 'annotation_plot', 'network_plot', 'heatmap', 'other_plot'].includes(f.type)),
+    'Visualizations': analysisFiles.filter(f => ['dotplot', 'cluster_plot', 'annotation_plot', 'heatmap', 'other_plot'].includes(f.type)),
     'Data Files': analysisFiles.filter(f => f.type === 'csv_data'),
     'Reports & Text': analysisFiles.filter(f => ['text_file', 'html_report', 'pdf_report', 'annotation_details', 'annotation_confidence'].includes(f.type))
   };
@@ -129,7 +127,7 @@ const AnnotationResults: React.FC<AnnotationResultsProps> = ({ analysisFiles }) 
         </div>
         <h3 className="text-lg font-medium text-gray-200 mb-1">No Results Available</h3>
         <p className="text-gray-500 max-w-md mx-auto">
-          Analysis outputs will appear here after running annotation, CellPhoneDB, or other analysis pipelines.
+          Analysis outputs will appear here after running annotation pipelines.
         </p>
       </div>
     );

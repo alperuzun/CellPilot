@@ -15,7 +15,7 @@ from ..annotation import (
     AnnotationOrchestrator,
 )
 from ..annotation.base import OutputArtifact
-from ..sync.cleaner import OutputTracker
+from ..concurrency import OutputTracker
 from ..utils import summarize_h5ad
 
 logger = logging.getLogger(__name__)
@@ -67,12 +67,7 @@ class PipelineResult:
             "adata_output_file": self.adata_output_file,
             "qc_stats": self.qc_stats,
         }
-
-
-# ------------------------------------------------------------------
-# Engine
-# ------------------------------------------------------------------
-
+    
 class AnnotationEngine:
     """Orchestrates the full annotation pipeline: load -> preprocess -> annotate -> save."""
 
@@ -125,14 +120,16 @@ class AnnotationEngine:
                 "output_dir": output_dir,
                 "name": request.name,
                 "timestamp": timestamp,
+                "input_file": request.input_file,
                 **request.method_options,
             }
             orchestrator = AnnotationOrchestrator()
-            results = orchestrator.run_multiple(request.methods, adata, **kwargs)
-
-            # 4. Consensus + apply
-            consensus = orchestrator.compute_consensus(results, adata)
-            orchestrator.apply_to_adata(adata, results, consensus)
+            try:
+              results = orchestrator.run_multiple(request.methods, adata, **kwargs)
+              consensus = orchestrator.compute_consensus(results, adata)
+              orchestrator.apply_to_adata(adata, results, consensus)
+            except Exception as e:
+                raise e
 
             # 5. Collect artifacts from annotation results
             for r in results:
@@ -184,15 +181,17 @@ class AnnotationEngine:
         if not os.path.exists(input_file):
             raise FileNotFoundError(f"Input file not found: {input_file}")
         if input_file.endswith(".h5ad"):
-            return sc.read_h5ad(input_file)
+            adata = sc.read_h5ad(input_file)
         elif input_file.endswith(".h5"):
-            return sc.read_10x_h5(input_file)
+            adata = sc.read_10x_h5(input_file)
         elif input_file.endswith(".csv") or input_file.endswith(".txt"):
-            return sc.read_csv(input_file).transpose()
+            adata = sc.read_csv(input_file).transpose()
         elif input_file.endswith(".mtx"):
-            return sc.read_10x_mtx(os.path.dirname(input_file))
+            adata = sc.read_10x_mtx(os.path.dirname(input_file))
         else:
             raise ValueError(f"Unsupported file format: {input_file}")
+        adata.var_names_make_unique()
+        return adata
 
     @staticmethod
     def _track_resolution_annotations(

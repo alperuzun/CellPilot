@@ -62,35 +62,8 @@ export interface AnnotationParams {
   dir_name: string;
   preprocessed: boolean;
   preprocessing_params: any;
-  use_cellmarker: boolean;
-  use_panglao: boolean;
-  use_cancer_single_cell_atlas: boolean;
-  use_celltypist: boolean;
-  celltypist_model?: string;  // Deprecated, use celltypist_models
-  celltypist_models?: string[];  // List of model names to run
-  use_manual_annotation?: boolean;
-  manual_marker_file?: string | null;
-  manual_marker_text?: string | null;
-}
-
-export interface CellPhoneDBParams {
-  input_path: string;
-  name: string;
-  dir_name: string;
-  plot_column_names: string[];
-  column_name: string;
-  cpdb_file_path: string;
-  counts_min: number;
-}
-
-export interface InferCNVParams {
-  input_path: string;
-  name: string;
-  output_dir: string;
-  reference_key?: string;
-  gtf_path: string;
-  reference_cat?: string[];
-  cnv_threshold: number;
+  methods: string[];
+  method_options?: Record<string, any>;
 }
 
 export interface AnalysisResponse {
@@ -208,13 +181,7 @@ export interface DotPlotData {
 }
 
 export interface CSVDataResponse {
-  type: 'drug_response' | 'generic';
-  // Drug response format
-  drug_ids?: string[];
-  drug_names?: string[];
-  cells?: string[];
-  values?: number[][];
-  // Generic format
+  type: 'generic';
   columns?: string[];
   data?: any[];
   total_rows?: number;
@@ -227,7 +194,7 @@ export interface DatasetInfo {
   date: string;
   size_mb: number;
   directory: string;
-  analysis_type: 'annotation' | 'cellphonedb' | 'infercnv' | 'subcluster';
+  analysis_type: 'annotation' | 'subcluster' | 'unknown';
   parent_path?: string; // For subclusters
 }
 
@@ -237,7 +204,7 @@ export interface AvailableDatasetsResponse {
 
 export interface AnalysisFile {
   path: string;
-  type: 'dotplot' | 'annotation_details' | 'cluster_plot' | 'annotation_plot' | 'network_plot' | 'heatmap' | 'csv_data' | 'text_file' | 'html_report' | 'pdf_report' | 'other_plot' | 'annotation_confidence';
+  type: 'dotplot' | 'annotation_details' | 'cluster_plot' | 'annotation_plot' | 'heatmap' | 'csv_data' | 'text_file' | 'html_report' | 'pdf_report' | 'other_plot' | 'annotation_confidence';
   name: string;
   size_mb: number;
 }
@@ -342,15 +309,8 @@ export interface PreprocessingParams {
 }
 
 export interface SubclusterAnnotationParams {
-  use_cellmarker: boolean;
-  use_panglao: boolean;
-  use_cancer_single_cell_atlas: boolean;
-  use_celltypist: boolean;
-  celltypist_model?: string;  // Deprecated, use celltypist_models
-  celltypist_models?: string[];  // List of model names to run
-  use_manual_annotation: boolean;
-  manual_marker_file?: string | null;
-  manual_marker_text?: string | null;
+  methods: string[];
+  method_options?: Record<string, Record<string, unknown>>;
 }
 
 export interface SubclusterRequest {
@@ -410,14 +370,8 @@ export interface AddCustomResolutionRequest {
 export interface AnnotateResolutionRequest {
   input_path: string;
   resolution: number;
-  use_cellmarker?: boolean;
-  use_panglao?: boolean;
-  use_cancer_single_cell_atlas?: boolean;
-  use_celltypist?: boolean;
-  celltypist_models?: string[];
-  use_manual_annotation?: boolean;
-  manual_marker_file?: string | null;
-  manual_marker_text?: string | null;
+  methods: string[];
+  method_options?: Record<string, Record<string, unknown>>;
 }
 
 export interface PropagateAnnotationsRequest {
@@ -526,20 +480,6 @@ export const api = {
   // Analysis endpoints
   async runAnnotation(params: AnnotationParams): Promise<AnalysisResponse> {
     return apiRequest('/annotate', {
-      method: 'POST',
-      body: JSON.stringify(params),
-    });
-  },
-
-  async runCellPhoneDB(params: CellPhoneDBParams): Promise<AnalysisResponse> {
-    return apiRequest('/cellphonedb', {
-      method: 'POST',
-      body: JSON.stringify(params),
-    });
-  },
-
-  async runInferCNV(params: InferCNVParams): Promise<AnalysisResponse> {
-    return apiRequest('/inferCNV', {
       method: 'POST',
       body: JSON.stringify(params),
     });

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import logging
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Any
 import anndata as ad
 
 
@@ -63,7 +63,7 @@ class AnnotationMethod(ABC):
     name: str = ""
     display_name: str = ""
 
-    def __init_subclass__(cls, register: bool = True, **kwargs) -> None:
+    def __init_subclass__(cls, register: bool = True, **kwargs: dict[str, Any]) -> None:
         super().__init_subclass__(**kwargs)
         if register and cls.name:
             AnnotationRegistry._methods[cls.name] = cls
@@ -94,6 +94,6 @@ class AnnotationMethod(ABC):
         reference: Optional[ad.AnnData] = None,
         tissue: Optional[str] = None,
         organism: str = "human",
-        **kwargs,
+        **kwargs: Any,
     ) -> AnnotationResult:
         ...

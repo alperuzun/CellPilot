@@ -4,7 +4,7 @@ import omicverse as ov
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from .annotate import annotate_with_scsa, annotate_with_celltypist, count_marker_gene_expression, save_marker_gene_expression, save_annotation_confidence
+from .annotation import AnnotationOrchestrator
 from .utils import summarize_h5ad
 
 def run_subclustering_workflow(
@@ -110,53 +110,31 @@ def run_subclustering_workflow(
     
     sc.pl.umap(adata, color=['leiden'], show=False, save=f"_{name}_leiden.png")
     
-    # 4. Annotation
+    # 4. Annotation via orchestrator
     print("Running annotation on subclusters...")
-    data_tracker = {'figs': [], 'files': []} # Track files like in annotate.py
-    
-    use_cellmarker = annotation_params.get('use_cellmarker', True)
-    use_panglao = annotation_params.get('use_panglao', False)
-    use_cancersea = annotation_params.get('use_cancer_single_cell_atlas', False)
-    use_celltypist = annotation_params.get('use_celltypist', False)
-    celltypist_model = annotation_params.get('celltypist_model')  # Legacy single model
-    celltypist_models = annotation_params.get('celltypist_models')  # New multiple models
+    data_tracker: Dict[str, List[Any]] = {'figs': [], 'files': []}
 
-    used_annotators = []
+    orchestrator = AnnotationOrchestrator()
+    methods = annotation_params.get('methods', ['cellmarker'])
+    method_options = annotation_params.get('method_options', {})
 
-    # Reuse annotation logic from annotate.py
-    if use_cellmarker:
-        print("Annotating with CellMarker...")
-        adata = annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='cellmarker', name=name, data=data_tracker)
-        used_annotators.append('cellmarker')
+    method_kwargs = {
+        "output_dir": output_dir,
+        "name": name,
+        "timestamp": timestamp,
+        **method_options,
+    }
+    results = orchestrator.run_multiple(methods, adata, **method_kwargs)
 
-    if use_panglao:
-        print("Annotating with PanglaoDB...")
-        adata = annotate_with_scsa(adata, output_dir, cell_type='normal', db_type='panglaodb', name=name, data=data_tracker)
-        used_annotators.append('panglaodb')
+    used_annotators = [r.obs_key for r in results]
+    for r in results:
+        data_tracker['files'].extend(
+            [(a.path, a.label) for a in r.artifacts if a.artifact_type == "file"]
+        )
+        data_tracker['figs'].extend(
+            [(a.path, a.label) for a in r.artifacts if a.artifact_type == "figure"]
+        )
 
-    if use_cancersea:
-        print("Annotating with CancerSEA...")
-        adata = annotate_with_scsa(adata, output_dir, cell_type='cancer', db_type='cancersea', name=name, data=data_tracker)
-        used_annotators.append('cancersea')
-
-    if use_celltypist:
-        print("Annotating with CellTypist...")
-        # Support multiple models (new) or single model (legacy)
-        models_to_run = []
-        if celltypist_models and len(celltypist_models) > 0:
-            models_to_run = celltypist_models
-        elif celltypist_model:
-            models_to_run = [celltypist_model]
-        else:
-            models_to_run = ['Immune_All_Low.pkl']  # Default
-
-        for model_name in models_to_run:
-            print(f"Running CellTypist with model: {model_name}")
-            adata = annotate_with_celltypist(adata, output_dir, model_name=model_name, name=name, data=data_tracker)
-
-        if 'celltypist_prediction' in adata.obs.columns:
-            used_annotators.append('celltypist_prediction')
-        
     # Apply first available annotation to 'cell_type' column as default
     if used_annotators:
         adata.obs['cell_type'] = adata.obs[used_annotators[0]]

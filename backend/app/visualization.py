@@ -30,7 +30,7 @@ COMMON_CELL_MARKERS = [
     'ACTB', 'GAPDH', 'B2M', 'PTPRC'
 ]
 
-def extract_qc_report(h5ad_path: str, adata) -> Dict[str, Any]:
+def extract_qc_report(h5ad_path: str, adata: ad.AnnData) -> Dict[str, Any]:
     """
     Extract QC report data from JSON file or adata.uns
 
@@ -62,8 +62,9 @@ def extract_qc_report(h5ad_path: str, adata) -> Dict[str, Any]:
 
             # Look for text report in uns or file
             text_report = None
-            if 'txt_report_path' in qc_stats and os.path.exists(qc_stats['txt_report_path']):
-                with open(qc_stats['txt_report_path'], 'r') as f:
+            txt_path = str(qc_stats.get('txt_report_path', ''))
+            if txt_path and os.path.exists(txt_path):
+                with open(txt_path, 'r') as f:
                     text_report = f.read()
             
             return {
@@ -115,7 +116,7 @@ def extract_qc_report(h5ad_path: str, adata) -> Dict[str, Any]:
         'report_path': None
     }
 
-def to_builtin(val):
+def to_builtin(val: Any) -> Any:
     if isinstance(val, (np.integer,)):
         return int(val)
     if isinstance(val, (np.floating,)):

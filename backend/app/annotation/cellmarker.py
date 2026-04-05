@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
 import os
 import logging
 from contextlib import redirect_stdout
-from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 import anndata as ad
 import numpy as np
@@ -21,6 +19,7 @@ from .base import (
     AnnotationResult,
     OutputArtifact,
 )
+from .utils import ensure_timestamp, generate_annotation_umap, save_confidence_json
 from ..utils import validate_file_exists
 
 logger = logging.getLogger(__name__)
@@ -75,10 +74,9 @@ class SCSAAnnotationMethod(AnnotationMethod, register=False):
         output_dir: str = "",
         name: str = "",
         timestamp: str = "",
-        **kwargs,
+        **kwargs: dict[str, Any],
     ) -> AnnotationResult:
-        if not timestamp:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        timestamp = ensure_timestamp(timestamp)
 
         db_path = self._get_db_path()
         validate_file_exists(db_path, description="pySCSA Cell Annotation Database")
@@ -115,28 +113,7 @@ class SCSAAnnotationMethod(AnnotationMethod, register=False):
             cluster_rows = anno_df[anno_df["Cluster"] == cluster].sort_values("Z-score", ascending=False)
             confidence[str(cluster)] = float(cluster_rows.iloc[0]["Z-score"]) if len(cluster_rows) > 0 else 0.0
 
-        # Collect artifacts
-        artifacts: list[OutputArtifact] = []
-
-        # -- Annotation details text file
-        details_path = os.path.join(output_dir, f"{name}_{self.DB_TYPE}_annotation_details_{timestamp}.txt")
-        with open(details_path, "w") as f:
-            with redirect_stdout(f):
-                scsa.cell_anno_print()
-        scsa.cell_anno_print()
-        artifacts.append(OutputArtifact(path=details_path, label=f"{self.DB_TYPE} Clusters", artifact_type="file"))
-
-        # -- Confidence JSON
-        confidence_path = self._save_confidence(anno_df, output_dir, name, timestamp)
-        artifacts.append(OutputArtifact(path=confidence_path, label=f"{self.DB_TYPE} Confidence Analysis", artifact_type="file"))
-
-        # -- UMAP plot
-        umap_path = self._generate_umap(adata, output_dir, name, timestamp)
-        artifacts.append(OutputArtifact(path=umap_path, label=f"{self.DB_TYPE} Clusters", artifact_type="figure"))
-
-        # -- Marker gene plots
-        marker_artifacts = self._generate_marker_plots(adata, output_dir, name, timestamp)
-        artifacts.extend(marker_artifacts)
+        artifacts = self._collect_artifacts(scsa, anno_df, adata, output_dir, name, timestamp)
 
         return AnnotationResult(
             labels=labels,
@@ -145,6 +122,43 @@ class SCSAAnnotationMethod(AnnotationMethod, register=False):
             obs_key=self.DB_TYPE,
             artifacts=artifacts,
         )
+
+    # ------------------------------------------------------------------
+    # Artifact collection
+    # ------------------------------------------------------------------
+
+    def _collect_artifacts(
+        self,
+        scsa: ov.single.pySCSA,
+        anno_df: pd.DataFrame,
+        adata: ad.AnnData,
+        output_dir: str,
+        name: str,
+        timestamp: str,
+    ) -> list[OutputArtifact]:
+        artifacts: list[OutputArtifact] = []
+
+        # Annotation details text file
+        details_path = os.path.join(output_dir, f"{name}_{self.DB_TYPE}_annotation_details_{timestamp}.txt")
+        with open(details_path, "w") as f:
+            with redirect_stdout(f):
+                scsa.cell_anno_print()
+        scsa.cell_anno_print()
+        artifacts.append(OutputArtifact(path=details_path, label=f"{self.DB_TYPE} Clusters", artifact_type="file"))
+
+        # Confidence JSON
+        confidence_path = self._save_confidence(anno_df, output_dir, name, timestamp)
+        artifacts.append(OutputArtifact(path=confidence_path, label=f"{self.DB_TYPE} Confidence Analysis", artifact_type="file"))
+
+        # UMAP plot
+        umap_path = self._generate_umap(adata, output_dir, name, timestamp)
+        if umap_path:
+            artifacts.append(OutputArtifact(path=umap_path, label=f"{self.DB_TYPE} Clusters", artifact_type="figure"))
+
+        # Marker gene plots
+        artifacts.extend(self._generate_marker_plots(adata, output_dir, name, timestamp))
+
+        return artifacts
 
     # ------------------------------------------------------------------
     # Confidence scoring (ported from annotate.py save_annotation_confidence)
@@ -215,37 +229,17 @@ class SCSAAnnotationMethod(AnnotationMethod, register=False):
             }
 
         json_path = os.path.join(output_dir, f"{name}_{self.DB_TYPE}_annotation_confidence_{timestamp}.json")
-        with open(json_path, "w") as f:
-            json.dump(confidence_results, f, indent=2)
-        self.logger.info("Confidence data saved to %s", json_path)
-        return json_path
+        return save_confidence_json(confidence_results, json_path)
 
     # ------------------------------------------------------------------
     # UMAP (ported from annotate.py annotate_with_scsa)
     # ------------------------------------------------------------------
 
-    def _generate_umap(self, adata: ad.AnnData, output_dir: str, name: str, timestamp: str) -> str:
-        counts = adata.obs[self.DB_TYPE].value_counts().to_dict()
-        new_cats = {
-            cat: f"{cat} (n={counts[cat]})"
-            for cat in adata.obs[self.DB_TYPE].astype("category").cat.categories
-        }
-        annot_col = f"{self.DB_TYPE}_cnt"
-        adata.obs[annot_col] = adata.obs[self.DB_TYPE].astype("category").cat.rename_categories(new_cats)
-
-        fig, ax = ov.utils.plot_embedding(
-            adata,
-            basis="X_mde",
-            color=annot_col,
-            legend_loc="on data",
-            frameon="small",
-            legend_fontoutline=2,
-            palette=ov.utils.palette()[14:],
-            title=f"{self.DB_TYPE} annotation",
-        )
+    def _generate_umap(self, adata: ad.AnnData, output_dir: str, name: str, timestamp: str) -> Optional[str]:
         path = os.path.join(output_dir, f"{name}_{self.DB_TYPE}_scsa_annotation_{timestamp}.png")
-        fig.savefig(path, dpi=300)
-        return path
+        return generate_annotation_umap(
+            adata, self.DB_TYPE, f"{self.DB_TYPE} annotation", path, palette_offset=14,
+        )
 
     # ------------------------------------------------------------------
     # Marker gene plots (ported from annotate.py)

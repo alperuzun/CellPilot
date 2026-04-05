@@ -126,7 +126,7 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
         await api.annotateResolution({
           input_path: h5adPath,
           resolution,
-          use_cellmarker: true,
+          methods: ['cellmarker'],
         });
         // The annotation runs as a background job - we should poll for completion
         // For now, just refresh after a delay

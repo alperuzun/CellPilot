@@ -56,6 +56,13 @@ export default function SubclusterConfigModal({
   const [manualMarkerText, setManualMarkerText] = useState('');
   const [manualInputType, setManualInputType] = useState<'file' | 'text'>('file');
 
+  // mLLMCelltype Params
+  const [useMllm, setUseMllm] = useState(false);
+  const [mllmMode, setMllmMode] = useState<'single' | 'consensus'>('consensus');
+  const [mllmModels, setMllmModels] = useState<string[]>(['gpt-4o', 'claude-sonnet-4-5-20250929', 'gemini-2.0-flash']);
+  const [mllmProvider, setMllmProvider] = useState('openai');
+  const [mllmModel, setMllmModel] = useState('gpt-4o');
+
   // Load CellTypist models
   useEffect(() => {
     const fetchModels = async () => {
@@ -84,7 +91,7 @@ export default function SubclusterConfigModal({
       return;
     }
 
-    if (!useCellMarker && !usePanglao && !useCancerSEA && !useCellTypist && !useManualAnnotation) {
+    if (!useCellMarker && !usePanglao && !useCancerSEA && !useCellTypist && !useManualAnnotation && !useMllm) {
         setError("Please select at least one annotation method.");
         return;
     }
@@ -115,14 +122,31 @@ export default function SubclusterConfigModal({
           resolution: resolution
         },
         annotation_params: {
-          use_cellmarker: useCellMarker,
-          use_panglao: usePanglao,
-          use_cancer_single_cell_atlas: useCancerSEA,
-          use_celltypist: useCellTypist,
-          celltypist_models: selectedCellTypistModels,
-          use_manual_annotation: useManualAnnotation,
-          manual_marker_file: manualMarkerFile,
-          manual_marker_text: manualMarkerText
+          methods: [
+            ...(useCellMarker ? ['cellmarker'] : []),
+            ...(usePanglao ? ['panglaodb'] : []),
+            ...(useCancerSEA ? ['cancersea'] : []),
+            ...(useCellTypist ? ['celltypist'] : []),
+            ...(useManualAnnotation ? ['manual'] : []),
+            ...(useMllm ? ['mllm'] : []),
+          ],
+          method_options: {
+            ...(useCellTypist && selectedCellTypistModels?.length && { celltypist: { models: selectedCellTypistModels } }),
+            ...(useManualAnnotation && {
+              manual: {
+                ...(manualMarkerFile && { marker_file: manualMarkerFile }),
+                ...(manualMarkerText && { marker_text: manualMarkerText }),
+              },
+            }),
+            ...(useMllm && {
+              mllm: {
+                mode: mllmMode,
+                models: mllmModels,
+                provider: mllmProvider,
+                model: mllmModel,
+              },
+            }),
+          },
         }
       });
       
@@ -344,6 +368,85 @@ export default function SubclusterConfigModal({
                 onInputTypeChange={setManualInputType}
               />
             </ThemeProvider>
+          </div>
+
+          {/* LLM-Based Annotation */}
+          <div className="space-y-2">
+            <p className="text-xs text-gray-500 mb-2">LLM-Based Annotation</p>
+            <div className="bg-cyan-900/20 rounded-md p-2 border border-cyan-800/30">
+              <label className="flex items-start gap-2 cursor-pointer group mb-2">
+                <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${useMllm ? 'bg-cyan-600 border-cyan-600' : 'border-neutral-600 bg-neutral-900'}`}>
+                  {useMllm && <Check size={12} className="text-white" />}
+                </div>
+                <input type="checkbox" checked={useMllm} onChange={(e) => setUseMllm(e.target.checked)} className="hidden" />
+                <div>
+                  <span className="text-sm text-gray-300 group-hover:text-white flex items-center gap-2">
+                    mLLMCelltype
+                    <span className="px-1 py-0.5 text-[10px] bg-cyan-900/50 text-cyan-400 rounded">LLM</span>
+                  </span>
+                  <span className="text-[10px] text-gray-500 block">Multi-LLM consensus annotation from marker genes</span>
+                </div>
+              </label>
+
+              {useMllm && (
+                <div className="ml-6 mt-2 space-y-2">
+                  {/* Mode toggle */}
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setMllmMode('consensus')}
+                      className={`px-2 py-1 text-[10px] rounded ${mllmMode === 'consensus' ? 'bg-cyan-700 text-white' : 'bg-neutral-800 text-gray-400'}`}>
+                      Consensus
+                    </button>
+                    <button type="button" onClick={() => setMllmMode('single')}
+                      className={`px-2 py-1 text-[10px] rounded ${mllmMode === 'single' ? 'bg-cyan-700 text-white' : 'bg-neutral-800 text-gray-400'}`}>
+                      Single Model
+                    </button>
+                  </div>
+
+                  {/* Model checkboxes for consensus mode */}
+                  {mllmMode === 'consensus' && (
+                    <div className="space-y-1 border border-neutral-700 rounded-md p-2 bg-neutral-900">
+                      {[
+                        { id: 'gpt-4o', label: 'GPT-4o (OpenAI)' },
+                        { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5 (Anthropic)' },
+                        { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (Google)' },
+                      ].map(m => (
+                        <label key={m.id} className="flex items-center gap-2 text-[10px] text-gray-300 cursor-pointer hover:bg-neutral-800 rounded p-1">
+                          <input type="checkbox" checked={mllmModels.includes(m.id)}
+                            onChange={(e) => setMllmModels(prev => e.target.checked ? [...prev, m.id] : prev.filter(x => x !== m.id))}
+                            className="h-3 w-3 text-cyan-600 rounded border-neutral-600 bg-neutral-800" />
+                          {m.label}
+                        </label>
+                      ))}
+                      {mllmModels.length > 0 && (
+                        <p className="text-[10px] text-cyan-400 mt-1">{mllmModels.length} model(s) selected</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Single mode: provider + model */}
+                  {mllmMode === 'single' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-1">Provider</label>
+                        <select value={mllmProvider} onChange={(e) => setMllmProvider(e.target.value)}
+                          className="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-gray-300">
+                          <option value="openai">OpenAI</option>
+                          <option value="anthropic">Anthropic</option>
+                          <option value="google">Google</option>
+                          <option value="openrouter">OpenRouter</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-1">Model</label>
+                        <input type="text" value={mllmModel} onChange={(e) => setMllmModel(e.target.value)}
+                          className="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-gray-300"
+                          placeholder="gpt-4o" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

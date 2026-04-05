@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from typing import Optional
+from typing import Any, Optional
 
 import anndata as ad
 
@@ -17,7 +17,7 @@ class AnnotationOrchestrator:
         self,
         method_names: list[str],
         adata: ad.AnnData,
-        **kwargs,
+        **kwargs: Any,
     ) -> list[AnnotationResult]:
         results: list[AnnotationResult] = []
         for method_name in method_names:
@@ -33,7 +33,6 @@ class AnnotationOrchestrator:
                 logger.warning("Skipping method %s: %s", method_name, reason)
                 continue
 
-            # Merge method-specific options (e.g. kwargs["celltypist"] dict)
             method_kwargs = dict(kwargs)
             method_kwargs.update(kwargs.get(method_name, {}))
 
@@ -41,18 +40,17 @@ class AnnotationOrchestrator:
             try:
                 result = method.annotate(adata, **method_kwargs)
                 results.append(result)
-            except Exception:
+            except Exception as e:
                 logger.exception("Method %s failed", method_name)
+                raise e
         return results
 
     def compute_consensus(
         self,
         results: list[AnnotationResult],
         adata: ad.AnnData,
-    ) -> Optional[AnnotationResult]:
+    ) -> AnnotationResult:
         """Majority-vote consensus across multiple annotation methods."""
-        if len(results) <= 1:
-            return None
 
         clusters: set[str] = set()
         for r in results:

@@ -29,7 +29,7 @@ def perform_differential_expression(
         group_col = 'cellpilot_dge_group'
         
         # Logic to define "Rest" / "Reference"
-        target_cells = []
+        target_cells: List[str] = []
         reference_group_name = 'Rest'
         
         if mode == 'local':

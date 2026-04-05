@@ -1,77 +1,95 @@
 """
-Simple in-memory job manager for tracking analysis progress.
-In production, this would be replaced with Redis/database.
+In-memory job manager for tracking background analysis progress.
+
+In production this would be backed by Redis or a database; for the
+single-process desktop backend an in-memory dict is sufficient.
 """
+import logging
 import uuid
-import time
-import asyncio
-from typing import Dict, Any, Optional
 from datetime import datetime
-from pathlib import Path
+from typing import Any, Dict, Optional
 
-class JobStatus:
-    def __init__(self, job_id: str, name: str):
-        self.job_id = job_id
-        self.name = name
-        self.status = "pending"  # pending, running, completed, failed
-        self.progress = 0.0
-        self.current_step = "Initializing..."
-        self.message = None
-        self.result = None
-        self.created_at = datetime.now()
-        self.started_at = None
-        self.completed_at = None
+from pydantic import BaseModel, Field
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "job_id": self.job_id,
-            "status": self.status,
-            "progress": self.progress,
-            "current_step": self.current_step,
-            "message": self.message,
-            "result": self.result
-        }
+logger = logging.getLogger(__name__)
+
+
+class JobStatus(BaseModel):
+    """Internal state of a single background job."""
+
+    job_id: str
+    name: str
+    status: str = "pending"  # pending | running | completed | failed
+    progress: float = 0.0
+    current_step: str = "Initializing..."
+    message: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+    created_at: datetime = Field(default_factory=datetime.now)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
 
 class JobManager:
-    def __init__(self):
-        self.jobs: Dict[str, JobStatus] = {}
+    """Create and track background jobs by id."""
+
+    def __init__(self) -> None:
+        self._jobs: Dict[str, JobStatus] = {}
 
     def create_job(self, name: str) -> str:
         job_id = str(uuid.uuid4())
-        self.jobs[job_id] = JobStatus(job_id, name)
+        self._jobs[job_id] = JobStatus(job_id=job_id, name=name)
+        logger.info("Created job %s (%s)", job_id[:8], name)
         return job_id
 
     def get_job(self, job_id: str) -> Optional[JobStatus]:
-        return self.jobs.get(job_id)
+        return self._jobs.get(job_id)
 
-    def update_job(self, job_id: str, **kwargs):
-        if job_id in self.jobs:
-            job = self.jobs[job_id]
-            for key, value in kwargs.items():
-                if hasattr(job, key):
-                    setattr(job, key, value)
+    def update_progress(
+        self,
+        job_id: str,
+        progress: float,
+        current_step: str,
+    ) -> None:
+        """Update the progress percentage and step description."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            logger.warning("update_progress: unknown job %s", job_id)
+            return
+        job.progress = progress
+        job.current_step = current_step
+        logger.debug("Job %s — %.0f%% %s", job_id[:8], progress * 100, current_step)
 
-    def start_job(self, job_id: str):
-        if job_id in self.jobs:
-            job = self.jobs[job_id]
-            job.status = "running"
-            job.started_at = datetime.now()
+    def start_job(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)
+        if job is None:
+            logger.warning("start_job: unknown job %s", job_id)
+            return
+        job.status = "running"
+        job.started_at = datetime.now()
+        logger.info("Job %s started", job_id[:8])
 
-    def complete_job(self, job_id: str, result: Dict[str, Any]):
-        if job_id in self.jobs:
-            job = self.jobs[job_id]
-            job.status = "completed"
-            job.progress = 1.0
-            job.current_step = "Completed"
-            job.result = result
-            job.completed_at = datetime.now()
+    def complete_job(self, job_id: str, result: Dict[str, Any]) -> None:
+        job = self._jobs.get(job_id)
+        if job is None:
+            logger.warning("complete_job: unknown job %s", job_id)
+            return
+        job.status = "completed"
+        job.progress = 1.0
+        job.current_step = "Completed"
+        job.result = result
+        job.completed_at = datetime.now()
+        logger.info("Job %s completed", job_id[:8])
 
-    def fail_job(self, job_id: str, error_message: str):
-        if job_id in self.jobs:
-            job = self.jobs[job_id]
-            job.status = "failed"
-            job.message = error_message
-            job.completed_at = datetime.now()
+    def fail_job(self, job_id: str, error_message: str) -> None:
+        job = self._jobs.get(job_id)
+        if job is None:
+            logger.warning("fail_job: unknown job %s", job_id)
+            return
+        job.status = "failed"
+        job.message = error_message
+        job.completed_at = datetime.now()
+        logger.error("Job %s failed: %s", job_id[:8], error_message)
 
-# Global job manager instance
+
+# Global singleton
 job_manager = JobManager()

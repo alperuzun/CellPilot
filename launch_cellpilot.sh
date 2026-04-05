@@ -94,7 +94,7 @@ fi
 echo "▶️  Starting API server..."
 pushd "$(dirname "$0")/backend" >/dev/null
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload \
-  > ../backend.log 2>&1 &
+  2> ../backend_stderr.log &
 BACKEND_PID=$!
 popd >/dev/null
 

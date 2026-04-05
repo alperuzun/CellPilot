@@ -64,9 +64,24 @@ export interface AnalysisData {
   manualMarkerText: string;
   manualInputType: 'file' | 'text';
 
-  // Other Analysis types
-  runCellPhone: boolean;
-  runInferCNV: boolean;
+  // Ensemble Annotation (PopV)
+  usePopV: boolean;
+  popvMode: 'pretrained' | 'custom';
+  popvPredictionMode: 'fast' | 'inference' | 'retrain';
+  popvModelRepo: string;
+  popvBatchKey: string;
+  popvRefPath: string;
+  popvRefLabelsKey: string;
+  popvRefBatchKey: string;
+
+  // LLM-Based Annotation (mLLMCelltype)
+  useMllm: boolean;
+  mllmMode: 'single' | 'consensus';
+  mllmModels: string[];
+  mllmProvider: string;
+  mllmModel: string;
+  mllmConsensusThreshold: number;
+  mllmMaxDiscussionRounds: number;
 
   // Results
   analysisId?: string;
@@ -129,8 +144,21 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     manualMarkerFile: analysisData?.manualMarkerFile || null,
     manualMarkerText: analysisData?.manualMarkerText || '',
     manualInputType: analysisData?.manualInputType || 'file',
-    runCellPhone: analysisData?.runCellPhone ?? false,
-    runInferCNV: analysisData?.runInferCNV ?? false,
+    usePopV: analysisData?.usePopV ?? false,
+    popvMode: analysisData?.popvMode || 'pretrained',
+    popvPredictionMode: analysisData?.popvPredictionMode || 'fast',
+    popvModelRepo: analysisData?.popvModelRepo || 'popV/tabula_sapiens_All_Cells',
+    popvBatchKey: analysisData?.popvBatchKey || '',
+    popvRefPath: analysisData?.popvRefPath || '',
+    popvRefLabelsKey: analysisData?.popvRefLabelsKey || 'cell_ontology_class',
+    popvRefBatchKey: analysisData?.popvRefBatchKey || '',
+    useMllm: analysisData?.useMllm ?? false,
+    mllmMode: analysisData?.mllmMode || 'consensus',
+    mllmModels: analysisData?.mllmModels || ['gpt-4o', 'claude-sonnet-4-5-20250929', 'gemini-2.0-flash'],
+    mllmProvider: analysisData?.mllmProvider || 'openai',
+    mllmModel: analysisData?.mllmModel || 'gpt-4o',
+    mllmConsensusThreshold: analysisData?.mllmConsensusThreshold ?? 0.7,
+    mllmMaxDiscussionRounds: analysisData?.mllmMaxDiscussionRounds ?? 3,
     status: analysisData?.status || 'pending'
   });
 
@@ -202,7 +230,7 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
 
   const validateCurrentStep = (): string | null => {
     if (currentWizardStep === 'annotation') {
-      if (!config.useCellmarker && !config.usePanglao && !config.useCancerSingleCellAtlas && !config.useCellTypist && !config.useManualAnnotation) {
+      if (!config.useCellmarker && !config.usePanglao && !config.useCancerSingleCellAtlas && !config.useCellTypist && !config.useManualAnnotation && !config.useMllm && !config.usePopV) {
         return 'Please select at least one annotation method';
       }
       if (config.useManualAnnotation) {
@@ -212,6 +240,9 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
         if (config.manualInputType === 'text' && !config.manualMarkerText.trim()) {
           return 'Please enter marker text for manual annotation';
         }
+      }
+      if (config.usePopV && config.popvMode === 'custom' && !config.popvRefPath.trim()) {
+        return 'Please provide a reference dataset for PopV custom reference mode';
       }
     }
     return null;
@@ -261,16 +292,47 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
         },
         analysis_params: {
           runAnnotation: config.runAnnotation,
-          runCellPhone: config.runCellPhone,
-          runInferCNV: config.runInferCNV,
-          use_cellmarker: config.useCellmarker,
-          use_panglao: config.usePanglao,
-          use_cancer_single_cell_atlas: config.useCancerSingleCellAtlas,
-          use_celltypist: config.useCellTypist,
-          celltypist_models: config.cellTypistModels,
-          use_manual_annotation: config.useManualAnnotation,
-          manual_marker_file: config.manualMarkerFile,
-          manual_marker_text: config.manualMarkerText,
+          methods: [
+            ...(config.useCellmarker ? ['cellmarker'] : []),
+            ...(config.usePanglao ? ['panglaodb'] : []),
+            ...(config.useCancerSingleCellAtlas ? ['cancersea'] : []),
+            ...(config.useCellTypist ? ['celltypist'] : []),
+            ...(config.useManualAnnotation ? ['manual'] : []),
+            ...(config.useMllm ? ['mllm'] : []),
+            ...(config.usePopV ? ['popv'] : []),
+          ],
+          method_options: {
+            ...(config.useCellTypist && config.cellTypistModels?.length && { celltypist: { models: config.cellTypistModels } }),
+            ...(config.useManualAnnotation && {
+              manual: {
+                ...(config.manualMarkerFile && { marker_file: config.manualMarkerFile }),
+                ...(config.manualMarkerText && { marker_text: config.manualMarkerText }),
+              },
+            }),
+            ...(config.useMllm && {
+              mllm: {
+                mode: config.mllmMode,
+                models: config.mllmModels,
+                provider: config.mllmProvider,
+                model: config.mllmModel,
+                consensus_threshold: config.mllmConsensusThreshold,
+                max_discussion_rounds: config.mllmMaxDiscussionRounds,
+              },
+            }),
+            ...(config.usePopV && {
+              popv: {
+                prediction_mode: config.popvPredictionMode,
+                ...(config.popvMode === 'pretrained'
+                  ? { model_repo: config.popvModelRepo }
+                  : {
+                      ref_path: config.popvRefPath,
+                      ref_labels_key: config.popvRefLabelsKey,
+                      ...(config.popvRefBatchKey && { ref_batch_key: config.popvRefBatchKey }),
+                    }),
+                ...(config.popvBatchKey && { batch_key: config.popvBatchKey }),
+              },
+            }),
+          },
           n_hvgs: config.numHVGs,
           n_pcs: config.numPCs,
           n_neighbors: config.numNeighbors,
@@ -902,6 +964,254 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
         </label>
       </div>
 
+      {/* Ensemble Methods (PopV) */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+            <Layers size={18} className="text-indigo-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Ensemble Methods</h3>
+            <p className="text-xs text-gray-500">Multi-algorithm consensus annotation</p>
+          </div>
+        </div>
+
+        <label className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
+          config.usePopV ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'
+        }`}>
+          <div className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={config.usePopV}
+              onChange={(e) => updateConfig({ usePopV: e.target.checked })}
+              className="mt-1 h-4 w-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">PopV</span>
+                <span className="text-xs px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">Ensemble</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Runs 8 classifiers (KNN, RF, SVM, scANVI, OnClass, CellTypist) with majority voting.
+                Published in Nature Genetics 2024.
+              </p>
+            </div>
+          </div>
+
+          {config.usePopV && (
+            <div className="mt-4 pt-4 border-t border-indigo-200 space-y-4">
+              {/* Reference Mode Toggle */}
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-2">Reference Source:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => updateConfig({ popvMode: 'pretrained', popvPredictionMode: 'fast' })}
+                    className={`p-3 rounded-lg border-2 text-left text-xs ${
+                      config.popvMode === 'pretrained' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200'
+                    }`}
+                  >
+                    <span className="font-medium">Pretrained Model</span>
+                    <span className="text-gray-500 block mt-1">78 models from Tabula Sapiens/Muris</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateConfig({ popvMode: 'custom', popvPredictionMode: 'retrain' })}
+                    className={`p-3 rounded-lg border-2 text-left text-xs ${
+                      config.popvMode === 'custom' ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200'
+                    }`}
+                  >
+                    <span className="font-medium">Custom Reference</span>
+                    <span className="text-gray-500 block mt-1">Your own annotated h5ad dataset</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Pretrained mode: model selector + prediction mode */}
+              {config.popvMode === 'pretrained' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Pretrained Model</label>
+                    <select
+                      value={config.popvModelRepo}
+                      onChange={(e) => updateConfig({ popvModelRepo: e.target.value })}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <optgroup label="Human — Tabula Sapiens (broad)">
+                        <option value="popV/tabula_sapiens_All_Cells">All Cells</option>
+                        <option value="popV/tabula_sapiens_Immune">Immune</option>
+                        <option value="popV/tabula_sapiens_Endothelium">Endothelium</option>
+                        <option value="popV/tabula_sapiens_Epithelium">Epithelium</option>
+                        <option value="popV/tabula_sapiens_Stromal">Stromal</option>
+                        <option value="popV/tabula_sapiens_Neural">Neural</option>
+                        <option value="popV/tabula_sapiens_Germline">Germline</option>
+                      </optgroup>
+                      <optgroup label="Human — Tabula Sapiens (by tissue)">
+                        <option value="popV/tabula_sapiens_Blood">Blood</option>
+                        <option value="popV/tabula_sapiens_Bone_Marrow">Bone Marrow</option>
+                        <option value="popV/tabula_sapiens_Heart">Heart</option>
+                        <option value="popV/tabula_sapiens_Kidney">Kidney</option>
+                        <option value="popV/tabula_sapiens_Liver">Liver</option>
+                        <option value="popV/tabula_sapiens_Lung">Lung</option>
+                        <option value="popV/tabula_sapiens_Lymph_Node">Lymph Node</option>
+                        <option value="popV/tabula_sapiens_Pancreas">Pancreas</option>
+                        <option value="popV/tabula_sapiens_Skin">Skin</option>
+                        <option value="popV/tabula_sapiens_Spleen">Spleen</option>
+                        <option value="popV/tabula_sapiens_Eye">Eye</option>
+                        <option value="popV/tabula_sapiens_Fat">Fat</option>
+                        <option value="popV/tabula_sapiens_Mammary">Mammary</option>
+                        <option value="popV/tabula_sapiens_Muscle">Muscle</option>
+                        <option value="popV/tabula_sapiens_Prostate">Prostate</option>
+                        <option value="popV/tabula_sapiens_Bladder">Bladder</option>
+                        <option value="popV/tabula_sapiens_Large_Intestine">Large Intestine</option>
+                        <option value="popV/tabula_sapiens_Small_Intestine">Small Intestine</option>
+                        <option value="popV/tabula_sapiens_Stomach">Stomach</option>
+                        <option value="popV/tabula_sapiens_Thymus">Thymus</option>
+                        <option value="popV/tabula_sapiens_Trachea">Trachea</option>
+                        <option value="popV/tabula_sapiens_Uterus">Uterus</option>
+                        <option value="popV/tabula_sapiens_Ovary">Ovary</option>
+                        <option value="popV/tabula_sapiens_Testis">Testis</option>
+                        <option value="popV/tabula_sapiens_Vasculature">Vasculature</option>
+                        <option value="popV/tabula_sapiens_Salivary_Gland">Salivary Gland</option>
+                        <option value="popV/tabula_sapiens_Tongue">Tongue</option>
+                        <option value="popV/tabula_sapiens_Ear">Ear</option>
+                      </optgroup>
+                      <optgroup label="Mouse — Tabula Muris">
+                        <option value="popV/tabula_muris_All">All (combined)</option>
+                        <option value="popV/tabula_muris_All_10x">All (10x)</option>
+                        <option value="popV/tabula_muris_All_Smart-seq2">All (Smart-seq2)</option>
+                        <option value="popV/tabula_muris_Bone_marrow_10x">Bone Marrow</option>
+                        <option value="popV/tabula_muris_Spleen_10x">Spleen</option>
+                        <option value="popV/tabula_muris_Lung_10x">Lung</option>
+                        <option value="popV/tabula_muris_Kidney_10x">Kidney</option>
+                        <option value="popV/tabula_muris_Heart_10x">Heart</option>
+                        <option value="popV/tabula_muris_Liver_10x">Liver</option>
+                        <option value="popV/tabula_muris_Pancreas_10x">Pancreas</option>
+                        <option value="popV/tabula_muris_Thymus_10x">Thymus</option>
+                        <option value="popV/tabula_muris_Mammary_gland_10x">Mammary Gland</option>
+                        <option value="popV/tabula_muris_Skin_of_body_10x">Skin</option>
+                      </optgroup>
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">Downloaded from HuggingFace on first use</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-2">Prediction Mode:</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {([
+                        { id: 'fast', label: 'Fast', desc: '~5 min' },
+                        { id: 'inference', label: 'Inference', desc: '~30 min' },
+                        { id: 'retrain', label: 'Retrain', desc: '~1 hr, GPU' },
+                      ] as const).map(mode => (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => updateConfig({ popvPredictionMode: mode.id })}
+                          className={`p-2 rounded-lg border-2 text-center text-xs ${
+                            config.popvPredictionMode === mode.id
+                              ? 'border-indigo-500 bg-indigo-50'
+                              : 'border-gray-200'
+                          }`}
+                        >
+                          <span className="font-medium">{mode.label}</span>
+                          <span className="text-gray-500 block">{mode.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Custom reference mode */}
+              {config.popvMode === 'custom' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Reference Dataset (h5ad)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={config.popvRefPath}
+                        onChange={(e) => updateConfig({ popvRefPath: e.target.value })}
+                        className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
+                        placeholder="/path/to/reference.h5ad"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const result = await (window as any).electronAPI?.openFileDialog?.({
+                              filters: [{ name: 'H5AD Files', extensions: ['h5ad'] }],
+                            });
+                            if (result) updateConfig({ popvRefPath: result });
+                          } catch (e) {
+                            console.error('File dialog error:', e);
+                          }
+                        }}
+                        className="px-3 py-1.5 text-sm bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+                      >
+                        Browse
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Annotated h5ad with cell-type labels in .obs</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Labels Key</label>
+                      <input
+                        type="text"
+                        value={config.popvRefLabelsKey}
+                        onChange={(e) => updateConfig({ popvRefLabelsKey: e.target.value })}
+                        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
+                        placeholder="cell_ontology_class"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Ref Batch Key (optional)</label>
+                      <input
+                        type="text"
+                        value={config.popvRefBatchKey}
+                        onChange={(e) => updateConfig({ popvRefBatchKey: e.target.value })}
+                        className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
+                        placeholder="donor_method"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                    <p className="text-xs text-indigo-700">
+                      Custom reference mode trains all classifiers from scratch (~1 hr, GPU recommended).
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* Batch Key (both modes) */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Query Batch Key (optional)</label>
+                <input
+                  type="text"
+                  value={config.popvBatchKey}
+                  onChange={(e) => updateConfig({ popvBatchKey: e.target.value })}
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. sample, batch, donor"
+                />
+                <p className="text-xs text-gray-400 mt-1">Batch correction key in your query data. Leave empty if single-batch.</p>
+              </div>
+
+              {/* CellTypist overlap note */}
+              {config.useCellTypist && (
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-xs text-amber-700">
+                    Note: PopV includes CellTypist internally. Having both enabled is fine — standalone CellTypist may use different models, and each counts as one vote in consensus.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </label>
+      </div>
+
       {/* Custom Markers */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center gap-2 mb-4">
@@ -927,6 +1237,186 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
             onInputTypeChange={(type) => updateConfig({ manualInputType: type })}
           />
         </ThemeProvider>
+      </div>
+
+      {/* LLM-Based Annotation */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-lg bg-cyan-100 flex items-center justify-center">
+            <Tag size={18} className="text-cyan-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">LLM-Based Annotation</h3>
+            <p className="text-xs text-gray-500">Multi-LLM consensus cell type prediction</p>
+          </div>
+        </div>
+
+        <label className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
+          config.useMllm ? 'border-cyan-500 bg-cyan-50' : 'border-gray-200 hover:border-gray-300'
+        }`}>
+          <div className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={config.useMllm}
+              onChange={(e) => updateConfig({ useMllm: e.target.checked })}
+              className="mt-1 h-4 w-4 text-cyan-600 rounded border-gray-300 focus:ring-cyan-500"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-gray-900">mLLMCelltype</span>
+                <span className="text-xs px-1.5 py-0.5 bg-cyan-100 text-cyan-700 rounded">LLM</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Uses large language models to annotate cell types from marker genes.
+                Requires API keys set as environment variables.
+              </p>
+            </div>
+          </div>
+
+          {config.useMllm && (
+            <div className="mt-4 pt-4 border-t border-cyan-200 space-y-4">
+              {/* Mode selector */}
+              <div>
+                <p className="text-xs font-medium text-gray-700 mb-2">Annotation Mode:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => updateConfig({ mllmMode: 'consensus' })}
+                    className={`p-3 rounded-lg border-2 text-left text-xs ${
+                      config.mllmMode === 'consensus'
+                        ? 'border-cyan-500 bg-cyan-50'
+                        : 'border-gray-200'
+                    }`}
+                  >
+                    <span className="font-medium">Multi-Model Consensus</span>
+                    <span className="text-gray-500 block mt-1">
+                      Multiple LLMs discuss and agree on annotations
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateConfig({ mllmMode: 'single' })}
+                    className={`p-3 rounded-lg border-2 text-left text-xs ${
+                      config.mllmMode === 'single'
+                        ? 'border-cyan-500 bg-cyan-50'
+                        : 'border-gray-200'
+                    }`}
+                  >
+                    <span className="font-medium">Single Model</span>
+                    <span className="text-gray-500 block mt-1">
+                      Use one LLM model for annotation
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Consensus mode: model checkboxes */}
+              {config.mllmMode === 'consensus' && (
+                <div>
+                  <p className="text-xs font-medium text-gray-700 mb-2">Select Models:</p>
+                  <div className="space-y-1">
+                    {[
+                      { id: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI' },
+                      { id: 'gpt-4.1', label: 'GPT-4.1', provider: 'OpenAI' },
+                      { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', provider: 'Anthropic' },
+                      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'Google' },
+                      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'Google' },
+                    ].map(m => (
+                      <label key={m.id} className="flex items-center gap-2 p-2 rounded hover:bg-cyan-100/50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={config.mllmModels.includes(m.id)}
+                          onChange={(e) => {
+                            const newModels = e.target.checked
+                              ? [...config.mllmModels, m.id]
+                              : config.mllmModels.filter(id => id !== m.id);
+                            updateConfig({ mllmModels: newModels });
+                          }}
+                          className="h-3.5 w-3.5 text-cyan-600 rounded border-gray-300 focus:ring-cyan-500"
+                        />
+                        <span className="text-xs">
+                          <span className="font-medium text-gray-900">{m.label}</span>
+                          <span className="text-gray-400 ml-1">({m.provider})</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {config.mllmModels.length > 0 && (
+                    <p className="text-xs text-cyan-600 mt-2 font-medium">
+                      {config.mllmModels.length} model(s) selected
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Single mode: provider + model selectors */}
+              {config.mllmMode === 'single' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Provider</label>
+                    <select
+                      value={config.mllmProvider}
+                      onChange={(e) => updateConfig({ mllmProvider: e.target.value })}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-cyan-500"
+                    >
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="google">Google</option>
+                      <option value="openrouter">OpenRouter</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Model</label>
+                    <input
+                      type="text"
+                      value={config.mllmModel}
+                      onChange={(e) => updateConfig({ mllmModel: e.target.value })}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-cyan-500"
+                      placeholder="gpt-4o"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Advanced Settings (collapsed) */}
+              <details className="group">
+                <summary className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-700 flex items-center gap-1">
+                  <ChevronRight size={12} className="group-open:rotate-90 transition-transform" />
+                  Advanced Settings
+                </summary>
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  {config.mllmMode === 'consensus' && (
+                    <>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Consensus Threshold</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0.1"
+                          max="1.0"
+                          value={config.mllmConsensusThreshold}
+                          onChange={(e) => updateConfig({ mllmConsensusThreshold: Number(e.target.value) })}
+                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Max Discussion Rounds</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={config.mllmMaxDiscussionRounds}
+                          onChange={(e) => updateConfig({ mllmMaxDiscussionRounds: Number(e.target.value) })}
+                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              </details>
+            </div>
+          )}
+        </label>
       </div>
     </div>
   );
@@ -1013,6 +1503,16 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
               </span>
             )}
             {config.useManualAnnotation && <span className="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">Custom Markers</span>}
+            {config.useMllm && (
+              <span className="px-2 py-1 text-xs font-medium bg-cyan-100 text-cyan-700 rounded-full">
+                mLLMCelltype ({config.mllmMode === 'consensus' ? `${config.mllmModels.length} models` : config.mllmModel})
+              </span>
+            )}
+            {config.usePopV && (
+              <span className="px-2 py-1 text-xs font-medium bg-indigo-100 text-indigo-700 rounded-full">
+                PopV ({config.popvMode === 'pretrained' ? config.popvModelRepo.split('/').pop() : 'custom ref'})
+              </span>
+            )}
           </div>
         </div>
       </div>

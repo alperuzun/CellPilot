@@ -1,10 +1,9 @@
 import os
+
 import anndata as ad
 import scanpy as sc
 from fastapi import HTTPException
-from .sync.lock_manager import FileLockManager
 
-lock_manager = FileLockManager()
 
 def load_adata(path: str) -> ad.AnnData:
     """Shared utility: load h5ad or 10x h5, raise 404 if missing."""
