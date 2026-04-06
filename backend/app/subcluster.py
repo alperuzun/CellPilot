@@ -7,6 +7,13 @@ from typing import List, Dict, Any, Optional
 from .annotation import AnnotationOrchestrator
 from .utils import summarize_h5ad
 
+# Per-cell annotation methods cannot meaningfully re-run on a cell subset
+# (each cell would get the same prediction it had in the parent because its
+# gene expression is unchanged). Cluster-level methods produce new labels
+# because re-clustering a subset reveals new sub-populations.
+PER_CELL_METHODS = {"popv", "celltypist"}
+
+
 def run_subclustering_workflow(
     parent_path: str,
     cell_ids: List[str],
@@ -19,11 +26,11 @@ def run_subclustering_workflow(
     1. Load parent dataset
     2. Subset to selected cells
     3. Run preprocessing (HVG, PCA, Neighbors, Leiden, UMAP)
-    4. Run annotation
-    5. Save nested results
+    4. Run annotation (cluster-level methods only)
+    5. Save nested results with parent label tracking
     """
     print(f"Starting subclustering workflow: {name}")
-    
+
     # 1. Load Parent Data
     if parent_path.endswith('.h5ad'):
         parent_adata = sc.read_h5ad(parent_path)
@@ -31,15 +38,33 @@ def run_subclustering_workflow(
         parent_adata = sc.read_10x_h5(parent_path)
     else:
         raise ValueError(f"Unsupported file format: {parent_path}")
-        
+
     # 2. Subset Data
     # Validate cell IDs
     valid_ids = [cid for cid in cell_ids if cid in parent_adata.obs.index]
     if len(valid_ids) < 10:
         raise ValueError(f"Too few valid cells selected ({len(valid_ids)}). Minimum 10 required.")
-        
+
     print(f"Subsetting to {len(valid_ids)} cells...")
     adata = parent_adata[valid_ids].copy()
+
+    # Track the parent label (most common cell_type / leiden in the selected cells)
+    # so the frontend can show "Parent: T cell -> Sub: ..."
+    parent_label: Optional[str] = None
+    parent_label_source: Optional[str] = None
+    for candidate in ("cell_type", "leiden", "consensus_annotation", "cellmarker"):
+        if candidate in adata.obs.columns:
+            try:
+                parent_label = str(adata.obs[candidate].astype(str).value_counts().idxmax())
+                parent_label_source = candidate
+                break
+            except Exception:
+                pass
+    if parent_label:
+        adata.uns["parent_label"] = parent_label
+        adata.uns["parent_label_source"] = parent_label_source or ""
+        adata.uns["parent_path"] = parent_path
+        print(f"Parent label: {parent_label} (from {parent_label_source})")
     
     # Clean up old unstructured data to force re-calculation
     for key in ['neighbors', 'pca', 'umap', 'leiden', 'rank_genes_groups']:
@@ -115,8 +140,19 @@ def run_subclustering_workflow(
     data_tracker: Dict[str, List[Any]] = {'figs': [], 'files': []}
 
     orchestrator = AnnotationOrchestrator()
-    methods = annotation_params.get('methods', ['cellmarker'])
+    requested_methods = annotation_params.get('methods', ['cellmarker'])
     method_options = annotation_params.get('method_options', {})
+
+    # Filter out per-cell methods — they would just re-predict the same labels
+    # since gene expression for each cell is unchanged.
+    methods = [m for m in requested_methods if m not in PER_CELL_METHODS]
+    skipped = [m for m in requested_methods if m in PER_CELL_METHODS]
+    if skipped:
+        print(f"Skipping per-cell methods (not useful for subclustering): {skipped}")
+    if not methods:
+        # Default to cellmarker if everything was filtered out
+        methods = ["cellmarker"]
+        print("All methods were per-cell; falling back to cellmarker")
 
     method_kwargs = {
         "output_dir": output_dir,
@@ -157,6 +193,9 @@ def run_subclustering_workflow(
         "n_genes": adata.n_vars,
         "n_clusters": len(adata.obs['leiden'].unique()),
         "annotators": used_annotators,
+        "parent_label": parent_label,
+        "parent_label_source": parent_label_source,
+        "skipped_methods": skipped,
         "files": data_tracker['files'],
         "figs": data_tracker['figs']
     }

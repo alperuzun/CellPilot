@@ -3,6 +3,8 @@ import Plot from 'react-plotly.js';
 import { VisualizationData, MarkerGenesData, GeneExpressionData, api } from '../../services/api';
 import { Select, Button } from './Shared';
 import { RefreshCw, Star, Layers, Users } from 'lucide-react';
+import { useVizTheme } from '../../theme/ThemeContext';
+import { usePlotlyTheme } from '../../theme/usePlotlyTheme';
 
 interface MarkerGenesHeatmapProps {
   h5adPath: string;
@@ -15,6 +17,8 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
   data,
   selectedCells = []
 }) => {
+  const { v, isDark, colors } = useVizTheme();
+  const plotlyTheme = usePlotlyTheme();
   const [clusterColumn, setClusterColumn] = useState<string>('leiden');
   const [markerGenes, setMarkerGenes] = useState<MarkerGenesData>({});
   const [geneExpression, setGeneExpression] = useState<GeneExpressionData>({});
@@ -174,8 +178,8 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
       colorbar: {
         title: 'Avg Exp',
         titleside: 'right',
-        titlefont: { color: '#e5e7eb' },
-        tickfont: { color: '#e5e7eb' },
+        titlefont: { color: plotlyTheme.raw.fontColor },
+        tickfont: { color: plotlyTheme.raw.tickColor },
       },
     },
   ];
@@ -186,56 +190,60 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
       title: markerMode === 'cluster' ? 'Clusters' : 'Cell Types',
       tickangle: -45,
       side: 'bottom' as const,
-      color: '#e5e7eb',
-      gridcolor: '#374151',
+      color: plotlyTheme.raw.fontColor,
+      gridcolor: plotlyTheme.raw.gridColor,
     },
     yaxis: {
       title: 'Genes',
       autorange: 'reversed' as const,
-      color: '#e5e7eb',
-      gridcolor: '#374151',
+      color: plotlyTheme.raw.fontColor,
+      gridcolor: plotlyTheme.raw.gridColor,
     },
     height: Math.max(400, y.length * 20 + 100),
     margin: { l: 100, r: 100, t: 20, b: 100 },
     annotations: createAnnotations(),
     plot_bgcolor: 'transparent',
     paper_bgcolor: 'transparent',
-    font: { color: '#e5e7eb' },
+    font: { color: plotlyTheme.raw.fontColor },
   };
 
   if (loading) {
     return (
-      <div className="bg-gray-800 p-8 rounded-lg border border-gray-700 flex flex-col items-center justify-center min-h-[300px]">
+      <div className="p-8 rounded-lg flex flex-col items-center justify-center min-h-[300px]" style={{ background: v.panelBgSecondary, borderWidth: 1, borderStyle: 'solid', borderColor: v.panelBorderSecondary }}>
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
-        <p className="text-gray-400">Loading marker genes...</p>
+        <p style={{ color: v.textMuted }}>Loading marker genes...</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 text-gray-100">
+    <div className="space-y-6" style={{ color: v.textHeading }}>
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-100">Marker Genes Heatmap</h2>
+        <h2 className="text-xl font-bold" style={{ color: v.textHeading }}>Marker Genes Heatmap</h2>
       </div>
 
       {/* Controls */}
-      <div className="bg-gray-800/50 p-4 border border-gray-700 rounded-lg shadow-sm flex flex-wrap gap-4 items-end">
+      <div className="p-4 rounded-lg shadow-sm flex flex-wrap gap-4 items-end" style={{ background: v.panelBgSecondary, borderWidth: 1, borderStyle: 'solid', borderColor: v.panelBorderSecondary }}>
         {/* Marker Mode Toggle */}
-        <div className="flex bg-gray-900 p-1 rounded-lg border border-gray-700">
+        <div className="flex p-1 rounded-lg" style={{ background: v.panelBg, borderWidth: 1, borderStyle: 'solid', borderColor: v.panelBorderSecondary }}>
           <button
             onClick={() => setMarkerMode('cluster')}
-            className={`flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
-              markerMode === 'cluster' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'
-            }`}
+            className="flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-all"
+            style={{
+              background: markerMode === 'cluster' ? v.buttonPrimaryBg : 'transparent',
+              color: markerMode === 'cluster' ? v.textHeading : v.textMuted,
+            }}
           >
             <Layers size={16} className="mr-2" />
             Cluster
           </button>
           <button
             onClick={() => setMarkerMode('celltype')}
-            className={`flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-all ${
-              markerMode === 'celltype' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'
-            }`}
+            className="flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-all"
+            style={{
+              background: markerMode === 'celltype' ? v.buttonPrimaryBg : 'transparent',
+              color: markerMode === 'celltype' ? v.textHeading : v.textMuted,
+            }}
           >
             <Users size={16} className="mr-2" />
             Cell Type
@@ -249,14 +257,14 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
             value={clusterColumn}
             onChange={(e) => setClusterColumn(e.target.value)}
             options={markerMode === 'cluster' ? clusterOptions : cellTypeOptions}
-            className="bg-gray-900 border-gray-700 text-gray-100"
+            style={{ background: v.panelBg, borderColor: v.panelBorderSecondary, color: v.textHeading }}
           />
         </div>
 
         {/* Number of genes slider */}
         {markerMode === 'cluster' && (
           <div className="w-40">
-            <label className="block text-xs font-medium text-gray-400 mb-1">
+            <label className="block text-xs font-medium mb-1" style={{ color: v.textMuted }}>
               Genes per cluster: {nGenes}
             </label>
             <input
@@ -266,7 +274,8 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
               step="5"
               value={nGenes}
               onChange={(e) => setNGenes(parseInt(e.target.value))}
-              className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer"
+              style={{ background: v.panelBorderSecondary, accentColor: colors.accent }}
             />
           </div>
         )}
@@ -278,7 +287,7 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
               variant={showOnlySelected ? "primary" : "secondary"}
               onClick={() => setShowOnlySelected(!showOnlySelected)}
               size="sm"
-              className={!showOnlySelected ? "bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600" : ""}
+              style={!showOnlySelected ? { background: v.buttonSecondaryBg, color: v.textLabel, borderColor: v.panelBorderSecondary } : {}}
             >
               Use Selected Cells ({selectedCells.length})
             </Button>
@@ -291,7 +300,7 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
             disabled={loading}
             icon={<RefreshCw size={16} />}
             size="sm"
-            className="bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600"
+            style={{ background: v.buttonSecondaryBg, color: v.textLabel, borderColor: v.panelBorderSecondary }}
           >
             Refresh
           </Button>
@@ -300,23 +309,23 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
 
       {/* Summary Chips */}
       <div className="flex flex-wrap gap-2">
-        <span className="px-3 py-1 bg-gray-800 text-gray-300 rounded-full text-sm font-medium border border-gray-700">
+        <span className="px-3 py-1 rounded-full text-sm font-medium" style={{ background: v.panelBgSecondary, color: v.textLabel, borderWidth: 1, borderStyle: 'solid', borderColor: v.panelBorderSecondary }}>
           {Object.keys(markerGenes).length} {markerMode === 'cluster' ? 'clusters' : 'cell types'}
         </span>
-        <span className="px-3 py-1 bg-blue-900/30 text-blue-300 rounded-full text-sm font-medium border border-blue-800">
+        <span className="px-3 py-1 rounded-full text-sm font-medium" style={{ background: v.badgeBlue.bg, color: v.badgeBlue.text, borderWidth: 1, borderStyle: 'solid', borderColor: v.badgeBlue.border }}>
           {y.length} genes
         </span>
-        <span className="px-3 py-1 bg-green-900/30 text-green-300 rounded-full text-sm font-medium border border-green-800">
+        <span className="px-3 py-1 rounded-full text-sm font-medium" style={{ background: v.badgeGreen.bg, color: v.badgeGreen.text, borderWidth: 1, borderStyle: 'solid', borderColor: v.badgeGreen.border }}>
           {cellIndices.length} cells analyzed
         </span>
-        <span className="px-3 py-1 bg-yellow-900/30 text-yellow-300 rounded-full text-sm font-medium border border-yellow-800 flex items-center gap-1">
-          <Star size={12} fill="orange" className="text-orange-500" /> Top marker
+        <span className="px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1" style={{ background: v.badgeYellow.bg, color: v.badgeYellow.text, borderWidth: 1, borderStyle: 'solid', borderColor: v.badgeYellow.border }}>
+          <Star size={12} fill="orange" style={{ color: v.badgeOrange.text }} /> Top marker
         </span>
       </div>
 
       {/* Plot */}
       {z.length > 0 ? (
-        <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-x-auto">
+        <div className="rounded-lg overflow-x-auto" style={{ background: v.panelBgSecondary, borderWidth: 1, borderStyle: 'solid', borderColor: v.panelBorderSecondary }}>
           <div style={{ minWidth: Math.max(600, x.length * 60 + 200) }}>
             <Plot
               data={plotData}
@@ -332,7 +341,7 @@ const MarkerGenesHeatmap: React.FC<MarkerGenesHeatmapProps> = ({
           </div>
         </div>
       ) : (
-        <div className="bg-gray-900 border border-dashed border-gray-700 rounded-lg h-64 flex items-center justify-center text-gray-500">
+        <div className="border-dashed rounded-lg h-64 flex items-center justify-center" style={{ background: v.panelBg, borderWidth: 1, borderStyle: 'dashed', borderColor: v.panelBorderSecondary, color: v.textFaint }}>
           No marker genes data available. Try refreshing or selecting a different column.
         </div>
       )}

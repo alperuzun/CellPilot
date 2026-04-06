@@ -8,6 +8,8 @@ import {
   AlertCircle,
   Trash2
 } from 'lucide-react';
+import { useVizTheme } from '../../theme/ThemeContext';
+import { usePlotlyTheme } from '../../theme/usePlotlyTheme';
 
 interface DotPlotProps {
   h5adPath: string;
@@ -22,6 +24,8 @@ const DotPlot: React.FC<DotPlotProps> = ({
   clusterColumns,
   defaultClusterColumn = 'leiden',
 }) => {
+  const { v, isDark } = useVizTheme();
+  const plotlyTheme = usePlotlyTheme();
   // State
   const [selectedGenes, setSelectedGenes] = useState<string[]>([]);
   const [clusterColumn, setClusterColumn] = useState(defaultClusterColumn);
@@ -152,7 +156,7 @@ const DotPlot: React.FC<DotPlotProps> = ({
           len: 0.5,
         },
         line: {
-          color: 'rgba(255,255,255,0.3)',
+          color: plotlyTheme.raw.markerLineColor,
           width: 1,
         },
       },
@@ -165,23 +169,23 @@ const DotPlot: React.FC<DotPlotProps> = ({
     xaxis: {
       title: { text: 'Genes', standoff: 10 },
       tickangle: -45,
-      tickfont: { size: 11, color: '#e5e7eb' },
-      gridcolor: '#374151',
+      tickfont: { size: 11, color: plotlyTheme.raw.tickColor },
+      gridcolor: plotlyTheme.raw.gridColor,
       linecolor: '#4b5563',
     },
     yaxis: {
       title: { text: 'Clusters', standoff: 10 },
       autorange: 'reversed' as const,
-      tickfont: { size: 11, color: '#e5e7eb' },
-      gridcolor: '#374151',
+      tickfont: { size: 11, color: plotlyTheme.raw.tickColor },
+      gridcolor: plotlyTheme.raw.gridColor,
       linecolor: '#4b5563',
     },
-    plot_bgcolor: 'transparent',
-    paper_bgcolor: 'transparent',
-    font: { color: '#e5e7eb' },
+    plot_bgcolor: plotlyTheme.baseLayout.plot_bgcolor,
+    paper_bgcolor: plotlyTheme.baseLayout.paper_bgcolor,
+    font: { color: plotlyTheme.raw.fontColor },
     margin: { l: 100, r: 80, t: 20, b: 100 },
     hovermode: 'closest' as const,
-  }), []);
+  }), [plotlyTheme]);
 
   const plotConfig = {
     displayModeBar: true,
@@ -197,13 +201,14 @@ const DotPlot: React.FC<DotPlotProps> = ({
         {/* Top row: Cluster column selector */}
         <div className="flex items-center gap-3">
           <div className="w-64">
-            <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">
+            <label className="text-[10px] uppercase tracking-wider block mb-1" style={{ color: v.textFaint }}>
               Group By
             </label>
             <select
               value={clusterColumn}
               onChange={(e) => setClusterColumn(e.target.value)}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+              className="w-full rounded px-2 py-1.5 text-sm focus:outline-none"
+              style={{ backgroundColor: v.inputBg, borderColor: v.inputBorder, color: v.inputText, border: `1px solid ${v.inputBorder}` }}
             >
               {clusterColumns.map(col => (
                 <option key={col} value={col}>{col}</option>
@@ -214,13 +219,13 @@ const DotPlot: React.FC<DotPlotProps> = ({
 
         {/* Gene search and selection */}
         <div className="relative" ref={dropdownRef}>
-          <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">
+          <label className="text-[10px] uppercase tracking-wider block mb-1" style={{ color: v.textFaint }}>
             Select Genes ({selectedGenes.length} selected)
           </label>
 
           {/* Search input */}
           <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2" style={{ color: v.textFaint }} size={16} />
             <input
               ref={searchInputRef}
               type="text"
@@ -231,15 +236,16 @@ const DotPlot: React.FC<DotPlotProps> = ({
               }}
               onFocus={() => setIsDropdownOpen(true)}
               placeholder="Search genes (e.g. CD3D, CD4)..."
-              className="w-full bg-neutral-800 border border-neutral-700 rounded pl-8 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              className="w-full rounded pl-8 pr-3 py-2 text-sm focus:outline-none"
+              style={{ backgroundColor: v.inputBg, border: `1px solid ${v.inputBorder}`, color: v.inputText }}
             />
           </div>
 
           {/* Dropdown */}
           {isDropdownOpen && (
-            <div className="absolute z-50 w-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+            <div className="absolute z-50 w-full mt-1 rounded-lg shadow-xl max-h-48 overflow-y-auto" style={{ backgroundColor: v.inputBg, border: `1px solid ${v.inputBorder}` }}>
               {filteredGenes.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-gray-500">No genes found</div>
+                <div className="px-3 py-2 text-sm" style={{ color: v.textFaint }}>No genes found</div>
               ) : (
                 filteredGenes.map(gene => {
                   const isSelected = selectedGenes.includes(gene);
@@ -247,11 +253,13 @@ const DotPlot: React.FC<DotPlotProps> = ({
                     <div
                       key={gene}
                       onClick={() => !isSelected && addGene(gene)}
-                      className={`px-3 py-1.5 text-sm cursor-pointer transition-colors ${
-                        isSelected
-                          ? 'bg-blue-900/30 text-blue-300 cursor-not-allowed'
-                          : 'text-gray-300 hover:bg-neutral-700'
-                      }`}
+                      className="px-3 py-1.5 text-sm cursor-pointer transition-colors"
+                      style={isSelected
+                        ? { backgroundColor: v.badgeBlue.bg, color: v.badgeBlue.text, cursor: 'not-allowed' }
+                        : { color: v.textLabel }
+                      }
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = v.hoverOverlay; }}
+                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent'; }}
                     >
                       {gene}
                       {isSelected && <span className="ml-2 text-xs">(selected)</span>}
@@ -269,12 +277,13 @@ const DotPlot: React.FC<DotPlotProps> = ({
             {selectedGenes.map(gene => (
               <span
                 key={gene}
-                className="inline-flex items-center gap-1 px-2 py-1 bg-blue-900/30 text-blue-300 border border-blue-800/50 rounded-full text-xs"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs"
+                style={{ backgroundColor: v.badgeBlue.bg, color: v.badgeBlue.text, border: `1px solid ${v.badgeBlue.border}` }}
               >
                 {gene}
                 <button
                   onClick={() => removeGene(gene)}
-                  className="hover:text-blue-100 transition-colors"
+                  className="transition-colors"
                 >
                   <X size={12} />
                 </button>
@@ -282,7 +291,8 @@ const DotPlot: React.FC<DotPlotProps> = ({
             ))}
             <button
               onClick={clearAllGenes}
-              className="inline-flex items-center gap-1 px-2 py-1 bg-red-900/20 text-red-300 border border-red-800/30 rounded-full text-xs hover:bg-red-900/30 transition-colors"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-colors"
+              style={{ backgroundColor: v.badgeRed.bg, color: v.badgeRed.text, border: `1px solid ${v.badgeRed.border}` }}
             >
               <Trash2 size={12} />
               Clear all
@@ -294,8 +304,8 @@ const DotPlot: React.FC<DotPlotProps> = ({
       {/* Plot area */}
       <div className="flex-1 min-h-0 relative">
         {loading && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10 rounded-lg">
-            <div className="flex items-center gap-2 text-blue-400">
+          <div className="absolute inset-0 flex items-center justify-center z-10 rounded-lg" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.2)' }}>
+            <div className="flex items-center gap-2" style={{ color: v.badgeBlue.text }}>
               <Loader2 className="animate-spin" size={20} />
               <span className="text-sm">Loading dot plot...</span>
             </div>
@@ -313,7 +323,7 @@ const DotPlot: React.FC<DotPlotProps> = ({
 
         {!loading && !error && selectedGenes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center text-gray-500">
+            <div className="text-center" style={{ color: v.textFaint }}>
               <Search size={32} className="mx-auto mb-2 opacity-50" />
               <p className="text-sm">Search and select genes to create a dot plot</p>
               <p className="text-xs mt-1">e.g., CD3D, CD4, CD8A for T cells</p>
@@ -332,8 +342,8 @@ const DotPlot: React.FC<DotPlotProps> = ({
             />
 
             {/* Size legend */}
-            <div className="absolute bottom-2 left-4 bg-neutral-900/90 border border-neutral-700 rounded-lg px-3 py-2">
-              <div className="text-[10px] text-gray-400 mb-1">Percent Expressing</div>
+            <div className="absolute bottom-2 left-4 rounded-lg px-3 py-2" style={{ backgroundColor: v.panelBg, border: `1px solid ${v.panelBorderSecondary}`, opacity: 0.9 }}>
+              <div className="text-[10px] mb-1" style={{ color: v.textMuted }}>Percent Expressing</div>
               <div className="flex items-end gap-2">
                 {[10, 25, 50, 75, 100].map(pct => {
                   const size = Math.sqrt(pct) * 2.5 + 5;
@@ -343,7 +353,7 @@ const DotPlot: React.FC<DotPlotProps> = ({
                         className="rounded-full bg-blue-500"
                         style={{ width: size, height: size }}
                       />
-                      <span className="text-[9px] text-gray-500 mt-0.5">{pct}%</span>
+                      <span className="text-[9px] mt-0.5" style={{ color: v.textFaint }}>{pct}%</span>
                     </div>
                   );
                 })}

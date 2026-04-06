@@ -42,7 +42,7 @@ cd SingleCell
 2. Create a conda environment **from environment.yml**:
 ```bash
 conda env create -f environment.yml
-conda activate CellPilot-dev
+conda activate CellPilot-dev-311
 ```
 
 3. Make the launch script executable:

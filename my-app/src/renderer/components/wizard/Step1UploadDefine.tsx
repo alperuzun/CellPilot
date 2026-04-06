@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { api, APIError } from '../../services/api';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { api, APIError, recentDatasetsApi, RecentDatasetEntry } from '../../services/api';
 
 interface Step1Props {
   onNext: (data: UploadData) => void;
@@ -30,6 +30,9 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [recentDatasets, setRecentDatasets] = useState<RecentDatasetEntry[]>([]);
+  const [loadingRecent, setLoadingRecent] = useState(true);
+
   const [formData, setFormData] = useState<UploadData>({
     fileName: uploadData?.fileName || '',
     filePath: uploadData?.filePath || '',
@@ -39,6 +42,13 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
     analysisType: uploadData?.analysisType || 'annotation',
     summary: uploadData?.summary
   });
+
+  useEffect(() => {
+    recentDatasetsApi.list()
+      .then(res => setRecentDatasets(res.datasets))
+      .catch(() => {})
+      .finally(() => setLoadingRecent(false));
+  }, []);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -94,6 +104,15 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
         summary: response.summary
       }));
 
+      // Track in recent datasets
+      recentDatasetsApi.add({
+        input_path: response.input_path,
+        name: response.name,
+        file_size: fileSize,
+        n_obs: response.summary?.n_obs ?? 0,
+        n_vars: response.summary?.n_vars ?? 0,
+      }).catch(() => {});
+
       setUploadComplete(true);
     } catch (err) {
       console.error('Upload error:', err);
@@ -105,6 +124,56 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
     } finally {
       setUploading(false);
     }
+  }, []);
+
+  const handleSelectRecent = useCallback(async (entry: RecentDatasetEntry) => {
+    setError(null);
+    setUploading(true);
+    try {
+      const response = await api.uploadAdata({
+        input_path: entry.input_path,
+        name: entry.name,
+      });
+      const fileStats = await window.backend.getFileStats(entry.input_path).catch(() => null);
+      const fileSize = fileStats?.size || entry.file_size || 0;
+      const fileName = entry.input_path.split('/').pop() || entry.input_path.split('\\').pop() || entry.name;
+
+      setFormData({
+        fileName,
+        filePath: response.input_path,
+        fileSize,
+        datasetName: entry.name,
+        species: entry.species || '',
+        analysisType: 'annotation',
+        summary: response.summary,
+      });
+
+      // Bump to top of recent list
+      recentDatasetsApi.add({
+        input_path: entry.input_path,
+        name: entry.name,
+        species: entry.species,
+        file_size: fileSize,
+        n_obs: response.summary?.n_obs ?? entry.n_obs,
+        n_vars: response.summary?.n_vars ?? entry.n_vars,
+      }).catch(() => {});
+
+      setUploadComplete(true);
+    } catch (err) {
+      if (err instanceof APIError) {
+        setError(`Failed to load dataset: ${err.message}`);
+      } else {
+        setError('Failed to load dataset. The file may have been moved or deleted.');
+      }
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  const handleRemoveRecent = useCallback((e: React.MouseEvent, inputPath: string) => {
+    e.stopPropagation();
+    setRecentDatasets(prev => prev.filter(d => d.input_path !== inputPath));
+    recentDatasetsApi.remove(inputPath).catch(() => {});
   }, []);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -163,6 +232,15 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
 
   const handleNext = () => {
     if (formData.fileName && formData.datasetName && formData.species && formData.analysisType) {
+      // Update species in the recent entry so it's remembered next time
+      recentDatasetsApi.add({
+        input_path: formData.filePath,
+        name: formData.datasetName,
+        species: formData.species,
+        file_size: formData.fileSize,
+        n_obs: formData.summary?.n_obs ?? 0,
+        n_vars: formData.summary?.n_vars ?? 0,
+      }).catch(() => {});
       onNext(formData);
     }
   };
@@ -187,6 +265,50 @@ export default function Step1UploadDefine({ onNext, uploadData }: Step1Props) {
         onChange={handleFileInputChange}
         className="hidden"
       />
+
+      {/* Recent Datasets */}
+      {!uploadComplete && !loadingRecent && recentDatasets.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-sm font-medium text-gray-700 mb-3">Recent Datasets</h2>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {recentDatasets.map((entry) => (
+              <div
+                key={entry.input_path}
+                onClick={() => handleSelectRecent(entry)}
+                className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors group"
+              >
+                <div className="flex items-center min-w-0">
+                  <svg className="w-5 h-5 text-gray-400 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{entry.name}</p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {entry.n_obs > 0 && <span>{entry.n_obs.toLocaleString()} cells</span>}
+                      {entry.n_obs > 0 && entry.n_vars > 0 && <span> · </span>}
+                      {entry.n_vars > 0 && <span>{entry.n_vars.toLocaleString()} genes</span>}
+                      {entry.species && <span> · {entry.species}</span>}
+                      {entry.file_size > 0 && <span> · {formatFileSize(entry.file_size)}</span>}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => handleRemoveRecent(e, entry.input_path)}
+                  className="p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2"
+                  title="Remove from recent"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 border-t border-gray-200 pt-3">
+            <p className="text-xs text-gray-500">Or upload a new dataset below</p>
+          </div>
+        </div>
+      )}
 
       {/* File Upload Area */}
       {!uploadComplete ? (

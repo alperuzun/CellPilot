@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../../services/api';
 import { Send, User, Bot, AlertCircle, Settings2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { useVizTheme } from '../../theme/ThemeContext';
 
 interface ChatAgentProps {
   datasetPath: string;
@@ -15,6 +16,7 @@ interface Message {
 }
 
 export default function ChatAgent({ datasetPath, selectedCluster, selectedCells = [] }: ChatAgentProps) {
+  const { v, isDark, colors } = useVizTheme();
   const [messages, setMessages] = useState<Message[]>([
     { 
       role: 'assistant', 
@@ -113,20 +115,22 @@ export default function ChatAgent({ datasetPath, selectedCluster, selectedCells 
   };
 
   return (
-    <div className="flex flex-col h-full bg-neutral-900 text-gray-100 rounded-lg overflow-hidden relative">
-      
+    <div className="flex flex-col h-full rounded-lg overflow-hidden relative" style={{ backgroundColor: v.panelBg, color: v.textBody }}>
+
       {/* Header / Settings Bar */}
-      <div className="flex justify-between items-center p-2 border-b border-neutral-700 bg-neutral-800/50">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
-            <span className={`w-2 h-2 rounded-full ${
-                currentMode === 'global' ? 'bg-blue-500' :
-                currentMode === 'cluster' ? 'bg-green-500' : 'bg-purple-500'
-            }`}></span>
+      <div className="flex justify-between items-center p-2" style={{ borderBottom: `1px solid ${v.panelBorder}`, backgroundColor: v.panelBgSecondary }}>
+        <div className="flex items-center gap-2 text-xs" style={{ color: v.textMuted }}>
+            <span className="w-2 h-2 rounded-full" style={{
+                backgroundColor: currentMode === 'global' ? colors.blue : currentMode === 'cluster' ? colors.green : colors.purple
+            }}></span>
             <span className="uppercase font-semibold">{currentMode} Context</span>
         </div>
-        <button 
+        <button
             onClick={() => setShowSettings(!showSettings)}
-            className="p-1 hover:bg-neutral-700 rounded text-gray-400 hover:text-white transition-colors"
+            className="p-1 rounded transition-colors"
+            style={{ color: v.textMuted }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = v.panelBg; e.currentTarget.style.color = v.textHeading; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = v.textMuted; }}
         >
             <Settings2 size={14} />
         </button>
@@ -134,20 +138,28 @@ export default function ChatAgent({ datasetPath, selectedCluster, selectedCells 
 
       {/* Settings Panel Overlay */}
       {showSettings && (
-        <div className="absolute top-10 right-2 z-10 w-48 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl p-3 animate-in fade-in slide-in-from-top-2">
+        <div className="absolute top-10 right-2 z-10 w-48 rounded-lg shadow-xl p-3 animate-in fade-in slide-in-from-top-2" style={{ backgroundColor: v.panelBgSecondary, border: `1px solid ${v.panelBorder}` }}>
             <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-semibold text-gray-300">Chat Settings</span>
-                <button onClick={() => setShowSettings(false)} className="text-gray-500 hover:text-white">
+                <span className="text-xs font-semibold" style={{ color: v.textLabel }}>Chat Settings</span>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  style={{ color: v.textFaint }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = v.textHeading; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = v.textFaint; }}
+                >
                     <X size={12} />
                 </button>
             </div>
             <div className="space-y-4">
                 <div>
-                    <label className="block text-xs text-gray-400 mb-1">Model</label>
-                    <select 
+                    <label className="block text-xs mb-1" style={{ color: v.textMuted }}>Model</label>
+                    <select
                         value={model}
                         onChange={(e) => setModel(e.target.value)}
-                        className="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-white focus:border-blue-500 outline-none"
+                        className="w-full rounded px-2 py-1 text-xs outline-none"
+                        style={{ backgroundColor: v.inputBg, border: `1px solid ${v.inputBorder}`, color: v.inputText }}
+                        onFocus={(e) => { e.currentTarget.style.borderColor = v.inputFocusBorder; }}
+                        onBlur={(e) => { e.currentTarget.style.borderColor = v.inputBorder; }}
                     >
                         <option value="gpt-4o">GPT-4o (Best Overall)</option>
                         <option value="gpt-4o-mini">GPT-4o Mini (Fastest)</option>
@@ -156,16 +168,17 @@ export default function ChatAgent({ datasetPath, selectedCluster, selectedCells 
                         <option value="gpt-4-turbo">GPT-4 Turbo (Legacy)</option>
                     </select>
                 </div>
-                
+
                 <div className="flex items-center gap-2">
-                    <input 
-                        type="checkbox" 
+                    <input
+                        type="checkbox"
                         id="hideLabels"
                         checked={hideLabels}
                         onChange={(e) => setHideLabels(e.target.checked)}
-                        className="w-3 h-3 rounded bg-neutral-900 border-neutral-700 text-blue-600 focus:ring-blue-500"
+                        className="w-3 h-3 rounded"
+                        style={{ backgroundColor: v.inputBg, borderColor: v.inputBorder }}
                     />
-                    <label htmlFor="hideLabels" className="text-xs text-gray-300 select-none cursor-pointer">
+                    <label htmlFor="hideLabels" className="text-xs select-none cursor-pointer" style={{ color: v.textLabel }}>
                         Hide Existing Labels (Blind Mode)
                     </label>
                 </div>
@@ -176,16 +189,18 @@ export default function ChatAgent({ datasetPath, selectedCluster, selectedCells 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
         {messages.map((msg, idx) => (
-          <div 
-            key={idx} 
+          <div
+            key={idx}
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
-            <div 
+            <div
               className={`max-w-[85%] rounded-lg p-3 ${
-                msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-br-none' 
-                  : 'bg-neutral-800 text-gray-200 rounded-bl-none border border-neutral-700'
+                msg.role === 'user' ? 'rounded-br-none' : 'rounded-bl-none'
               }`}
+              style={msg.role === 'user'
+                ? { backgroundColor: v.buttonPrimaryBg, color: v.buttonPrimaryText }
+                : { backgroundColor: v.panelBgSecondary, color: v.textBody, border: `1px solid ${v.panelBorder}` }
+              }
             >
               <div className="flex items-center gap-2 mb-1 opacity-70 text-xs">
                 {msg.role === 'user' ? <User size={12} /> : <Bot size={12} />}
@@ -196,7 +211,6 @@ export default function ChatAgent({ datasetPath, selectedCluster, selectedCells 
               <div className="text-sm leading-relaxed overflow-hidden">
                 <ReactMarkdown
                     components={{
-                        // Style basic elements to look good in chat
                         p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
                         ul: ({node, ...props}) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
                         ol: ({node, ...props}) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
@@ -204,10 +218,10 @@ export default function ChatAgent({ datasetPath, selectedCluster, selectedCells 
                         h1: ({node, ...props}) => <h1 className="text-lg font-bold mb-2 mt-1" {...props} />,
                         h2: ({node, ...props}) => <h2 className="text-base font-bold mb-2 mt-1" {...props} />,
                         h3: ({node, ...props}) => <h3 className="text-sm font-bold mb-1 mt-1" {...props} />,
-                        blockquote: ({node, ...props}) => <blockquote className="border-l-2 border-gray-500 pl-2 italic my-2" {...props} />,
-                        code: ({node, ...props}) => <code className="bg-black/30 rounded px-1 py-0.5 text-xs font-mono" {...props} />,
-                        pre: ({node, ...props}) => <pre className="bg-black/30 rounded p-2 overflow-x-auto text-xs font-mono my-2" {...props} />,
-                        strong: ({node, ...props}) => <strong className="font-bold text-blue-200" {...props} />,
+                        blockquote: ({node, ...props}) => <blockquote className="pl-2 italic my-2" style={{ borderLeft: `2px solid ${v.textFaint}` }} {...props} />,
+                        code: ({node, ...props}) => <code className="rounded px-1 py-0.5 text-xs font-mono" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.06)' }} {...props} />,
+                        pre: ({node, ...props}) => <pre className="rounded p-2 overflow-x-auto text-xs font-mono my-2" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.06)' }} {...props} />,
+                        strong: ({node, ...props}) => <strong className="font-bold" style={{ color: v.badgeBlue.text }} {...props} />,
                     }}
                 >
                     {msg.content}
@@ -218,11 +232,11 @@ export default function ChatAgent({ datasetPath, selectedCluster, selectedCells 
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-neutral-800 rounded-lg p-3 rounded-bl-none border border-neutral-700">
+            <div className="rounded-lg p-3 rounded-bl-none" style={{ backgroundColor: v.panelBgSecondary, border: `1px solid ${v.panelBorder}` }}>
               <div className="flex gap-1">
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: v.textFaint, animationDelay: '0ms' }} />
+                <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: v.textFaint, animationDelay: '150ms' }} />
+                <div className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: v.textFaint, animationDelay: '300ms' }} />
               </div>
             </div>
           </div>
@@ -231,24 +245,30 @@ export default function ChatAgent({ datasetPath, selectedCluster, selectedCells 
       </div>
 
       {/* Input Area */}
-      <div className="p-3 bg-neutral-800 border-t border-neutral-700">
+      <div className="p-3" style={{ backgroundColor: v.panelBgSecondary, borderTop: `1px solid ${v.panelBorder}` }}>
         <div className="relative">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-                currentMode === 'cluster' ? `Ask about Cluster ${selectedCluster}...` : 
+                currentMode === 'cluster' ? `Ask about Cluster ${selectedCluster}...` :
                 currentMode === 'selection' ? `Analyze selection (${selectedCells.length} cells)...` :
                 "Ask about the global dataset..."
             }
-            className="w-full bg-neutral-900 border border-neutral-700 rounded-lg pl-3 pr-10 py-2 text-sm text-white focus:outline-none focus:border-blue-500 resize-none max-h-32 min-h-[44px]"
+            className="w-full rounded-lg pl-3 pr-10 py-2 text-sm focus:outline-none resize-none max-h-32 min-h-[44px]"
+            style={{ backgroundColor: v.inputBg, border: `1px solid ${v.inputBorder}`, color: v.inputText }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = v.inputFocusBorder; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = v.inputBorder; }}
             rows={1}
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || loading}
-            className="absolute right-2 bottom-2 p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="absolute right-2 bottom-2 p-1.5 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            style={{ backgroundColor: v.buttonPrimaryBg, color: v.buttonPrimaryText }}
+            onMouseEnter={(e) => { if (!e.currentTarget.disabled) e.currentTarget.style.opacity = '0.85'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
           >
             <Send size={14} />
           </button>

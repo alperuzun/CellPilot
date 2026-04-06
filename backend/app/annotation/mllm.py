@@ -34,9 +34,16 @@ PROVIDER_API_KEY_ENV = {
 }
 
 MODEL_TO_PROVIDER = {
-    "gpt-5.2": "openai",
+    # OpenAI
+    "gpt-4o": "openai",
+    "gpt-4.1": "openai",
+    "gpt-4o-mini": "openai",
+    # Anthropic
     "claude-sonnet-4-5-20250929": "anthropic",
-    "gemini-3-pro": "gemini",
+    "claude-opus-4-20250514": "anthropic",
+    # Google
+    "gemini-2.0-flash": "google",
+    "gemini-2.5-pro": "google",
 }
 
 
@@ -239,24 +246,36 @@ class MLLMAnnotation(AnnotationMethod):
     ) -> tuple[dict[str, str], dict[str, float], dict]:
         from mllmcelltype import interactive_consensus_annotation
 
+        # mllmcelltype v2 expects models as list of {model, provider} dicts
+        models_spec = [
+            {"model": m, "provider": MODEL_TO_PROVIDER.get(m, "openai")}
+            for m in models
+        ]
+
         self.logger.info(
             "Running consensus annotation with models: %s "
             "(threshold=%.2f, max_rounds=%d)",
-            models, consensus_threshold, max_discussion_rounds,
+            models_spec, consensus_threshold, max_discussion_rounds,
         )
         raw_result = interactive_consensus_annotation(
             marker_genes=marker_genes,
             species=species,
             tissue=tissue,
-            models=models,
+            models=models_spec,
             consensus_threshold=consensus_threshold,
             max_discussion_rounds=max_discussion_rounds,
+            force_rerun=True,
         )
 
         consensus_dict = raw_result.get("consensus", {})
         proportion_dict = raw_result.get("consensus_proportion", {})
         entropy_dict = raw_result.get("entropy", {})
         individual = raw_result.get("individual_predictions", {})
+
+        self.logger.info("Raw consensus keys: %s", list(consensus_dict.keys()))
+        self.logger.info("Raw consensus: %s", consensus_dict)
+        if raw_result.get("error"):
+            self.logger.warning("mllmcelltype error: %s", raw_result["error"])
 
         labels = {str(k): str(v) for k, v in consensus_dict.items()}
         confidence = {str(k): float(v) for k, v in proportion_dict.items()}

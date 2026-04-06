@@ -229,7 +229,11 @@ def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = Non
 
     # Extract QC metrics
     qc_metrics = {}
-    qc_columns = ['total_counts', 'n_genes_by_counts', 'pct_counts_mt', 'doublet_score']
+    qc_columns = [
+        'total_counts', 'n_genes_by_counts', 'pct_counts_mt', 'doublet_score',
+        # PopV per-cell agreement (0..1) and ontology depth — numeric, not labels
+        'popv_agreement', 'popv_prediction_depth',
+    ]
     for col in qc_columns:
         if col in adata.obs.columns:
             qc_metrics[col] = adata.obs[col].tolist()
@@ -240,18 +244,34 @@ def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = Non
 
     # Define known categories to help classification
     known_cluster_cols = ['leiden', 'louvain', 'cluster', 'seurat_clusters']
-    known_annotation_cols = ['cellmarker', 'panglaodb', 'cancersea', 'cell_type', 'manual_annotation', 'celltype', 'annotation', 'celltypist']
+    known_annotation_cols = [
+        'cellmarker', 'panglaodb', 'cancersea', 'cell_type',
+        'manual_annotation', 'celltype', 'annotation', 'celltypist',
+        'popv', 'mllm', 'consensus',
+    ]
 
     # ========== MULTI-RESOLUTION: Determine which columns to use ==========
     # For multi-resolution datasets, identify the primary leiden column but include ALL leiden columns
     primary_leiden_col = None
     primary_annotation_cols = []
 
-    # Get annotation_resolutions mapping from adata.uns (maps annotator name to resolution)
-    annotation_resolutions = {}
+    # Get annotation_resolutions mapping from adata.uns. Each value may be:
+    #   - a float (legacy: annotated at a single resolution)
+    #   - a list of floats (new: annotated at multiple resolutions)
+    # We normalize to a list internally.
+    annotation_resolutions: Dict[str, List[float]] = {}
     if 'annotation_resolutions' in adata.uns:
         raw_anno_res = adata.uns['annotation_resolutions']
-        annotation_resolutions = {str(k): float(v) for k, v in dict(raw_anno_res).items()}
+        for k, v in dict(raw_anno_res).items():
+            if v is None:
+                continue
+            try:
+                if isinstance(v, (list, tuple, np.ndarray)):
+                    annotation_resolutions[str(k)] = sorted({float(x) for x in v})
+                else:
+                    annotation_resolutions[str(k)] = [float(v)]
+            except (TypeError, ValueError):
+                continue
         print(f"DEBUG: Found annotation_resolutions: {annotation_resolutions}")
 
     if is_multi_resolution and active_resolution is not None:
@@ -263,9 +283,22 @@ def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = Non
                 primary_annotation_cols.append(col)
         print(f"DEBUG: Multi-res mode - primary leiden: {primary_leiden_col}, annotations: {primary_annotation_cols}")
 
+    # Columns to skip entirely — internal artifacts, not useful for color-by
+    skip_suffixes = ('_cnt', '_cluster', '_probabilities')
+    skip_columns = {
+        '_dataset', '_labels_annotation',
+        '_reference_labels_annotation', '_scvi_batch', '_scvi_labels',
+    }
+
     for col in adata.obs.columns:
         # Skip QC columns
         if col in qc_metrics:
+            continue
+
+        # Skip internal/artifact columns
+        if col in skip_columns or col.startswith('_'):
+            continue
+        if any(col.endswith(s) for s in skip_suffixes):
             continue
 
         # ========== MULTI-RESOLUTION: Include ALL leiden columns for Color By dropdown ==========
@@ -319,12 +352,19 @@ def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = Non
                     is_annotation = True
 
                 if is_annotation:
-                    # Add resolution metadata if available
-                    # Check if this annotator is in annotation_resolutions mapping
-                    resolution_for_col = None
-                    for annotator_key, res_val in annotation_resolutions.items():
+                    # Add resolution metadata if available. Each annotator now
+                    # tracks a LIST of resolutions it was computed at; if the
+                    # active resolution is in that list, prefer it; otherwise
+                    # fall back to the first.
+                    resolution_for_col: Optional[float] = None
+                    for annotator_key, res_list in annotation_resolutions.items():
                         if annotator_key in col_lower or col_lower in annotator_key:
-                            resolution_for_col = res_val
+                            if not res_list:
+                                continue
+                            if active_resolution is not None and float(active_resolution) in res_list:
+                                resolution_for_col = float(active_resolution)
+                            else:
+                                resolution_for_col = float(res_list[0])
                             break
                     # Also check if it's the combined cell_type column (uses active resolution)
                     if col == 'cell_type' and active_resolution is not None:
@@ -424,6 +464,14 @@ def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = Non
     if resolution_info is not None:
         result['resolution_info'] = resolution_info
 
+    # Include parent label info for subcluster datasets
+    if 'parent_label' in adata.uns:
+        result['parent_info'] = {
+            'label': str(adata.uns.get('parent_label', '')),
+            'source': str(adata.uns.get('parent_label_source', '')),
+            'parent_path': str(adata.uns.get('parent_path', '')),
+        }
+
     return result
 
 def get_gene_expression(h5ad_path: str, gene_names: List[str]) -> Dict[str, List[float]]:
@@ -460,15 +508,28 @@ def get_gene_expression(h5ad_path: str, gene_names: List[str]) -> Dict[str, List
 
 def get_marker_genes_by_cluster(h5ad_path: str, cluster_column: str = 'leiden', n_genes: int = 10) -> Dict[str, List[str]]:
     """
-    Get top marker genes for each cluster using scanpy's rank_genes_groups
+    Get top marker genes for each cluster using scanpy's rank_genes_groups.
+
+    Always (re)computes against the requested ``cluster_column`` so the returned
+    keys match that column's category labels (e.g. leiden cluster numbers),
+    rather than reusing a stale ``rank_genes_groups`` keyed on a different column
+    such as ``cell_type``.
     """
     adata = sc.read_h5ad(h5ad_path)
 
     if cluster_column not in adata.obs.columns:
         return {}
 
-    # Calculate marker genes if not already done
-    if 'rank_genes_groups' not in adata.uns:
+    # Recompute if missing OR if the cached rank_genes_groups was computed
+    # against a different column (params.groupby in adata.uns).
+    cached_groupby = None
+    if 'rank_genes_groups' in adata.uns:
+        try:
+            cached_groupby = adata.uns['rank_genes_groups'].get('params', {}).get('groupby')
+        except Exception:
+            cached_groupby = None
+
+    if 'rank_genes_groups' not in adata.uns or cached_groupby != cluster_column:
         sc.tl.rank_genes_groups(adata, cluster_column, method='wilcoxon')
 
     # Extract top genes per cluster

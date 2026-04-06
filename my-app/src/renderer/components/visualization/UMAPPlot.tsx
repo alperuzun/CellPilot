@@ -1,6 +1,8 @@
 import React from 'react';
 import Plot from 'react-plotly.js';
 import { VisualizationData, GeneExpressionData } from '../../services/api';
+import { useVizTheme } from '../../theme/ThemeContext';
+import { usePlotlyTheme } from '../../theme/usePlotlyTheme';
 
 interface UMAPPlotProps {
   data: VisualizationData;
@@ -42,7 +44,9 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({
   onSelectionCoordinates,
   onClusterSelect
 }) => {
-  
+  const { v, isDark, colors } = useVizTheme();
+  const plotlyTheme = usePlotlyTheme();
+
   // Get available embeddings (prioritize UMAP)
   const availableEmbeddings = data.summary_stats?.embeddings_available || [];
   const currentEmbedding = availableEmbeddings.includes('umap') ? 'umap' : availableEmbeddings[0] || 'umap';
@@ -50,7 +54,7 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({
 
   if (!coordinates) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-400">
+      <div className="flex items-center justify-center h-full" style={{ color: v.textMuted }}>
         <div className="text-center">
           <p>No embedding data available</p>
         </div>
@@ -240,22 +244,22 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({
     xaxis: {
       title: '',
       showgrid: true,
-      gridcolor: 'rgba(255,255,255,0.05)',
+      gridcolor: plotlyTheme.umapAxisStyle.gridcolor,
       zeroline: false,
       showticklabels: false,
     },
     yaxis: {
       title: '',
       showgrid: true,
-      gridcolor: 'rgba(255,255,255,0.05)',
+      gridcolor: plotlyTheme.umapAxisStyle.gridcolor,
       zeroline: false,
       showticklabels: false,
     },
     hovermode: 'closest' as const,
     dragmode: activeTool === 'lasso' ? 'lasso' : activeTool === 'select' ? 'select' : 'pan',
     selectdirection: 'any' as const,
-    plot_bgcolor: 'transparent', // Transparent for dark mode background
-    paper_bgcolor: 'transparent',
+    plot_bgcolor: plotlyTheme.baseLayout.plot_bgcolor,
+    paper_bgcolor: plotlyTheme.baseLayout.paper_bgcolor,
     margin: { l: 0, r: 0, t: 0, b: 0 },
     autosize: true,
     showlegend: false,
@@ -271,10 +275,25 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({
           const cellIds = selectedIndices.map((i: number) => data.cell_ids[i]);
           onCellSelection(cellIds);
         }
-      } 
-      // If event fires with empty points (sometimes happens on clear), do nothing or clear
-      // We rely on onDeselect for explicit clearing usually, but sometimes select tool returns empty
+      }
     }
+  };
+
+  // Handle single-cell click → identify leiden cluster and open cluster details
+  const handlePointClick = (eventData: any) => {
+    if (!eventData || !eventData.points || eventData.points.length === 0) return;
+    const point = eventData.points[0];
+    const idx = point.pointIndex;
+    if (idx === undefined || idx === null) return;
+
+    // Find leiden cluster for this cell. Prefer 'leiden', fall back to first cluster column.
+    const leidenSrc = data.clusters['leiden'] || Object.values(data.clusters)[0];
+    if (!leidenSrc) return;
+    const rawLabel = leidenSrc.labels[idx];
+    if (rawLabel === undefined) return;
+    // Apply custom label remap if present
+    const displayLabel = customLabels?.[rawLabel] || rawLabel;
+    onClusterSelect?.(displayLabel);
   };
 
   // Legend Component
@@ -287,13 +306,16 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({
             : 'linear-gradient(to right, #0d0887, #46039f, #7201a8, #9c179e, #bd3786, #d8576b, #ed7953, #fb9f3a, #fdca26, #f0f921)'; // Plasma
         
         return (
-            <div className="absolute top-4 right-4 bg-neutral-900/80 backdrop-blur border border-neutral-800 p-3 rounded-lg shadow-xl max-w-[200px]">
-                <div className="text-xs font-semibold text-gray-300 mb-2">{selectedGene || colorBy}</div>
-                <div 
+            <div
+                className="absolute top-4 right-4 backdrop-blur p-3 rounded-lg shadow-xl max-w-[200px]"
+                style={{ backgroundColor: plotlyTheme.legend.bg, borderWidth: 1, borderStyle: 'solid', borderColor: plotlyTheme.legend.border }}
+            >
+                <div className="text-xs font-semibold mb-2" style={{ color: plotlyTheme.legend.text }}>{selectedGene || colorBy}</div>
+                <div
                     className="h-2 w-full rounded-full mb-1"
                     style={{ background: gradientStyle }}
                 ></div>
-                <div className="flex justify-between text-[10px] text-gray-400">
+                <div className="flex justify-between text-[10px]" style={{ color: v.textMuted }}>
                     <span>Low</span>
                     <span>High</span>
                 </div>
@@ -304,21 +326,33 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({
     if (colorMapping.type === 'categorical' && colorMapping.categories) {
         const categoryColors = generateCategoryColors(colorMapping.categories);
         return (
-            <div className="absolute top-4 right-4 bg-neutral-900/80 backdrop-blur border border-neutral-800 p-3 rounded-lg shadow-xl max-w-[200px] max-h-[300px] overflow-y-auto custom-scrollbar z-20 pointer-events-auto">
-                <div className="text-xs font-semibold text-gray-300 mb-2 sticky top-0 bg-neutral-900/0">{colorBy}</div>
+            <div
+                className="absolute top-4 right-4 backdrop-blur p-3 rounded-lg shadow-xl max-w-[200px] max-h-[300px] overflow-y-auto custom-scrollbar z-20 pointer-events-auto"
+                style={{ backgroundColor: plotlyTheme.legend.bg, borderWidth: 1, borderStyle: 'solid', borderColor: plotlyTheme.legend.border }}
+            >
+                <div className="text-xs font-semibold mb-2 sticky top-0" style={{ color: plotlyTheme.legend.text }}>{colorBy}</div>
                 <div className="space-y-1">
                     {colorMapping.categories.map(cat => (
-                        <div 
-                            key={cat} 
+                        <div
+                            key={cat}
                             onClick={(e) => {
                                 e.stopPropagation();
                                 e.nativeEvent.stopImmediatePropagation();
                                 onClusterSelect?.(cat);
                             }}
-                            className="flex items-center gap-2 text-[10px] text-gray-400 cursor-pointer hover:bg-neutral-700/50 hover:text-white px-1 py-0.5 rounded transition-colors"
+                            className="flex items-center gap-2 text-[10px] cursor-pointer px-1 py-0.5 rounded transition-colors"
+                            style={{ color: v.textFaint }}
+                            onMouseEnter={(e) => {
+                                (e.currentTarget as HTMLElement).style.backgroundColor = v.hoverOverlay;
+                                (e.currentTarget as HTMLElement).style.color = v.textHeading;
+                            }}
+                            onMouseLeave={(e) => {
+                                (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                                (e.currentTarget as HTMLElement).style.color = v.textFaint;
+                            }}
                         >
-                            <span 
-                                className="w-3 h-3 rounded-full flex-shrink-0" 
+                            <span
+                                className="w-3 h-3 rounded-full flex-shrink-0"
                                 style={{ backgroundColor: categoryColors[cat] }}
                             ></span>
                             <span className="truncate">{cat}</span>
@@ -353,9 +387,8 @@ const UMAPPlot: React.FC<UMAPPlotProps> = ({
         style={{ width: '100%', height: '100%' }}
         useResizeHandler={true}
         onSelected={handleSelection}
+        onClick={handlePointClick}
         onDeselect={() => {
-            // Only clear if we are in a selection mode, otherwise pan might trigger this?
-            // Actually onDeselect is specific to double-click or mode change clearing
             if (onCellSelection) onCellSelection([]);
         }}
         />

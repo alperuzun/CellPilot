@@ -17,10 +17,12 @@ class AnnotationOrchestrator:
         self,
         method_names: list[str],
         adata: ad.AnnData,
+        on_progress: Any = None,
         **kwargs: Any,
     ) -> list[AnnotationResult]:
         results: list[AnnotationResult] = []
-        for method_name in method_names:
+        total = len(method_names)
+        for i, method_name in enumerate(method_names):
             try:
                 method_cls = AnnotationRegistry.get(method_name)
             except KeyError:
@@ -37,12 +39,19 @@ class AnnotationOrchestrator:
             method_kwargs.update(kwargs.get(method_name, {}))
 
             logger.info("Running annotation method: %s", method.display_name)
+            if on_progress:
+                on_progress(i, total, method.display_name)
+
             try:
                 result = method.annotate(adata, **method_kwargs)
                 results.append(result)
             except Exception as e:
                 logger.exception("Method %s failed", method_name)
                 raise e
+
+        if on_progress:
+            on_progress(total, total, "Computing consensus")
+
         return results
 
     def compute_consensus(

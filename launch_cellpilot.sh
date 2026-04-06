@@ -20,15 +20,15 @@ fi
 echo "🔍 Checking prerequisites..."
 
 # Check if conda environment exists
-if ! conda env list | grep -q "CellPilot-dev"; then
-  echo "❌ CellPilot-dev conda environment not found!"
-  echo "   Please run: conda env create -f environment.yml"
+if ! conda env list | grep -q "CellPilot-dev-311"; then
+  echo "❌ CellPilot-dev-311 conda environment not found!"
+  echo "   Please run: conda env create -f environment.yml -n CellPilot-dev-311"
   exit 1
 fi
 
 # Activate the conda environment
-echo "🔄 Activating CellPilot-dev environment..."
-conda activate CellPilot-dev
+echo "🔄 Activating CellPilot-dev-311 environment..."
+conda activate CellPilot-dev-311
 
 # Verify critical dependencies are available
 echo "🧪 Checking Python dependencies..."
@@ -92,6 +92,7 @@ fi
 
 # --- Start backend -------------------------------------------------
 echo "▶️  Starting API server..."
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES  # Required for PopV (PyTorch/macOS fork safety)
 pushd "$(dirname "$0")/backend" >/dev/null
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload \
   2> ../backend_stderr.log &

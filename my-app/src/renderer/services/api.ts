@@ -137,6 +137,11 @@ export interface VisualizationData {
     active_resolution?: number | null;
   };
   cell_ids: string[];
+  parent_info?: {
+    label: string;
+    source: string;
+    parent_path: string;
+  };
   qc_report?: {
     available: boolean;
     stats?: {
@@ -207,6 +212,10 @@ export interface AnalysisFile {
   type: 'dotplot' | 'annotation_details' | 'cluster_plot' | 'annotation_plot' | 'heatmap' | 'csv_data' | 'text_file' | 'html_report' | 'pdf_report' | 'other_plot' | 'annotation_confidence';
   name: string;
   size_mb: number;
+  /** Populated for `annotation_confidence` files: the leiden resolution this
+   * annotation was computed against. Read from the JSON metadata.resolution
+   * field by the backend, with filename suffix `_resX.X` as a fallback. */
+  resolution?: number;
 }
 
 export interface AnalysisFilesResponse {
@@ -553,6 +562,12 @@ export const api = {
     return apiRequest('/available_datasets');
   },
 
+  async deleteDataset(path: string): Promise<{ status: string; deleted: string }> {
+    return apiRequest(`/dataset?path=${encodeURIComponent(path)}`, {
+      method: 'DELETE',
+    });
+  },
+
   async getAnalysisFiles(h5adPath: string): Promise<AnalysisFilesResponse> {
     return apiRequest(`/analysis_files?h5ad_path=${encodeURIComponent(h5adPath)}`);
   },
@@ -654,6 +669,36 @@ export const api = {
     return apiRequest('/annotate_resolution', {
       method: 'POST',
       body: JSON.stringify(params),
+    });
+  },
+};
+
+// Recent Datasets (MRU)
+export interface RecentDatasetEntry {
+  input_path: string;
+  name: string;
+  species: string;
+  file_size: number;
+  n_obs: number;
+  n_vars: number;
+  last_used: string;
+}
+
+export const recentDatasetsApi = {
+  async list(): Promise<{ datasets: RecentDatasetEntry[] }> {
+    return apiRequest('/recent_datasets');
+  },
+
+  async add(entry: Partial<RecentDatasetEntry> & { input_path: string; name: string }): Promise<{ status: string }> {
+    return apiRequest('/recent_datasets', {
+      method: 'POST',
+      body: JSON.stringify(entry),
+    });
+  },
+
+  async remove(inputPath: string): Promise<{ status: string }> {
+    return apiRequest(`/recent_datasets?input_path=${encodeURIComponent(inputPath)}`, {
+      method: 'DELETE',
     });
   },
 };

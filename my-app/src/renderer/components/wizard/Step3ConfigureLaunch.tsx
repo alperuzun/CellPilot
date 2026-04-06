@@ -199,6 +199,21 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
           setCurrentStep('Analysis Complete!');
           setProgress(100);
 
+          // System notification so user knows even if they switched tabs
+          if (Notification.permission === 'granted') {
+            new Notification('CellPilot', {
+              body: `Analysis of "${uploadData.datasetName}" is complete!`,
+            });
+          } else if (Notification.permission !== 'denied') {
+            Notification.requestPermission().then(perm => {
+              if (perm === 'granted') {
+                new Notification('CellPilot', {
+                  body: `Analysis of "${uploadData.datasetName}" is complete!`,
+                });
+              }
+            });
+          }
+
           const completedAnalysis: AnalysisData = {
             ...config,
             analysisId: jobId,
@@ -987,14 +1002,68 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
               className="mt-1 h-4 w-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
             />
             <div className="flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium text-gray-900">PopV</span>
                 <span className="text-xs px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">Ensemble</span>
+                <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">per-cell</span>
+                <span className="text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">Nature Genetics 2024</span>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
-                Runs 8 classifiers (KNN, RF, SVM, scANVI, OnClass, CellTypist) with majority voting.
-                Published in Nature Genetics 2024.
+              <p className="text-xs text-gray-600 mt-1">
+                Runs 8 independent classifiers per cell and uses majority voting to assign high-confidence labels.
+                Each cell gets its own prediction — labels with high agreement (≥6/8 classifiers) reach &gt;90% accuracy.
               </p>
+
+              {/* Detailed explanation — collapsed by default */}
+              <details className="mt-2 group">
+                <summary className="cursor-pointer text-xs font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-1">
+                  <ChevronRight size={12} className="group-open:rotate-90 transition-transform" />
+                  How does PopV work?
+                </summary>
+                <div className="mt-2 p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg space-y-2 text-xs text-gray-700">
+                  <div>
+                    <p className="font-semibold text-gray-800 mb-1">The 8 classifiers PopV runs internally:</p>
+                    <ul className="list-disc list-inside space-y-0.5 pl-1">
+                      <li><strong>KNN on scVI</strong> — k-nearest neighbors in deep latent space</li>
+                      <li><strong>KNN on BBKNN</strong> — batch-balanced KNN integration</li>
+                      <li><strong>KNN on Scanorama</strong> — manifold alignment integration</li>
+                      <li><strong>KNN on Harmony</strong> — soft k-means integration</li>
+                      <li><strong>scANVI</strong> — semi-supervised deep generative model</li>
+                      <li><strong>SVM</strong> — support vector machine on PCA</li>
+                      <li><strong>Random Forest</strong> — ensemble of decision trees</li>
+                      <li><strong>OnClass</strong> — Cell Ontology-aware predictor</li>
+                      <li><strong>CellTypist</strong> — logistic regression on reference</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800 mb-1">Voting & confidence:</p>
+                    <p>
+                      Each cell receives 8 independent predictions, then PopV picks the most common label.
+                      The agreement score (1–8) indicates confidence:
+                    </p>
+                    <ul className="list-disc list-inside space-y-0.5 pl-1 mt-1">
+                      <li><strong>7–8/8</strong> agreement → very high confidence (&gt;95% accuracy)</li>
+                      <li><strong>5–6/8</strong> agreement → high confidence (~90% accuracy)</li>
+                      <li><strong>3–4/8</strong> agreement → ambiguous, manually review</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800 mb-1">Two reference modes (configure below):</p>
+                    <ul className="list-disc list-inside space-y-0.5 pl-1">
+                      <li>
+                        <strong>Pretrained</strong> — Tissue-specific models from HuggingFace (Tabula Sapiens for human, Tabula Muris for mouse).
+                        78 models covering 30+ tissues. Fast — no training required.
+                      </li>
+                      <li>
+                        <strong>Custom reference</strong> — Provide your own annotated h5ad. PopV trains all 8 classifiers from scratch on it (slower).
+                        Useful for non-standard tissues, disease references, or rare cell types.
+                      </li>
+                    </ul>
+                  </div>
+                  <p className="text-[11px] italic text-gray-500 pt-1 border-t border-indigo-100">
+                    Ergen et al., "Consensus prediction of cell type labels in single-cell data with popV", Nature Genetics (2024).
+                  </p>
+                </div>
+              </details>
             </div>
           </div>
 

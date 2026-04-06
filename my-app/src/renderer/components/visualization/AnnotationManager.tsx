@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { VisualizationData, api } from '../../services/api';
 import { Button, Modal, Select } from './Shared';
 import { Plus, Save, Edit2, Check, X, Layers, Trash2 } from 'lucide-react';
+import { useVizTheme } from '../../theme/ThemeContext';
 
 interface AnnotationManagerProps {
   data: VisualizationData;
@@ -22,6 +23,7 @@ export default function AnnotationManager({
   onMappingChange,
   selectedCells = []
 }: AnnotationManagerProps) {
+  const { v, isDark, colors } = useVizTheme();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [newLayerName, setNewLayerName] = useState('');
@@ -186,10 +188,10 @@ export default function AnnotationManager({
   };
 
   return (
-    <div className="h-full flex flex-col bg-neutral-900 text-gray-100">
+    <div className="h-full flex flex-col" style={{ backgroundColor: v.panelBg, color: v.textHeading }}>
       {/* Header */}
-      <div className="p-4 border-b border-neutral-800 flex justify-between items-center">
-        <h3 className="text-lg font-semibold flex items-center gap-2">
+      <div className="p-4 flex justify-between items-center" style={{ borderBottom: `1px solid ${v.panelBorder}` }}>
+        <h3 className="text-lg font-semibold flex items-center gap-2" style={{ color: v.textHeading }}>
           <Layers size={20} />
           Annotation Layers
         </h3>
@@ -204,18 +206,20 @@ export default function AnnotationManager({
       </div>
 
       {/* Layer List */}
-      <div className="p-4 border-b border-neutral-800 overflow-y-auto max-h-40">
-        <label className="text-xs font-medium text-gray-400 mb-2 block">Active Layer (Color By)</label>
+      <div className="p-4 overflow-y-auto max-h-40" style={{ borderBottom: `1px solid ${v.panelBorder}` }}>
+        <label className="text-xs font-medium mb-2 block" style={{ color: v.textMuted }}>Active Layer (Color By)</label>
         <div className="space-y-1">
           {allLayers.map(layer => (
-            <div 
+            <div
               key={layer}
               onClick={() => onLayerChange(layer)}
-              className={`px-3 py-2 rounded-lg cursor-pointer text-sm flex justify-between items-center transition-colors ${
-                activeLayer === layer 
-                  ? 'bg-blue-900/30 text-blue-300 border border-blue-800' 
-                  : 'hover:bg-neutral-800 text-gray-400'
-              }`}
+              className="px-3 py-2 rounded-lg cursor-pointer text-sm flex justify-between items-center transition-colors"
+              style={activeLayer === layer
+                ? { backgroundColor: v.badgeBlue.bg, color: v.badgeBlue.text, border: `1px solid ${v.badgeBlue.border}` }
+                : { color: v.textMuted }
+              }
+              onMouseEnter={(e) => { if (activeLayer !== layer) e.currentTarget.style.backgroundColor = v.panelBgSecondary; }}
+              onMouseLeave={(e) => { if (activeLayer !== layer) e.currentTarget.style.backgroundColor = 'transparent'; }}
             >
               <span>{layer}</span>
               {activeLayer === layer && <Check size={14} />}
@@ -228,8 +232,8 @@ export default function AnnotationManager({
       <div className="flex-1 overflow-y-auto p-4">
         {/* Selection Labeling */}
         {selectedCells.length > 0 && (
-            <div className="mb-6 p-3 bg-blue-900/20 border border-blue-800 rounded-lg">
-                <h4 className="text-sm font-medium text-blue-300 mb-2">
+            <div className="mb-6 p-3 rounded-lg" style={{ backgroundColor: v.badgeBlue.bg, border: `1px solid ${v.badgeBlue.border}` }}>
+                <h4 className="text-sm font-medium mb-2" style={{ color: v.badgeBlue.text }}>
                     Label {selectedCells.length} Selected Cells
                 </h4>
                 <div className="flex gap-2">
@@ -238,7 +242,10 @@ export default function AnnotationManager({
                         value={selectionLabel}
                         onChange={(e) => setSelectionLabel(e.target.value)}
                         placeholder="New Category Name"
-                        className="flex-1 bg-neutral-900 border border-blue-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                        className="flex-1 rounded px-3 py-1.5 text-sm focus:outline-none"
+                        style={{ backgroundColor: v.inputBg, border: `1px solid ${v.badgeBlue.border}`, color: v.inputText }}
+                        onFocus={(e) => e.currentTarget.style.borderColor = v.inputFocusBorder}
+                        onBlur={(e) => e.currentTarget.style.borderColor = v.badgeBlue.border}
                     />
                     <Button 
                         variant="primary" 
@@ -253,8 +260,8 @@ export default function AnnotationManager({
         )}
 
         <div className="flex justify-between items-center mb-4">
-            <label className="text-xs font-medium text-gray-400">
-                Categories in <span className="text-white font-bold">{activeLayer}</span>
+            <label className="text-xs font-medium" style={{ color: v.textMuted }}>
+                Categories in <span className="font-bold" style={{ color: v.textHeading }}>{activeLayer}</span>
             </label>
             <div className="flex gap-2">
                 <Button 
@@ -281,43 +288,50 @@ export default function AnnotationManager({
 
         <div className="space-y-2">
           {activeCategories.map(cat => (
-            <div key={cat} className="flex items-center gap-2 bg-neutral-800/50 p-2 rounded border border-neutral-800">
-              <div 
+            <div key={cat} className="flex items-center gap-2 p-2 rounded" style={{ backgroundColor: v.panelBgSecondary, border: `1px solid ${v.panelBorder}` }}>
+              <div
                 className="w-3 h-3 rounded-full shrink-0"
                 style={{ backgroundColor: 'gray' }} // TODO: Pass colors map?
               />
-              
+
               {editingCategory === cat ? (
                 <div className="flex-1 flex items-center gap-2">
                   <input
                     type="text"
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
-                    className="flex-1 bg-neutral-900 border border-blue-500 rounded px-2 py-1 text-sm text-white focus:outline-none"
+                    className="flex-1 rounded px-2 py-1 text-sm focus:outline-none"
+                    style={{ backgroundColor: v.inputBg, border: `1px solid ${v.inputFocusBorder}`, color: v.inputText }}
                     autoFocus
                     onKeyDown={(e) => {
                         if (e.key === 'Enter') confirmEdit();
                         if (e.key === 'Escape') cancelEdit();
                     }}
                   />
-                  <button onClick={confirmEdit} className="text-green-500 hover:text-green-400"><Check size={16} /></button>
-                  <button onClick={cancelEdit} className="text-red-500 hover:text-red-400"><X size={16} /></button>
+                  <button onClick={confirmEdit} style={{ color: v.badgeGreen.text }}><Check size={16} /></button>
+                  <button onClick={cancelEdit} style={{ color: v.badgeRed.text }}><X size={16} /></button>
                 </div>
               ) : (
                 <div className="flex-1 flex justify-between items-center group">
-                  <span className={`text-sm ${localMapping[cat] ? 'text-blue-300 font-medium' : 'text-gray-300'}`}>
+                  <span className="text-sm" style={{ color: localMapping[cat] ? v.badgeBlue.text : v.textLabel, fontWeight: localMapping[cat] ? 500 : 400 }}>
                     {localMapping[cat] || cat}
                   </span>
-                  <button 
+                  <button
                     onClick={() => startEditing(cat)}
-                    className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition-opacity"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ color: v.textFaint }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = v.textHeading}
+                    onMouseLeave={(e) => e.currentTarget.style.color = v.textFaint}
                     title="Rename Category"
                   >
                     <Edit2 size={14} />
                   </button>
-                  <button 
+                  <button
                     onClick={() => handleDeleteCategory(cat)}
-                    className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-opacity ml-2"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity ml-2"
+                    style={{ color: v.textFaint }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = v.badgeRed.text}
+                    onMouseLeave={(e) => e.currentTarget.style.color = v.textFaint}
                     title="Delete Category (set to Unannotated)"
                   >
                     <Trash2 size={14} />
@@ -327,30 +341,34 @@ export default function AnnotationManager({
             </div>
           ))}
           {activeCategories.length === 0 && (
-              <p className="text-sm text-gray-500 text-center py-4">No categories found in this layer</p>
+              <p className="text-sm text-center py-4" style={{ color: v.textFaint }}>No categories found in this layer</p>
           )}
         </div>
       </div>
 
       {/* Create Layer Modal */}
-      <Modal 
-        isOpen={showCreateModal} 
+      <Modal
+        isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         title="Create New Annotation Layer"
+        theme={isDark ? 'dark' : 'light'}
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">New Layer Name</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: v.textLabel }}>New Layer Name</label>
             <input
               type="text"
               value={newLayerName}
               onChange={(e) => setNewLayerName(e.target.value)}
               placeholder="e.g. Manual_V1"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 rounded-md focus:outline-none"
+              style={{ backgroundColor: v.inputBg, border: `1px solid ${v.inputBorder}`, color: v.inputText }}
+              onFocus={(e) => e.currentTarget.style.borderColor = v.inputFocusBorder}
+              onBlur={(e) => e.currentTarget.style.borderColor = v.inputBorder}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Source Layer (Copy from)</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: v.textLabel }}>Source Layer (Copy from)</label>
             <Select
                 value={sourceLayer}
                 onChange={(e) => setSourceLayer(e.target.value)}
@@ -359,8 +377,8 @@ export default function AnnotationManager({
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="secondary" onClick={() => setShowCreateModal(false)}>Cancel</Button>
-            <Button 
-                variant="primary" 
+            <Button
+                variant="primary"
                 onClick={handleCreateLayer}
                 disabled={creating || !newLayerName || !sourceLayer}
             >
@@ -371,20 +389,24 @@ export default function AnnotationManager({
       </Modal>
 
       {/* Add Category Modal */}
-      <Modal 
-        isOpen={showAddCategoryModal} 
+      <Modal
+        isOpen={showAddCategoryModal}
         onClose={() => setShowAddCategoryModal(false)}
         title="Add New Category"
+        theme={isDark ? 'dark' : 'light'}
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">New Category Name</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: v.textLabel }}>New Category Name</label>
             <input
               type="text"
               value={newCategoryName}
               onChange={(e) => setNewCategoryName(e.target.value)}
               placeholder="e.g. B cells, CD4+ T cells"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 rounded-md focus:outline-none"
+              style={{ backgroundColor: v.inputBg, border: `1px solid ${v.inputBorder}`, color: v.inputText }}
+              onFocus={(e) => e.currentTarget.style.borderColor = v.inputFocusBorder}
+              onBlur={(e) => e.currentTarget.style.borderColor = v.inputBorder}
               autoFocus
               onKeyDown={(e) => {
                   if (e.key === 'Enter') handleAddCategory();
@@ -393,8 +415,8 @@ export default function AnnotationManager({
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="secondary" onClick={() => setShowAddCategoryModal(false)}>Cancel</Button>
-            <Button 
-                variant="primary" 
+            <Button
+                variant="primary"
                 onClick={handleAddCategory}
                 disabled={creating || !newCategoryName.trim()}
             >

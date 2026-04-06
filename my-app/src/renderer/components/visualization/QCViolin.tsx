@@ -3,6 +3,8 @@ import Plot from 'react-plotly.js';
 import { VisualizationData } from '../../services/api';
 import { Select } from './Shared';
 import { Info, CheckCircle, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
+import { useVizTheme } from '../../theme/ThemeContext';
+import { usePlotlyTheme } from '../../theme/usePlotlyTheme';
 
 interface QCViolinProps {
   data: VisualizationData;
@@ -10,6 +12,8 @@ interface QCViolinProps {
 }
 
 const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
+  const { v, isDark } = useVizTheme();
+  const plotlyTheme = usePlotlyTheme();
   const [groupBy, setGroupBy] = useState<string>('leiden');
   const [showPoints, setShowPoints] = useState<boolean>(false);
   const [showOnlySelected, setShowOnlySelected] = useState<boolean>(false);
@@ -24,9 +28,9 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
 
   if (qcMetrics.length === 0) {
     return (
-      <div className="p-6 rounded-lg border border-gray-700 text-center bg-gray-800">
-        <h3 className="text-lg font-medium text-gray-100">No QC metrics available</h3>
-        <p className="text-gray-400 mt-1">
+      <div className="p-6 rounded-lg border text-center" style={{ borderColor: v.panelBorderSecondary, backgroundColor: v.panelBgSecondary }}>
+        <h3 className="text-lg font-medium" style={{ color: v.textHeading }}>No QC metrics available</h3>
+        <p className="mt-1" style={{ color: v.textMuted }}>
           QC metrics could not be found in the data. Available metrics: {Object.keys(data.qc_metrics).join(', ') || 'None'}
         </p>
       </div>
@@ -102,16 +106,16 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
       title: false,
       height: rows * 400 + 100,
       margin: { l: 60, r: 60, t: 40, b: 60 },
-      plot_bgcolor: 'transparent',
-      paper_bgcolor: 'transparent',
-      font: { color: '#e5e7eb' }, // Light text
+      plot_bgcolor: plotlyTheme.baseLayout.plot_bgcolor,
+      paper_bgcolor: plotlyTheme.baseLayout.paper_bgcolor,
+      font: { color: plotlyTheme.raw.fontColor },
       showlegend: true,
       legend: {
         orientation: 'h' as const,
         x: 0.5,
         xanchor: 'center',
         y: -0.1,
-        font: { color: '#e5e7eb' }
+        font: { color: plotlyTheme.raw.fontColor }
       },
     };
 
@@ -136,16 +140,16 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
         title: groupBy,
         domain: xDomain,
         anchor: yAxisKey.replace('axis', ''),
-        gridcolor: '#374151', // Dark gray grid
-        color: '#e5e7eb'
+        gridcolor: plotlyTheme.raw.gridColor,
+        color: plotlyTheme.raw.fontColor
       };
 
       layout[yAxisKey] = {
         title: metric,
         domain: yDomain,
         anchor: xAxisKey.replace('axis', ''),
-        gridcolor: '#374151',
-        color: '#e5e7eb'
+        gridcolor: plotlyTheme.raw.gridColor,
+        color: plotlyTheme.raw.fontColor
       };
     });
 
@@ -184,28 +188,29 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
   const summaryStats = calculateSummaryStats();
 
   return (
-    <div className="space-y-6 pb-8 text-gray-100">
+    <div className="space-y-6 pb-8" style={{ color: v.textHeading }}>
       {/* QC Report Panel */}
       {data.qc_report?.available && data.qc_report.stats && (
-        <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+        <div className="border rounded-lg p-4" style={{ backgroundColor: v.panelBgSecondary, borderColor: v.panelBorderSecondary }}>
           <div className="flex items-center gap-2 mb-4">
-            <Info className="text-blue-400" size={20} />
-            <h3 className="text-lg font-semibold text-gray-100">Quality Control Filtering Report</h3>
+            <Info style={{ color: v.badgeBlue.text }} size={20} />
+            <h3 className="text-lg font-semibold" style={{ color: v.textHeading }}>Quality Control Filtering Report</h3>
           </div>
 
           {/* Text Report Accordion */}
           {data.qc_report.text_report && (
-            <div className="mb-4 border border-gray-700 rounded-md bg-gray-900 overflow-hidden">
+            <div className="mb-4 border rounded-md overflow-hidden" style={{ borderColor: v.panelBorderSecondary, backgroundColor: v.panelBg }}>
               <button
                 onClick={() => setIsReportExpanded(!isReportExpanded)}
-                className="w-full px-4 py-2 text-left flex items-center justify-between bg-gray-800 hover:bg-gray-700 transition-colors"
+                className="w-full px-4 py-2 text-left flex items-center justify-between transition-colors"
+                style={{ backgroundColor: v.panelBgSecondary }}
               >
-                <span className="text-sm font-medium text-gray-300">View Full Text Report</span>
+                <span className="text-sm font-medium" style={{ color: v.textLabel }}>{`View Full Text Report`}</span>
                 {isReportExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
               </button>
-              
+
               {isReportExpanded && (
-                <div className="p-4 bg-black text-gray-300 font-mono text-xs overflow-auto max-h-96 whitespace-pre-wrap border-t border-gray-700">
+                <div className="p-4 font-mono text-xs overflow-auto max-h-96 whitespace-pre-wrap border-t" style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.2)', color: v.textLabel, borderColor: v.panelBorderSecondary }}>
                   {data.qc_report.text_report}
                 </div>
               )}
@@ -214,66 +219,61 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
 
           {/* Summary Cards Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-            <div className="bg-green-900/20 border border-green-900/50 rounded-lg p-4 text-center">
-              <CheckCircle className="text-green-500 mx-auto mb-2" size={32} />
-              <div className="text-2xl font-bold text-green-400">
+            <div className="border rounded-lg p-4 text-center" style={{ backgroundColor: v.badgeGreen.bg, borderColor: v.badgeGreen.border }}>
+              <CheckCircle style={{ color: v.badgeGreen.text }} className="mx-auto mb-2" size={32} />
+              <div className="text-2xl font-bold" style={{ color: v.badgeGreen.text }}>
                 {data.qc_report.stats.final_cells.toLocaleString()}
               </div>
-              <div className="text-sm text-green-300">Cells Retained</div>
+              <div className="text-sm" style={{ color: v.badgeGreen.text }}>Cells Retained</div>
             </div>
 
-            <div className="bg-red-900/20 border border-red-900/50 rounded-lg p-4 text-center">
-              <AlertTriangle className="text-red-500 mx-auto mb-2" size={32} />
-              <div className="text-2xl font-bold text-red-400">
+            <div className="border rounded-lg p-4 text-center" style={{ backgroundColor: v.badgeRed.bg, borderColor: v.badgeRed.border }}>
+              <AlertTriangle style={{ color: v.badgeRed.text }} className="mx-auto mb-2" size={32} />
+              <div className="text-2xl font-bold" style={{ color: v.badgeRed.text }}>
                 {data.qc_report.stats.cells_removed.toLocaleString()}
               </div>
-              <div className="text-sm text-red-300">Cells Removed</div>
+              <div className="text-sm" style={{ color: v.badgeRed.text }}>Cells Removed</div>
             </div>
 
-            <div className={`border rounded-lg p-4 text-center ${
-              data.qc_report.stats.retention_rate_pct < 30 
-                ? 'bg-yellow-900/20 border-yellow-900/50' 
-                : 'bg-blue-900/20 border-blue-900/50'
-            }`}>
-              <Info className={`mx-auto mb-2 ${
-                data.qc_report.stats.retention_rate_pct < 30 ? 'text-yellow-500' : 'text-blue-500'
-              }`} size={32} />
-              <div className={`text-2xl font-bold ${
-                data.qc_report.stats.retention_rate_pct < 30 ? 'text-yellow-400' : 'text-blue-400'
-              }`}>
-                {data.qc_report.stats.retention_rate_pct.toFixed(1)}%
-              </div>
-              <div className={`text-sm ${
-                data.qc_report.stats.retention_rate_pct < 30 ? 'text-yellow-300' : 'text-blue-300'
-              }`}>Retention Rate</div>
-            </div>
+            {(() => {
+              const badge = data.qc_report.stats.retention_rate_pct < 30 ? v.badgeYellow : v.badgeBlue;
+              return (
+                <div className="border rounded-lg p-4 text-center" style={{ backgroundColor: badge.bg, borderColor: badge.border }}>
+                  <Info style={{ color: badge.text }} className="mx-auto mb-2" size={32} />
+                  <div className="text-2xl font-bold" style={{ color: badge.text }}>
+                    {data.qc_report.stats.retention_rate_pct.toFixed(1)}%
+                  </div>
+                  <div className="text-sm" style={{ color: badge.text }}>Retention Rate</div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Filtering Breakdown */}
-          <div className="bg-gray-900 rounded-lg border border-gray-700 p-4">
-            <h4 className="text-sm font-bold text-gray-200 mb-3">Filtering Breakdown</h4>
+          <div className="rounded-lg border p-4" style={{ backgroundColor: v.panelBg, borderColor: v.panelBorderSecondary }}>
+            <h4 className="text-sm font-bold mb-3" style={{ color: v.textBody }}>Filtering Breakdown</h4>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between items-center">
-                <span className="text-gray-400">• Low UMI counts (&lt;{data.qc_report.stats.thresholds.min_counts})</span>
-                <span className="px-2 py-0.5 bg-red-900/30 text-red-300 rounded-full text-xs font-medium">
+                <span style={{ color: v.textMuted }}>• Low UMI counts (&lt;{data.qc_report.stats.thresholds.min_counts})</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: v.badgeRed.bg, color: v.badgeRed.text }}>
                   {data.qc_report.stats.failures.low_umi_count.toLocaleString()}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-400">• Low gene counts (&lt;{data.qc_report.stats.thresholds.min_genes})</span>
-                <span className="px-2 py-0.5 bg-red-900/30 text-red-300 rounded-full text-xs font-medium">
+                <span style={{ color: v.textMuted }}>• Low gene counts (&lt;{data.qc_report.stats.thresholds.min_genes})</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: v.badgeRed.bg, color: v.badgeRed.text }}>
                   {data.qc_report.stats.failures.low_gene_count.toLocaleString()}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-400">• High mitochondrial % (&gt;{data.qc_report.stats.thresholds.mito_threshold_pct}%)</span>
-                <span className="px-2 py-0.5 bg-red-900/30 text-red-300 rounded-full text-xs font-medium">
+                <span style={{ color: v.textMuted }}>• High mitochondrial % (&gt;{data.qc_report.stats.thresholds.mito_threshold_pct}%)</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: v.badgeRed.bg, color: v.badgeRed.text }}>
                   {data.qc_report.stats.failures.high_mito_pct.toLocaleString()}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-400">• Doublets detected (Scrublet)</span>
-                <span className="px-2 py-0.5 bg-yellow-900/30 text-yellow-300 rounded-full text-xs font-medium">
+                <span style={{ color: v.textMuted }}>• Doublets detected (Scrublet)</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: v.badgeYellow.bg, color: v.badgeYellow.text }}>
                   {data.qc_report.stats.estimated_doublets_removed.toLocaleString()}
                 </span>
               </div>
@@ -282,11 +282,11 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
 
           {/* Warning Alert */}
           {data.qc_report.stats.retention_rate_pct < 30 && (
-            <div className="mt-4 bg-yellow-900/20 border border-yellow-900/50 rounded-md p-4 flex gap-3">
-              <AlertTriangle className="text-yellow-500 flex-shrink-0" size={20} />
+            <div className="mt-4 border rounded-md p-4 flex gap-3" style={{ backgroundColor: v.badgeYellow.bg, borderColor: v.badgeYellow.border }}>
+              <AlertTriangle style={{ color: v.badgeYellow.text }} className="flex-shrink-0" size={20} />
               <div>
-                <h4 className="text-sm font-bold text-yellow-400">High Cell Loss Detected</h4>
-                <p className="text-sm text-yellow-300 mt-1">
+                <h4 className="text-sm font-bold" style={{ color: v.badgeYellow.text }}>High Cell Loss Detected</h4>
+                <p className="text-sm mt-1" style={{ color: v.badgeYellow.text }}>
                   Over {(100 - data.qc_report.stats.retention_rate_pct).toFixed(0)}% of cells were removed during QC filtering.
                   Consider reviewing the QC thresholds if this seems too aggressive for your dataset.
                 </p>
@@ -296,41 +296,44 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
         </div>
       )}
 
-      <hr className="border-gray-700" />
+      <hr style={{ borderColor: v.panelBorderSecondary }} />
 
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-100">QC Metrics Distribution</h2>
+        <h2 className="text-xl font-bold" style={{ color: v.textHeading }}>QC Metrics Distribution</h2>
       </div>
 
       {/* Controls */}
-      <div className="bg-gray-800/50 p-4 border border-gray-700 rounded-lg flex flex-wrap gap-6 items-center">
+      <div className="p-4 border rounded-lg flex flex-wrap gap-6 items-center" style={{ backgroundColor: v.panelBgSecondary, borderColor: v.panelBorderSecondary }}>
         <div className="w-64">
           <Select
             label="Group by"
             value={groupBy}
             onChange={(e) => setGroupBy(e.target.value)}
             options={availableGroupings}
-            className="bg-gray-900 border-gray-600 text-gray-100"
+            className=""
+            style={{ backgroundColor: v.inputBg, borderColor: v.inputBorder, color: v.inputText }}
           />
         </div>
 
-        <label className="flex items-center text-sm font-medium text-gray-300 cursor-pointer mt-4">
+        <label className="flex items-center text-sm font-medium cursor-pointer mt-4" style={{ color: v.textLabel }}>
           <input
             type="checkbox"
             checked={showPoints}
             onChange={(e) => setShowPoints(e.target.checked)}
-            className="mr-2 h-4 w-4 text-blue-600 bg-gray-700 border-gray-500 rounded focus:ring-blue-500"
+            className="mr-2 h-4 w-4 rounded focus:ring-blue-500"
+            style={{ backgroundColor: v.inputBg, borderColor: v.inputBorder }}
           />
           Show Points
         </label>
 
         {selectedCells.length > 0 && (
-          <label className="flex items-center text-sm font-medium text-gray-300 cursor-pointer mt-4">
+          <label className="flex items-center text-sm font-medium cursor-pointer mt-4" style={{ color: v.textLabel }}>
             <input
               type="checkbox"
               checked={showOnlySelected}
               onChange={(e) => setShowOnlySelected(e.target.checked)}
-              className="mr-2 h-4 w-4 text-blue-600 bg-gray-700 border-gray-500 rounded focus:ring-blue-500"
+              className="mr-2 h-4 w-4 rounded focus:ring-blue-500"
+              style={{ backgroundColor: v.inputBg, borderColor: v.inputBorder }}
             />
             Use Selected Cells ({selectedCells.length})
           </label>
@@ -339,23 +342,23 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
 
       {/* Summary Stats */}
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Summary Statistics</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: v.textMuted }}>Summary Statistics</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           {Object.entries(summaryStats).map(([metric, stats]) => (
-            <div key={metric} className="bg-gray-800 border border-gray-700 rounded p-3 shadow-sm">
-              <div className="text-xs font-bold text-gray-400 mb-1">{metric}</div>
+            <div key={metric} className="border rounded p-3 shadow-sm" style={{ backgroundColor: v.panelBgSecondary, borderColor: v.panelBorderSecondary }}>
+              <div className="text-xs font-bold mb-1" style={{ color: v.textMuted }}>{metric}</div>
               <div className="text-sm space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Mean:</span>
-                  <span className="font-mono text-gray-200">{stats.mean}</span>
+                  <span style={{ color: v.textFaint }}>Mean:</span>
+                  <span className="font-mono" style={{ color: v.textBody }}>{stats.mean}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Median:</span>
-                  <span className="font-mono text-gray-200">{stats.median}</span>
+                  <span style={{ color: v.textFaint }}>Median:</span>
+                  <span className="font-mono" style={{ color: v.textBody }}>{stats.median}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Range:</span>
-                  <span className="font-mono text-gray-200">{stats.min} - {stats.max}</span>
+                  <span style={{ color: v.textFaint }}>Range:</span>
+                  <span className="font-mono" style={{ color: v.textBody }}>{stats.min} - {stats.max}</span>
                 </div>
               </div>
             </div>
@@ -365,7 +368,7 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
 
       {/* Plot */}
       {plotData.length > 0 ? (
-        <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+        <div className="border rounded-lg overflow-hidden" style={{ backgroundColor: v.panelBgSecondary, borderColor: v.panelBorderSecondary }}>
           <Plot
             data={plotData}
             layout={layout}
@@ -380,7 +383,7 @@ const QCViolin: React.FC<QCViolinProps> = ({ data, selectedCells = [] }) => {
           />
         </div>
       ) : (
-        <div className="h-48 flex items-center justify-center text-gray-400 bg-gray-900 rounded-lg border border-dashed border-gray-700">
+        <div className="h-48 flex items-center justify-center rounded-lg border border-dashed" style={{ color: v.textFaint, backgroundColor: v.panelBg, borderColor: v.panelBorderSecondary }}>
           No QC metrics data available for the current selection.
         </div>
       )}

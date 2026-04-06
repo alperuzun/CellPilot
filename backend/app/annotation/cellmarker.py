@@ -258,12 +258,17 @@ class SCSAAnnotationMethod(AnnotationMethod, register=False):
                 f.write(f"{cell_type}: {genes}\n")
         artifacts.append(OutputArtifact(path=marker_path, label=f"{self.DB_TYPE} Marker Gene Expression", artifact_type="file"))
 
-        # Dotplot
-        sc.settings.figdir = output_dir
-        sc.pl.dotplot(adata, marker_dict, groupby=self.DB_TYPE, standard_scale="var",
-                      save=f"{name}_{self.DB_TYPE}_{timestamp}.png")
-        dotplot_path = os.path.join(output_dir, f"dotplot_{name}_{self.DB_TYPE}_{timestamp}.png")
-        artifacts.append(OutputArtifact(path=dotplot_path, label=f"{self.DB_TYPE} Marker Gene Expression", artifact_type="figure"))
+        # Dotplot — wrap in try/except since matplotlib gridspec can fail with
+        # too few clusters or very small datasets (e.g., subclustering output).
+        try:
+            sc.settings.figdir = output_dir
+            sc.pl.dotplot(adata, marker_dict, groupby=self.DB_TYPE, standard_scale="var",
+                          save=f"{name}_{self.DB_TYPE}_{timestamp}.png")
+            dotplot_path = os.path.join(output_dir, f"dotplot_{name}_{self.DB_TYPE}_{timestamp}.png")
+            if os.path.exists(dotplot_path):
+                artifacts.append(OutputArtifact(path=dotplot_path, label=f"{self.DB_TYPE} Marker Gene Expression", artifact_type="figure"))
+        except Exception as e:
+            self.logger.warning("Could not generate dotplot for %s: %s", self.DB_TYPE, e)
 
         # Marker gene expression counts
         counts_path = self._count_marker_gene_expression(adata, marker_dict, output_dir, name, timestamp)

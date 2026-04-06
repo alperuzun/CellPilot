@@ -1,13 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   X,
   Split,
-  Check,
   Edit3,
   Users,
   BarChart3
 } from 'lucide-react';
 import { VisualizationData } from '../../services/api';
+import { useVizTheme } from '../../theme/ThemeContext';
 
 interface ClusterDetailsPopupProps {
   isOpen: boolean;
@@ -18,34 +18,52 @@ interface ClusterDetailsPopupProps {
   annotationConfidence: any;
   customLabels: Record<string, string>;
   onSubcluster: () => void;
-  onAccept: (cellType: string) => void;
   onManualEdit: () => void;
   position?: { x: number; y: number };
 }
 
-interface CellTypeComposition {
-  type: string;
-  count: number;
-  percentage: number;
-  color: string;
-}
-
-interface MethodAgreement {
+interface MethodAnnotation {
   method: string;
-  prediction: string;
+  displayName: string;
+  annotationType: 'per-cell' | 'cluster-level';
+  topPrediction: string;
+  distribution: { type: string; count: number; percentage: number }[];
   confidence?: string;
+  confidenceLabel?: string;
 }
 
 const COMPOSITION_COLORS = [
-  '#3b82f6', // blue
-  '#10b981', // green
-  '#f59e0b', // amber
-  '#ef4444', // red
-  '#8b5cf6', // purple
-  '#ec4899', // pink
-  '#06b6d4', // cyan
-  '#f97316', // orange
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+  '#ec4899', '#06b6d4', '#f97316',
 ];
+
+// Methods that produce per-cell predictions (not just cluster-level)
+const PER_CELL_METHODS = new Set([
+  'popv_prediction', 'celltypist_prediction', 'cell_type',
+]);
+// Any key starting with 'celltypist_' is per-cell
+const isPerCellMethod = (key: string) =>
+  PER_CELL_METHODS.has(key) || key.startsWith('celltypist_');
+
+const FORMAT_NAMES: Record<string, string> = {
+  cellmarker: 'CellMarker',
+  panglaodb: 'PanglaoDB',
+  cancersea: 'CancerSEA',
+  celltypist_prediction: 'CellTypist',
+  mllm_annotation: 'mLLM Celltype',
+  popv_prediction: 'PopV',
+  consensus_annotation: 'Consensus',
+  cell_type: 'Cell Type',
+  manual_annotation: 'Manual',
+};
+
+const formatMethodName = (key: string): string => {
+  if (FORMAT_NAMES[key]) return FORMAT_NAMES[key];
+  if (key.startsWith('celltypist_')) {
+    return `CellTypist ${key.replace('celltypist_', '').replace(/_/g, ' ')}`;
+  }
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+};
 
 const ClusterDetailsPopup: React.FC<ClusterDetailsPopupProps> = ({
   isOpen,
@@ -56,114 +74,103 @@ const ClusterDetailsPopup: React.FC<ClusterDetailsPopupProps> = ({
   annotationConfidence,
   customLabels,
   onSubcluster,
-  onAccept,
   onManualEdit,
   position
 }) => {
-  // Calculate cell type composition for this cluster
-  // Shows the distribution of cell types within the selected cells using the primary annotation column
-  const composition = useMemo((): CellTypeComposition[] => {
+  const { v, isDark, colors } = useVizTheme();
+  const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
+
+  // Build per-method annotation data with distributions
+  const methodAnnotations = useMemo((): MethodAnnotation[] => {
     if (!data || cellIds.length === 0) return [];
 
-    const compositionMap: Record<string, number> = {};
-
-    // Use only the primary cell type column (prefer 'cell_type', then first available)
-    let primaryColumn: { labels: string[] } | null = null;
-    if (data.cell_types['cell_type']) {
-      primaryColumn = data.cell_types['cell_type'];
-    } else if (Object.keys(data.cell_types).length > 0) {
-      // Use first cell_types column
-      primaryColumn = Object.values(data.cell_types)[0];
-    } else if (Object.keys(data.clusters).length > 0) {
-      // Fallback to first cluster column (e.g., leiden)
-      primaryColumn = Object.values(data.clusters)[0];
-    }
-
-    if (primaryColumn) {
-      cellIds.forEach((cellId) => {
-        const cellIndex = data.cell_ids.indexOf(cellId);
-        if (cellIndex !== -1) {
-          const cellType = primaryColumn!.labels[cellIndex];
-          const displayType = customLabels[cellType] || cellType;
-          compositionMap[displayType] = (compositionMap[displayType] || 0) + 1;
-        }
-      });
-    }
-
-    // Convert to array and sort by count
+    const methods: MethodAnnotation[] = [];
     const total = cellIds.length;
-    return Object.entries(compositionMap)
-      .map(([type, count], idx) => ({
-        type,
-        count,
-        percentage: (count / total) * 100,
-        color: COMPOSITION_COLORS[idx % COMPOSITION_COLORS.length]
-      }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5); // Top 5
-  }, [data, cellIds, customLabels]);
 
-  // Get method agreement data from annotation confidence
-  const methodAgreement = useMemo((): MethodAgreement[] => {
-    if (!annotationConfidence) return [];
-
-    const methods: MethodAgreement[] = [];
-
-    // Handle structured JSON format from confidence files
-    if (annotationConfidence.clusters && annotationConfidence.clusters[clusterName]) {
-      const clusterData = annotationConfidence.clusters[clusterName];
-      methods.push({
-        method: annotationConfidence.metadata?.db_type || 'Primary',
-        prediction: clusterData.top_candidate?.cell_type || 'Unknown',
-        confidence: clusterData.confidence
-      });
-    }
-
-    // Also check for multiple annotation columns in the data
-    Object.keys(data.cell_types).forEach((columnName) => {
-      // Skip if we already have this from confidence data
-      if (methods.some(m => m.method.toLowerCase() === columnName.toLowerCase())) return;
-
-      // Get the most common cell type for this cluster in this column
-      const typeData = data.cell_types[columnName];
+    // Process each cell_types column — these have per-cell labels
+    Object.entries(data.cell_types).forEach(([key, typeData]) => {
       const typeCounts: Record<string, number> = {};
 
       cellIds.forEach((cellId) => {
         const cellIndex = data.cell_ids.indexOf(cellId);
         if (cellIndex !== -1) {
           const cellType = typeData.labels[cellIndex];
-          typeCounts[cellType] = (typeCounts[cellType] || 0) + 1;
+          const displayType = customLabels[cellType] || cellType;
+          typeCounts[displayType] = (typeCounts[displayType] || 0) + 1;
         }
       });
 
-      // Find the most common type
-      const topType = Object.entries(typeCounts)
-        .sort((a, b) => b[1] - a[1])[0];
+      const distribution = Object.entries(typeCounts)
+        .map(([type, count]) => ({
+          type,
+          count,
+          percentage: (count / total) * 100,
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
 
-      if (topType) {
-        methods.push({
-          method: columnName,
-          prediction: topType[0],
-          confidence: undefined
-        });
+      if (distribution.length === 0) return;
+
+      // Get confidence from annotation confidence data if available
+      let confidence: string | undefined;
+      let confidenceLabel: string | undefined;
+      if (annotationConfidence?.clusters?.[clusterName]) {
+        const clusterConf = annotationConfidence.clusters[clusterName];
+        // Match if the confidence file is for this method
+        const dbType = (annotationConfidence.metadata?.db_type || '').toLowerCase();
+        if (dbType.includes(key.split('_')[0])) {
+          confidence = clusterConf.confidence;
+        }
       }
+
+      // Special handling for PopV: compute confidence directly from per-cell
+      // popv_agreement values (0..1) over the cells in this cluster.
+      if (key === 'popv_prediction' && data.qc_metrics?.popv_agreement) {
+        const agreementArr = data.qc_metrics.popv_agreement as number[];
+        let sum = 0, n = 0;
+        cellIds.forEach((cellId) => {
+          const idx = data.cell_ids.indexOf(cellId);
+          if (idx !== -1 && Number.isFinite(agreementArr[idx])) {
+            sum += agreementArr[idx];
+            n += 1;
+          }
+        });
+        if (n > 0) {
+          const meanAgree = sum / n;
+          if (meanAgree >= 0.85) confidence = 'High';
+          else if (meanAgree >= 0.5) confidence = 'Medium';
+          else confidence = 'Low';
+          confidenceLabel = `${confidence} ${meanAgree.toFixed(2)}`;
+        }
+      }
+
+      methods.push({
+        method: key,
+        displayName: formatMethodName(key),
+        annotationType: isPerCellMethod(key) ? 'per-cell' : 'cluster-level',
+        topPrediction: distribution[0].type,
+        distribution,
+        confidence,
+        confidenceLabel,
+      });
     });
 
-    return methods.slice(0, 5); // Limit to 5 methods
-  }, [annotationConfidence, clusterName, data, cellIds]);
+    // Sort: per-cell methods first (more informative), then cluster-level
+    methods.sort((a, b) => {
+      if (a.annotationType !== b.annotationType) {
+        return a.annotationType === 'per-cell' ? -1 : 1;
+      }
+      return a.displayName.localeCompare(b.displayName);
+    });
 
-  // Get the top predicted cell type
-  const topPrediction = useMemo(() => {
-    if (composition.length > 0) return composition[0].type;
-    if (methodAgreement.length > 0) return methodAgreement[0].prediction;
-    return 'Unknown';
-  }, [composition, methodAgreement]);
+    return methods;
+  }, [data, cellIds, customLabels, annotationConfidence, clusterName]);
 
   if (!isOpen) return null;
 
   const popupStyle: React.CSSProperties = position ? {
-    left: Math.max(20, Math.min(position.x, window.innerWidth - 400)),
-    top: Math.max(20, Math.min(position.y, window.innerHeight - 500)),
+    left: Math.max(20, Math.min(position.x, window.innerWidth - 420)),
+    top: Math.max(20, Math.min(position.y, window.innerHeight - 600)),
   } : {
     left: '50%',
     top: '50%',
@@ -174,151 +181,159 @@ const ClusterDetailsPopup: React.FC<ClusterDetailsPopupProps> = ({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/40 z-40"
+        className="fixed inset-0 z-40"
+        style={{ backgroundColor: isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.25)' }}
         onClick={onClose}
       />
 
       {/* Popup */}
       <div
-        className="fixed z-50 w-96 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden"
-        style={popupStyle}
+        className="fixed z-50 w-[420px] rounded-xl shadow-2xl overflow-hidden"
+        style={{ ...popupStyle, backgroundColor: v.panelBg, border: `1px solid ${v.panelBorder}` }}
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-900/50 to-purple-900/50 px-4 py-3 flex items-center justify-between border-b border-neutral-700">
+        <div
+          className="px-4 py-3 flex items-center justify-between"
+          style={{
+            background: isDark
+              ? 'linear-gradient(to right, rgba(30,58,138,0.5), rgba(76,29,149,0.5))'
+              : 'linear-gradient(to right, #eff6ff, #f5f3ff)',
+            borderBottom: `1px solid ${v.panelBorder}`,
+          }}
+        >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-600/30 flex items-center justify-center">
-              <Users className="text-blue-400" size={20} />
+            <div
+              className="w-10 h-10 rounded-lg flex items-center justify-center"
+              style={{ backgroundColor: v.badgeBlue.bg, border: `1px solid ${v.badgeBlue.border}` }}
+            >
+              <Users style={{ color: v.badgeBlue.text }} size={20} />
             </div>
             <div>
-              <h3 className="font-semibold text-white text-lg">Cluster {clusterName}</h3>
-              <p className="text-xs text-gray-400">{cellIds.length.toLocaleString()} cells selected</p>
+              <h3 className="font-semibold text-lg" style={{ color: v.textHeading }}>{`Cluster ${clusterName}`}</h3>
+              <p className="text-xs" style={{ color: v.textMuted }}>{cellIds.length.toLocaleString()} cells</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-neutral-800 rounded-lg transition-colors text-gray-400 hover:text-white"
+            className="p-1.5 rounded-lg transition-colors"
+            style={{ color: v.textMuted }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = v.panelBgSecondary; e.currentTarget.style.color = v.textHeading; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = v.textMuted; }}
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar">
-
-          {/* Cell Type Composition */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-medium text-gray-400 uppercase tracking-wider">
-              <BarChart3 size={14} />
-              <span>Cell Type Composition</span>
+        <div className="p-4 space-y-4 max-h-[450px] overflow-y-auto custom-scrollbar">
+          {methodAnnotations.length === 0 ? (
+            <div className="text-sm text-center py-4" style={{ color: v.textFaint }}>
+              No annotation data available
             </div>
-
-            <div className="space-y-2">
-              {composition.length > 0 ? (
-                composition.map((item, idx) => (
-                  <div key={idx} className="space-y-1">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-200 truncate max-w-[200px]" title={item.type}>
-                        {item.type}
-                      </span>
-                      <span className="text-gray-400 text-xs">
-                        {item.count.toLocaleString()} ({item.percentage.toFixed(1)}%)
-                      </span>
-                    </div>
-                    <div className="h-2 bg-neutral-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: `${item.percentage}%`,
-                          backgroundColor: item.color
-                        }}
-                      />
-                    </div>
+          ) : (
+            methodAnnotations.map((method, mIdx) => (
+              <div key={method.method} className="space-y-2">
+                {/* Section header with type badge */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 size={14} style={{ color: v.textFaint }} />
+                    <span className="text-xs font-semibold" style={{ color: v.textBody }}>
+                      {method.displayName}
+                    </span>
+                    <span
+                      className="px-1.5 py-0.5 rounded text-[9px] font-medium"
+                      style={method.annotationType === 'per-cell'
+                        ? { backgroundColor: v.badgeBlue.bg, color: v.badgeBlue.text, border: `1px solid ${v.badgeBlue.border}` }
+                        : { backgroundColor: v.badgeAmber.bg, color: v.badgeAmber.text, border: `1px solid ${v.badgeAmber.border}` }
+                      }
+                    >
+                      {method.annotationType === 'per-cell' ? 'per-cell' : 'cluster'}
+                    </span>
                   </div>
-                ))
-              ) : (
-                <div className="text-sm text-gray-500 text-center py-2">
-                  No composition data available
+                  {method.confidence && (
+                    <span
+                      className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                      style={
+                        method.confidence === 'High'
+                          ? { backgroundColor: v.badgeGreen.bg, color: v.badgeGreen.text }
+                          : method.confidence === 'Medium'
+                          ? { backgroundColor: v.badgeAmber.bg, color: v.badgeAmber.text }
+                          : { backgroundColor: v.badgeRed.bg, color: v.badgeRed.text }
+                      }
+                    >
+                      {method.confidenceLabel || method.confidence}
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Method Agreement Table */}
-          {methodAgreement.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Annotation Method Agreement
-              </div>
+                {/* Distribution bars */}
+                <div className="space-y-1.5 pl-1">
+                  {method.distribution.map((item, idx) => (
+                    <div key={idx} className="space-y-0.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="truncate max-w-[220px]" style={{ color: v.textLabel }} title={item.type}>
+                          {item.type}
+                        </span>
+                        <span className="ml-2 whitespace-nowrap" style={{ color: v.textFaint }}>
+                          {method.annotationType === 'per-cell'
+                            ? `${item.count.toLocaleString()} (${item.percentage.toFixed(1)}%)`
+                            : `${item.percentage.toFixed(0)}%`
+                          }
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: v.panelBgSecondary }}>
+                        <div
+                          className="h-full rounded-full transition-all duration-300"
+                          style={{
+                            width: `${item.percentage}%`,
+                            backgroundColor: COMPOSITION_COLORS[idx % COMPOSITION_COLORS.length]
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
-              <div className="border border-neutral-700 rounded-lg overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead className="bg-neutral-800">
-                    <tr>
-                      <th className="px-3 py-2 text-left text-gray-400 font-medium">Method</th>
-                      <th className="px-3 py-2 text-left text-gray-400 font-medium">Prediction</th>
-                      <th className="px-3 py-2 text-right text-gray-400 font-medium">Conf.</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-800">
-                    {methodAgreement.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-neutral-800/50 transition-colors">
-                        <td className="px-3 py-2 text-gray-300 capitalize">
-                          {row.method.replace(/_/g, ' ')}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span className="text-blue-300 truncate block max-w-[150px]" title={row.prediction}>
-                            {row.prediction}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          {row.confidence && (
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              row.confidence === 'High' ? 'bg-green-900/30 text-green-300' :
-                              row.confidence === 'Medium' ? 'bg-amber-900/30 text-amber-300' :
-                              'bg-red-900/30 text-red-300'
-                            }`}>
-                              {row.confidence}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {/* Divider between methods (except last) */}
+                {mIdx < methodAnnotations.length - 1 && (
+                  <div className="mt-3" style={{ borderTop: `1px solid ${v.panelBorderSecondary}` }} />
+                )}
               </div>
-            </div>
+            ))
           )}
         </div>
 
         {/* Action Buttons */}
-        <div className="p-4 bg-neutral-900 border-t border-neutral-800 space-y-2">
-          {/* Primary Actions Row */}
-          <div className="flex gap-2">
-            <button
-              onClick={onSubcluster}
-              className="flex-1 flex items-center justify-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-600/30 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
-            >
-              <Split size={16} />
-              Subcluster This
-            </button>
+        <div className="p-4 space-y-2" style={{ backgroundColor: v.panelBg, borderTop: `1px solid ${v.panelBorderSecondary}` }}>
+          <button
+            onClick={onSubcluster}
+            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
+            style={{ backgroundColor: v.badgePurple.bg, color: v.badgePurple.text, border: `1px solid ${v.badgePurple.border}` }}
+            onMouseEnter={() => setHoveredBtn('subcluster')}
+            onMouseLeave={() => setHoveredBtn(null)}
+          >
+            <Split size={16} />
+            Subcluster
+          </button>
 
-            <button
-              onClick={() => onAccept(topPrediction)}
-              className="flex-1 flex items-center justify-center gap-2 bg-green-600/20 hover:bg-green-600/30 text-green-300 border border-green-600/30 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
-            >
-              <Check size={16} />
-              Accept as {topPrediction.split(' ').slice(0, 2).join(' ')}...
-            </button>
-          </div>
-
-          {/* Secondary Action */}
           <button
             onClick={onManualEdit}
-            className="w-full flex items-center justify-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-gray-300 border border-neutral-700 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+            style={{
+              backgroundColor: hoveredBtn === 'manual' ? v.panelBg : v.buttonSecondaryBg,
+              color: v.buttonSecondaryText,
+              border: `1px solid ${v.panelBorder}`,
+            }}
+            onMouseEnter={() => setHoveredBtn('manual')}
+            onMouseLeave={() => setHoveredBtn(null)}
           >
             <Edit3 size={16} />
             Manual Edit
           </button>
+
+          <p className="text-[10px] text-center pt-1" style={{ color: v.textFaint }}>
+            Use the Selection tab in the right panel to assign these cells to a layer.
+          </p>
         </div>
       </div>
     </>

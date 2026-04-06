@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import AnalysisWizard from './components/wizard/AnalysisWizard';
 import VisualizationDashboard from './components/visualization/VisualizationDashboard';
+import { ThemeProvider, ThemeToggle, useTheme } from './theme/ThemeContext';
 import cellpilotLogo from '../assets/cellpilot_logo.png';
 
-export default function App() {
+function AppContent() {
+  const { colors } = useTheme();
   const [activeSection, setActiveSection] = useState('analysis');
   const [visualizationDataset, setVisualizationDataset] = useState<string>('');
+  const [vizRefreshKey, setVizRefreshKey] = useState(0);
 
   useEffect(() => {
-    // Listen for custom event to switch to visualizations
     const handleSwitchToVisualizations = (event: CustomEvent) => {
       const { datasetPath } = event.detail;
       setVisualizationDataset(datasetPath);
@@ -16,7 +18,6 @@ export default function App() {
     };
 
     window.addEventListener('switchToVisualizations', handleSwitchToVisualizations as EventListener);
-
     return () => {
       window.removeEventListener('switchToVisualizations', handleSwitchToVisualizations as EventListener);
     };
@@ -29,45 +30,65 @@ export default function App() {
   ];
 
   return (
-    <div className="h-screen bg-gray-100 flex flex-col">
+    <div className="h-screen flex flex-col" style={{ background: colors.bgPrimary }}>
       {/* Header */}
-      <header className="bg-slate-700 text-white px-6 py-4 flex items-center justify-between shadow-lg">
+      <header
+        className="px-6 py-3 flex items-center justify-between shadow-lg shrink-0"
+        style={{ background: colors.headerBg, color: colors.headerText }}
+      >
         <div className="flex items-center space-x-3">
-          <img
-            src={cellpilotLogo}
-            alt="CellPilot"
-            className="w-8 h-8 object-contain"
-          />
+          <img src={cellpilotLogo} alt="CellPilot" className="w-8 h-8 object-contain" />
           <h1 className="text-xl font-semibold">CellPilot</h1>
         </div>
+        <ThemeToggle />
       </header>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <aside className="w-64 bg-slate-800 text-white flex flex-col shadow-xl">
-          <nav className="flex-1 py-6">
+        <aside
+          className="w-56 flex flex-col shadow-xl shrink-0"
+          style={{ background: colors.sidebarBg, color: colors.sidebarText }}
+        >
+          <nav className="flex-1 py-4">
             {sidebarItems.map((item) => (
               <button
                 key={item.id}
-                onClick={() => setActiveSection(item.id)}
-                className={`w-full px-6 py-3 text-left flex items-center space-x-3 transition-colors ${
-                  activeSection === item.id
-                    ? 'bg-blue-600 border-r-4 border-blue-400'
-                    : 'hover:bg-slate-700'
-                }`}
+                onClick={() => {
+                  if (item.id === 'visualizations') {
+                    setVisualizationDataset('');
+                    setVizRefreshKey(k => k + 1);
+                  }
+                  setActiveSection(item.id);
+                }}
+                className="w-full px-5 py-2.5 text-left flex items-center space-x-3 transition-colors text-sm"
+                style={{
+                  background: activeSection === item.id ? colors.sidebarActive : 'transparent',
+                  color: activeSection === item.id ? '#ffffff' : colors.sidebarText,
+                  borderRight: activeSection === item.id ? `3px solid ${colors.sidebarActiveBorder}` : '3px solid transparent',
+                }}
+                onMouseEnter={e => {
+                  if (activeSection !== item.id) {
+                    e.currentTarget.style.background = colors.sidebarHover;
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (activeSection !== item.id) {
+                    e.currentTarget.style.background = 'transparent';
+                  }
+                }}
               >
                 <span className="text-lg">{item.icon}</span>
-                <span className="font-medium">{item.label}</span>
+                <span className="font-medium tracking-wide">{item.label}</span>
               </button>
             ))}
           </nav>
-          
-          {/* Status indicator at bottom */}
-          <div className="px-6 py-4 border-t border-slate-600">
-            <div className="text-xs text-gray-400 mb-2">STATUS</div>
+
+          {/* Status indicator */}
+          <div className="px-5 py-4 border-t" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+            <div className="text-xs mb-2" style={{ color: colors.textMuted }}>STATUS</div>
             <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-              <span className="text-sm">Ready for Analysis</span>
+              <div className="w-2 h-2 rounded-full" style={{ background: colors.success }} />
+              <span className="text-sm" style={{ color: colors.sidebarText }}>Ready for Analysis</span>
             </div>
           </div>
         </aside>
@@ -84,14 +105,17 @@ export default function App() {
           )}
           {activeSection === 'visualizations' && (
             <VisualizationDashboard
+              key={vizRefreshKey}
               initialPath={visualizationDataset}
               onBack={() => setActiveSection('analysis')}
             />
           )}
           {activeSection === 'about' && (
             <div className="p-8">
-              <h2 className="text-3xl font-bold text-gray-900 mb-4">About CellPilot</h2>
-              <p className="text-gray-600">
+              <h2 className="text-3xl font-bold mb-4" style={{ color: colors.textPrimary }}>
+                About CellPilot
+              </h2>
+              <p style={{ color: colors.textSecondary }}>
                 CellPilot is a comprehensive single-cell RNA-seq analysis platform for researchers and scientists.
               </p>
             </div>
@@ -99,5 +123,13 @@ export default function App() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
   );
 }

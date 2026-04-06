@@ -28,8 +28,10 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest) -
     try:
         job_manager.start_job(job_id)
 
-        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        project_root = os.path.dirname(script_dir)
+        # __file__ = backend/app/routers/analysis.py
+        # Go up 3 levels: routers -> app -> backend, then one more to SingleCell
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        project_root = os.path.dirname(backend_dir)
         output_dir = os.path.join(project_root, "output", request.dir_name)
         os.makedirs(output_dir, exist_ok=True)
 
@@ -83,8 +85,16 @@ async def run_full_analysis_pipeline(job_id: str, request: AnalysisJobRequest) -
                     methods=annotation_params.methods,
                     method_options=annotation_params.method_options,
                 )
+                methods = annotation_params.methods
+                def _progress(i: int, total: int, method_name: str) -> None:
+                    pct = 0.3 + (0.6 * i / max(total, 1))
+                    job_manager.update_progress(
+                        job_id, pct,
+                        f"Annotating with {method_name} ({i+1}/{total})..."
+                    )
+
                 engine = AnnotationEngine()
-                pipe_result = await run_in_threadpool(engine.run, pipe_request)
+                pipe_result = await run_in_threadpool(engine.run, pipe_request, _progress)
                 annotation_result = pipe_result.to_response_data()
             except SystemExit as e:
                 raise Exception(f"Annotation failed due to database issue: {e}")

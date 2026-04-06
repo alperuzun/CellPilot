@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { Modal, Button, Select } from './Shared';
 import { Merge } from 'lucide-react';
+import { useVizTheme } from '../../theme/ThemeContext';
 
 interface MergeSubclusterModalProps {
   isOpen: boolean;
@@ -18,6 +19,7 @@ export default function MergeSubclusterModal({
   subclusterPath,
   onMerged
 }: MergeSubclusterModalProps) {
+  const { v, isDark, colors } = useVizTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -89,42 +91,51 @@ export default function MergeSubclusterModal({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Merge Subcluster to Parent" theme="dark">
-      <div className="space-y-6 text-gray-100 p-1">
-        
-        <div className="bg-neutral-800/50 p-4 rounded-lg border border-neutral-700">
-           <p className="text-xs text-gray-400">
-             Merge labels from this subcluster back into the parent dataset. 
+    <Modal isOpen={isOpen} onClose={onClose} title="Merge Subcluster to Parent" theme={isDark ? 'dark' : 'light'}>
+      <div className="space-y-6 p-1" style={{ color: v.textHeading }}>
+
+        <div className="p-4 rounded-lg" style={{ backgroundColor: v.panelBgSecondary, border: `1px solid ${v.panelBorderSecondary}` }}>
+           <p className="text-xs" style={{ color: v.textMuted }}>
+             Merge labels from this subcluster back into the parent dataset.
              This will update the parent's annotation layer for the cells present in this subcluster.
            </p>
         </div>
 
         {/* Source Layer Selection */}
         <div>
-           <label className="block text-sm font-medium text-gray-300 mb-2">Source Layer (Subcluster)</label>
+           <label className="block text-sm font-medium mb-2" style={{ color: v.textLabel }}>Source Layer (Subcluster)</label>
            <Select
              value={selectedSource}
              onChange={(e) => setSelectedSource(e.target.value)}
              options={sourceLayers.map(l => ({ label: l, value: l }))}
-             className="bg-neutral-900 border-neutral-700 text-white"
+             className=""
+             style={{ backgroundColor: v.inputBg, borderColor: v.inputBorder, color: v.inputText }}
            />
-           <p className="text-xs text-gray-500 mt-1">Which annotation column from the subcluster do you want to transfer?</p>
+           <p className="text-xs mt-1" style={{ color: v.textFaint }}>Which annotation column from the subcluster do you want to transfer?</p>
         </div>
 
         {/* Target Layer Selection */}
         <div>
-           <label className="block text-sm font-medium text-gray-300 mb-2">Target Layer (Parent)</label>
-           
+           <label className="block text-sm font-medium mb-2" style={{ color: v.textLabel }}>Target Layer (Parent)</label>
+
            <div className="flex gap-2 mb-2">
-              <button 
+              <button
                 onClick={() => setTargetMode('existing')}
-                className={`flex-1 py-1.5 text-xs rounded border ${targetMode === 'existing' ? 'bg-blue-600 border-blue-600 text-white' : 'border-neutral-700 text-gray-400'}`}
+                className="flex-1 py-1.5 text-xs rounded"
+                style={targetMode === 'existing'
+                  ? { backgroundColor: v.buttonPrimaryBg, borderColor: v.buttonPrimaryBg, color: v.buttonPrimaryText, border: `1px solid ${v.buttonPrimaryBg}` }
+                  : { backgroundColor: 'transparent', border: `1px solid ${v.panelBorderSecondary}`, color: v.textMuted }
+                }
               >
                 Update Existing
               </button>
-              <button 
+              <button
                 onClick={() => { setTargetMode('new'); setTargetLayer(''); }}
-                className={`flex-1 py-1.5 text-xs rounded border ${targetMode === 'new' ? 'bg-blue-600 border-blue-600 text-white' : 'border-neutral-700 text-gray-400'}`}
+                className="flex-1 py-1.5 text-xs rounded"
+                style={targetMode === 'new'
+                  ? { backgroundColor: v.buttonPrimaryBg, borderColor: v.buttonPrimaryBg, color: v.buttonPrimaryText, border: `1px solid ${v.buttonPrimaryBg}` }
+                  : { backgroundColor: 'transparent', border: `1px solid ${v.panelBorderSecondary}`, color: v.textMuted }
+                }
               >
                 Create New
               </button>
@@ -135,7 +146,8 @@ export default function MergeSubclusterModal({
                  value={targetLayer}
                  onChange={(e) => setTargetLayer(e.target.value)}
                  options={existingParentLayers.map(l => ({ label: l, value: l }))}
-                 className="bg-neutral-900 border-neutral-700 text-white"
+                 className=""
+                 style={{ backgroundColor: v.inputBg, borderColor: v.inputBorder, color: v.inputText }}
                />
            ) : (
                <input
@@ -143,29 +155,32 @@ export default function MergeSubclusterModal({
                  value={targetLayer}
                  onChange={(e) => setTargetLayer(e.target.value)}
                  placeholder="e.g., manual_v2_with_tcells"
-                 className="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                 className="w-full rounded-md px-3 py-2 text-sm focus:outline-none"
+                 style={{ backgroundColor: v.inputBg, border: `1px solid ${v.inputBorder}`, color: v.inputText }}
+                 onFocus={(e) => e.currentTarget.style.borderColor = v.inputFocusBorder}
+                 onBlur={(e) => e.currentTarget.style.borderColor = v.inputBorder}
                />
            )}
-           <p className="text-xs text-gray-500 mt-1">
-             {targetMode === 'existing' 
+           <p className="text-xs mt-1" style={{ color: v.textFaint }}>
+             {targetMode === 'existing'
                ? "Select a column in the parent dataset to update/overwrite."
                : "Create a new column in the parent dataset."}
            </p>
         </div>
 
         {error && (
-            <div className="p-3 bg-red-900/20 border border-red-800 rounded text-red-300 text-xs">
+            <div className="p-3 rounded text-xs" style={{ backgroundColor: v.badgeRed.bg, border: `1px solid ${v.badgeRed.border}`, color: v.badgeRed.text }}>
               {error}
             </div>
         )}
 
-        <div className="flex justify-end gap-3 pt-4 border-t border-neutral-800">
+        <div className="flex justify-end gap-3 pt-4" style={{ borderTop: `1px solid ${v.panelBorder}` }}>
            <Button variant="secondary-dark" onClick={onClose} disabled={loading}>
              Cancel
            </Button>
-           <Button 
-             variant="primary" 
-             onClick={handleMerge} 
+           <Button
+             variant="primary"
+             onClick={handleMerge}
              disabled={loading || !selectedSource || !targetLayer.trim()}
              className="w-32"
            >

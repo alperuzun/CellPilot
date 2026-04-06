@@ -11,11 +11,12 @@ import {
   Info,
 } from 'lucide-react';
 import { ResolutionInfo, api } from '../../services/api';
+import { useVizTheme } from '../../theme/ThemeContext';
 
 interface ResolutionExplorerProps {
   h5adPath: string;
   resolutionInfo: ResolutionInfo;
-  onResolutionChange: (resolution: number) => void;
+  onResolutionChange: (resolution: number) => void | Promise<void>;
   onAnnotationComplete?: () => void;
   disabled?: boolean;
 }
@@ -27,6 +28,7 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
   onAnnotationComplete,
   disabled = false,
 }) => {
+  const { v, isDark, colors } = useVizTheme();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showAddCustom, setShowAddCustom] = useState(false);
@@ -34,6 +36,9 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
   const [actionError, setActionError] = useState<string | null>(null);
   const [propagatingTo, setPropagatingTo] = useState<number | null>(null);
   const [annotatingResolution, setAnnotatingResolution] = useState<number | null>(null);
+  const [hoveredRes, setHoveredRes] = useState<number | null>(null);
+  const [expandBtnHovered, setExpandBtnHovered] = useState(false);
+  const [addBtnHovered, setAddBtnHovered] = useState(false);
 
   const {
     active_resolution,
@@ -66,7 +71,8 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
     [annotated_resolutions]
   );
 
-  // Handle resolution switch
+  // Handle resolution switch — the parent's onResolutionChange is now the
+  // single source of truth and persists the active resolution server-side.
   const handleResolutionSwitch = useCallback(
     async (resolution: number) => {
       if (resolution === active_resolution || disabled || isLoading) return;
@@ -75,15 +81,14 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
       setActionError(null);
 
       try {
-        await api.setActiveResolution({ input_path: h5adPath, resolution });
-        onResolutionChange(resolution);
+        await onResolutionChange(resolution);
       } catch (err) {
         setActionError(err instanceof Error ? err.message : 'Failed to switch resolution');
       } finally {
         setIsLoading(false);
       }
     },
-    [h5adPath, active_resolution, disabled, isLoading, onResolutionChange]
+    [active_resolution, disabled, isLoading, onResolutionChange]
   );
 
   // Handle annotation propagation
@@ -173,7 +178,10 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
 
     if (detail.annotated) {
       return (
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-green-900/30 text-green-400 text-[10px] rounded">
+        <span
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded"
+          style={{ background: v.badgeGreen.bg, color: v.badgeGreen.text }}
+        >
           <Check size={10} />
           Annotated
         </span>
@@ -182,7 +190,10 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
 
     if (detail.propagated_from !== null && detail.propagated_from !== undefined) {
       return (
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-yellow-900/30 text-yellow-400 text-[10px] rounded">
+        <span
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded"
+          style={{ background: v.badgeYellow.bg, color: v.badgeYellow.text }}
+        >
           <ArrowRight size={10} />
           From {detail.propagated_from.toFixed(1)}
         </span>
@@ -190,7 +201,10 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
     }
 
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-neutral-700 text-gray-400 text-[10px] rounded">
+      <span
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded"
+        style={{ background: v.panelBgSecondary, color: v.textMuted }}
+      >
         No Annotation
       </span>
     );
@@ -199,22 +213,28 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
   // Render collapsed view (just the slider)
   if (!isExpanded) {
     return (
-      <div className="bg-neutral-900 border border-neutral-700 rounded-lg p-3">
+      <div
+        className="rounded-lg p-3"
+        style={{ background: v.panelBg, border: `1px solid ${v.panelBorderSecondary}` }}
+      >
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <Layers size={14} className="text-blue-400" />
-            <span className="text-xs font-medium text-gray-300">Resolution</span>
-            <span className="text-sm font-mono text-blue-400">{active_resolution.toFixed(1)}</span>
-            <span className="text-[10px] text-gray-500">
+            <Layers size={14} style={{ color: v.badgeBlue.text }} />
+            <span className="text-xs font-medium" style={{ color: v.textLabel }}>Resolution</span>
+            <span className="text-sm font-mono" style={{ color: v.badgeBlue.text }}>{active_resolution.toFixed(1)}</span>
+            <span className="text-[10px]" style={{ color: v.textFaint }}>
               ({resolution_details[active_resolution.toFixed(1)]?.n_clusters || '?'} clusters)
             </span>
           </div>
           <button
             onClick={() => setIsExpanded(true)}
-            className="p-1 hover:bg-neutral-700 rounded transition-colors"
+            className="p-1 rounded transition-colors"
+            style={{ background: expandBtnHovered ? v.panelBgSecondary : 'transparent' }}
+            onMouseEnter={() => setExpandBtnHovered(true)}
+            onMouseLeave={() => setExpandBtnHovered(false)}
             title="Expand resolution options"
           >
-            <ChevronDown size={14} className="text-gray-400" />
+            <ChevronDown size={14} style={{ color: v.textMuted }} />
           </button>
         </div>
 
@@ -233,24 +253,30 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
               }
             }}
             disabled={disabled || isLoading}
-            className="w-full h-1.5 bg-neutral-700 rounded-lg appearance-none cursor-pointer
+            className="w-full h-1.5 rounded-lg appearance-none cursor-pointer
               [&::-webkit-slider-thumb]:appearance-none
               [&::-webkit-slider-thumb]:w-4
               [&::-webkit-slider-thumb]:h-4
-              [&::-webkit-slider-thumb]:bg-blue-500
               [&::-webkit-slider-thumb]:rounded-full
               [&::-webkit-slider-thumb]:cursor-pointer
               [&::-webkit-slider-thumb]:shadow-lg
               disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              background: v.panelBgSecondary,
+              // @ts-ignore -- webkit slider thumb color via CSS variable
+              '--tw-slider-thumb-bg': colors.accent,
+            } as React.CSSProperties}
           />
           {/* Resolution markers */}
           <div className="flex justify-between mt-1 px-0.5">
             {sortedResolutions.map((res) => (
               <div
                 key={res}
-                className={`text-[9px] ${
-                  res === active_resolution ? 'text-blue-400 font-medium' : 'text-gray-600'
-                }`}
+                className="text-[9px]"
+                style={{
+                  color: res === active_resolution ? v.badgeBlue.text : v.textFaint,
+                  fontWeight: res === active_resolution ? 500 : undefined,
+                }}
               >
                 {res.toFixed(1)}
               </div>
@@ -259,7 +285,7 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
         </div>
 
         {isLoading && (
-          <div className="flex items-center gap-1 mt-2 text-xs text-blue-400">
+          <div className="flex items-center gap-1 mt-2 text-xs" style={{ color: v.badgeBlue.text }}>
             <Loader2 size={12} className="animate-spin" />
             <span>Switching resolution...</span>
           </div>
@@ -270,25 +296,38 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
 
   // Render expanded view
   return (
-    <div className="bg-neutral-900 border border-neutral-700 rounded-lg p-3">
+    <div
+      className="rounded-lg p-3"
+      style={{ background: v.panelBg, border: `1px solid ${v.panelBorderSecondary}` }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Layers size={14} className="text-blue-400" />
-          <span className="text-xs font-medium text-gray-300">Multi-Resolution Clustering</span>
+          <Layers size={14} style={{ color: v.badgeBlue.text }} />
+          <span className="text-xs font-medium" style={{ color: v.textLabel }}>Multi-Resolution Clustering</span>
         </div>
         <button
           onClick={() => setIsExpanded(false)}
-          className="p-1 hover:bg-neutral-700 rounded transition-colors"
+          className="p-1 rounded transition-colors"
+          style={{ background: expandBtnHovered ? v.panelBgSecondary : 'transparent' }}
+          onMouseEnter={() => setExpandBtnHovered(true)}
+          onMouseLeave={() => setExpandBtnHovered(false)}
           title="Collapse"
         >
-          <ChevronUp size={14} className="text-gray-400" />
+          <ChevronUp size={14} style={{ color: v.textMuted }} />
         </button>
       </div>
 
       {/* Error message */}
       {actionError && (
-        <div className="flex items-center gap-2 mb-3 p-2 bg-red-900/20 border border-red-900/30 rounded text-red-400 text-xs">
+        <div
+          className="flex items-center gap-2 mb-3 p-2 rounded text-xs"
+          style={{
+            background: v.badgeRed.bg,
+            border: `1px solid ${v.badgeRed.border}`,
+            color: v.badgeRed.text,
+          }}
+        >
           <AlertTriangle size={14} />
           <span>{actionError}</span>
         </div>
@@ -301,27 +340,39 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
           const detail = resolution_details[resKey];
           const isActive = res === active_resolution;
           const isAnnotated = annotated_resolutions.includes(res);
+          const isHovered = hoveredRes === res;
 
           return (
             <div
               key={res}
               onClick={() => handleResolutionSwitch(res)}
-              className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all ${
-                isActive
-                  ? 'bg-blue-900/30 border border-blue-800/50'
-                  : 'bg-neutral-800 border border-neutral-700 hover:border-neutral-600'
-              } ${disabled || isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              onMouseEnter={() => setHoveredRes(res)}
+              onMouseLeave={() => setHoveredRes(null)}
+              className="flex items-center justify-between p-2 rounded-lg cursor-pointer transition-all"
+              style={{
+                background: isActive ? v.badgeBlue.bg : v.panelBgSecondary,
+                border: `1px solid ${
+                  isActive
+                    ? v.badgeBlue.border
+                    : isHovered
+                      ? v.panelBorderSecondary
+                      : v.panelBorderSecondary
+                }`,
+                opacity: disabled || isLoading ? 0.5 : 1,
+                cursor: disabled || isLoading ? 'not-allowed' : 'pointer',
+              }}
             >
               <div className="flex items-center gap-3">
                 {/* Resolution value */}
                 <span
-                  className={`text-sm font-mono ${isActive ? 'text-blue-400' : 'text-gray-300'}`}
+                  className="text-sm font-mono"
+                  style={{ color: isActive ? v.badgeBlue.text : v.textLabel }}
                 >
                   {resKey}
                 </span>
 
                 {/* Cluster count */}
-                <span className="text-xs text-gray-500">
+                <span className="text-xs" style={{ color: v.textFaint }}>
                   {detail?.n_clusters || '?'} clusters
                 </span>
 
@@ -338,7 +389,11 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
                       handlePropagate(res);
                     }}
                     disabled={propagatingTo === res}
-                    className="px-2 py-1 text-[10px] bg-yellow-900/20 text-yellow-400 hover:bg-yellow-900/30 rounded transition-colors disabled:opacity-50"
+                    className="px-2 py-1 text-[10px] rounded transition-colors disabled:opacity-50"
+                    style={{
+                      background: v.badgeYellow.bg,
+                      color: v.badgeYellow.text,
+                    }}
                     title={`Propagate from resolution ${findNearestAnnotated(res)?.toFixed(1)}`}
                   >
                     {propagatingTo === res ? (
@@ -355,7 +410,11 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
                       handleAnnotate(res);
                     }}
                     disabled={annotatingResolution === res}
-                    className="px-2 py-1 text-[10px] bg-green-900/20 text-green-400 hover:bg-green-900/30 rounded transition-colors disabled:opacity-50"
+                    className="px-2 py-1 text-[10px] rounded transition-colors disabled:opacity-50"
+                    style={{
+                      background: v.badgeGreen.bg,
+                      color: v.badgeGreen.text,
+                    }}
                     title="Run full annotation"
                   >
                     {annotatingResolution === res ? (
@@ -365,7 +424,7 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
                     )}
                   </button>
                 )}
-                {isActive && <Check size={14} className="text-blue-400 ml-1" />}
+                {isActive && <Check size={14} style={{ color: v.badgeBlue.text }} className="ml-1" />}
               </div>
             </div>
           );
@@ -374,7 +433,10 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
 
       {/* Add custom resolution */}
       {showAddCustom ? (
-        <div className="flex items-center gap-2 p-2 bg-neutral-800 rounded-lg">
+        <div
+          className="flex items-center gap-2 p-2 rounded-lg"
+          style={{ background: v.panelBgSecondary }}
+        >
           <input
             type="number"
             step="0.1"
@@ -383,12 +445,21 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
             value={customResolution}
             onChange={(e) => setCustomResolution(e.target.value)}
             placeholder="e.g., 1.2"
-            className="flex-1 px-2 py-1 text-sm bg-neutral-700 border border-neutral-600 rounded text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+            className="flex-1 px-2 py-1 text-sm rounded focus:outline-none"
+            style={{
+              background: v.inputBg,
+              border: `1px solid ${v.inputBorder}`,
+              color: v.inputText,
+            }}
           />
           <button
             onClick={handleAddCustomResolution}
             disabled={isLoading}
-            className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors disabled:opacity-50"
+            className="px-3 py-1 text-xs rounded transition-colors disabled:opacity-50"
+            style={{
+              background: v.buttonPrimaryBg,
+              color: v.buttonPrimaryText,
+            }}
           >
             Add
           </button>
@@ -397,7 +468,8 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
               setShowAddCustom(false);
               setCustomResolution('');
             }}
-            className="px-2 py-1 text-xs text-gray-400 hover:text-gray-300 transition-colors"
+            className="px-2 py-1 text-xs transition-colors"
+            style={{ color: v.textMuted }}
           >
             Cancel
           </button>
@@ -405,7 +477,13 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
       ) : (
         <button
           onClick={() => setShowAddCustom(true)}
-          className="flex items-center gap-1.5 w-full p-2 text-xs text-gray-400 hover:text-gray-300 hover:bg-neutral-800 rounded-lg transition-colors"
+          onMouseEnter={() => setAddBtnHovered(true)}
+          onMouseLeave={() => setAddBtnHovered(false)}
+          className="flex items-center gap-1.5 w-full p-2 text-xs rounded-lg transition-colors"
+          style={{
+            color: addBtnHovered ? v.textLabel : v.textMuted,
+            background: addBtnHovered ? v.panelBgSecondary : 'transparent',
+          }}
         >
           <Plus size={12} />
           Add custom resolution
@@ -413,10 +491,13 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
       )}
 
       {/* Info tooltip */}
-      <div className="mt-3 p-2 bg-neutral-800/50 rounded-lg">
+      <div
+        className="mt-3 p-2 rounded-lg"
+        style={{ background: v.panelBgSecondary }}
+      >
         <div className="flex items-start gap-2">
-          <Info size={12} className="text-gray-500 mt-0.5 flex-shrink-0" />
-          <p className="text-[10px] text-gray-500 leading-relaxed">
+          <Info size={12} className="mt-0.5 flex-shrink-0" style={{ color: v.textFaint }} />
+          <p className="text-[10px] leading-relaxed" style={{ color: v.textFaint }}>
             Lower resolution = fewer, broader clusters. Higher resolution = more, finer clusters.
             UMAP embedding stays fixed; only cluster assignments change.
           </p>
@@ -424,7 +505,7 @@ const ResolutionExplorer: React.FC<ResolutionExplorerProps> = ({
       </div>
 
       {isLoading && (
-        <div className="flex items-center justify-center gap-2 mt-3 text-xs text-blue-400">
+        <div className="flex items-center justify-center gap-2 mt-3 text-xs" style={{ color: v.badgeBlue.text }}>
           <Loader2 size={14} className="animate-spin" />
           <span>Processing...</span>
         </div>

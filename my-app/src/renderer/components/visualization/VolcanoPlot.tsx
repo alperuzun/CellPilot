@@ -1,6 +1,8 @@
 import React from 'react';
 import Plot from 'react-plotly.js';
 import { DifferentialExpressionResult } from '../../services/api';
+import { useVizTheme } from '../../theme/ThemeContext';
+import { usePlotlyTheme } from '../../theme/usePlotlyTheme';
 
 interface VolcanoPlotProps {
   data: DifferentialExpressionResult[];
@@ -8,6 +10,8 @@ interface VolcanoPlotProps {
 }
 
 const VolcanoPlot: React.FC<VolcanoPlotProps> = ({ data, onGeneClick }) => {
+  const { v, isDark, colors } = useVizTheme();
+  const plotlyTheme = usePlotlyTheme();
   // Transform data for plotting
   const plotData = data.map(d => ({
     ...d,
@@ -33,8 +37,8 @@ const VolcanoPlot: React.FC<VolcanoPlotProps> = ({ data, onGeneClick }) => {
     arrowhead: 0,
     ax: 0,
     ay: -20,
-    font: { color: '#e5e7eb', size: 10 },
-    arrowcolor: 'rgba(255,255,255,0.3)'
+    font: { color: plotlyTheme.raw.annotationColor, size: 10 },
+    arrowcolor: plotlyTheme.annotationArrowColor
   }));
 
   return (
@@ -61,21 +65,21 @@ const VolcanoPlot: React.FC<VolcanoPlotProps> = ({ data, onGeneClick }) => {
       layout={{
         title: {
             text: 'Volcano Plot',
-            font: { size: 14, color: '#e5e7eb' }
+            font: { size: 14, color: plotlyTheme.raw.fontColor }
         },
         xaxis: {
             title: 'Log2 Fold Change',
-            gridcolor: 'rgba(255,255,255,0.1)',
-            zerolinecolor: 'rgba(255,255,255,0.2)',
-            tickfont: { color: '#9ca3af' },
-            titlefont: { color: '#9ca3af', size: 12 }
+            gridcolor: plotlyTheme.raw.gridColor,
+            zerolinecolor: plotlyTheme.raw.zerolineColor,
+            tickfont: { color: plotlyTheme.raw.tickColor },
+            titlefont: { color: plotlyTheme.raw.tickColor, size: 12 }
         },
         yaxis: {
             title: '-Log10(P-value)',
-            gridcolor: 'rgba(255,255,255,0.1)',
-            zerolinecolor: 'rgba(255,255,255,0.2)',
-            tickfont: { color: '#9ca3af' },
-            titlefont: { color: '#9ca3af', size: 12 }
+            gridcolor: plotlyTheme.raw.gridColor,
+            zerolinecolor: plotlyTheme.raw.zerolineColor,
+            tickfont: { color: plotlyTheme.raw.tickColor },
+            titlefont: { color: plotlyTheme.raw.tickColor, size: 12 }
         },
         annotations: annotations,
         shapes: [
@@ -83,21 +87,21 @@ const VolcanoPlot: React.FC<VolcanoPlotProps> = ({ data, onGeneClick }) => {
             {
                 type: 'line',
                 x0: -1, x1: -1, y0: 0, y1: 1, yref: 'paper',
-                line: { color: 'rgba(255,255,255,0.1)', width: 1, dash: 'dash' }
+                line: { color: plotlyTheme.raw.shapeDashColor, width: 1, dash: 'dash' }
             },
             {
                 type: 'line',
                 x0: 1, x1: 1, y0: 0, y1: 1, yref: 'paper',
-                line: { color: 'rgba(255,255,255,0.1)', width: 1, dash: 'dash' }
+                line: { color: plotlyTheme.raw.shapeDashColor, width: 1, dash: 'dash' }
             },
             {
                 type: 'line',
                 x0: 0, x1: 1, xref: 'paper', y0: -Math.log10(0.05), y1: -Math.log10(0.05),
-                line: { color: 'rgba(255,255,255,0.1)', width: 1, dash: 'dash' }
+                line: { color: plotlyTheme.raw.shapeDashColor, width: 1, dash: 'dash' }
             }
         ],
-        paper_bgcolor: 'transparent',
-        plot_bgcolor: 'transparent',
+        paper_bgcolor: plotlyTheme.baseLayout.paper_bgcolor,
+        plot_bgcolor: plotlyTheme.baseLayout.plot_bgcolor,
         margin: { l: 50, r: 20, t: 40, b: 50 },
         height: 300,
         autosize: true,
