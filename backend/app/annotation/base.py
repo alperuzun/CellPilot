@@ -35,6 +35,15 @@ class OutputArtifact:
 
 
 @dataclass
+class OntologyMatch:
+    """A Cell Ontology match for a single backend's per-cluster label."""
+    cl_id: str           # e.g., "CL:0000084"
+    cl_name: str         # canonical CL term, e.g., "T cell"
+    similarity: float    # 0.0 – 1.0
+    raw_label: str       # the original string the backend emitted
+
+
+@dataclass
 class AnnotationResult:
     labels: dict[str, str]
     confidence: dict[str, float]
@@ -42,6 +51,10 @@ class AnnotationResult:
     obs_key: str
     artifacts: list[OutputArtifact] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
+    # Populated by OntologyNormalizer in the orchestrator. None means
+    # normalization was skipped (mapper unavailable, opted out, or this
+    # backend is not a cell-type backend — e.g., CancerSEA functional states).
+    cl_labels: Optional[dict[str, OntologyMatch]] = None
 
 
 class AnnotationRegistry:

@@ -1,41 +1,85 @@
+# CellPilot conda environment.
+#
+# Channel order matters: conda-forge first (so conda-forge wins on shared
+# packages), bioconda second (only used as a fallback for genomics tooling we
+# can't get elsewhere), pytorch third (provides platform-specific torch
+# binaries with CUDA on Linux). `nodefaults` excludes the Anaconda Inc.
+# `defaults` channel — many institutional installs now block it after the
+# 2024 Anaconda TOS change, and excluding it makes the environment
+# reproducible across academic labs.
+#
+# Pinning policy: hard pins for binary-critical scientific packages
+# (pytorch, numpy) and soft pins (or none) elsewhere so the solver has room
+# to find a satisfying set on macOS Apple Silicon, macOS Intel, and Linux.
+# Anything single-cell related lives in the pip section so we get one
+# coherent resolution instead of fighting bioconda's older scanpy bundle
+# that ships with celltypist.
 name: CellPilot-dev-311
+
 channels:
-  - pytorch
-  - bioconda
   - conda-forge
-  - defaults
+  - bioconda
+  - pytorch
+  - nodefaults
+
 dependencies:
   - python=3.11
-  - pip
-  # PyTorch (conda for proper platform-specific binaries)
-  - pytorch=2.2.2
-  - torchvision=0.17.2
-  - torchaudio=2.2.2
-  # Bioconda packages
-  - celltypist=1.7.1
-  # Scientific computing
-  - numpy=1.26.4
-  - scikit-learn=1.6.1
-  - scikit-image
-  - seaborn=0.13.2
-  - pillow
-  - pyyaml
-  - networkx
-  - openpyxl
-  # Build dependencies (headers needed by pip packages)
-  - xz
-  - bzip2
-  - llvm-openmp  # Required by xgboost (PopV dependency) on macOS
-  # Conda-only packages (better binary builds)
+  - pip>=23
+  # setuptools<81 retains pkg_resources, which omicverse 1.6.10 still imports.
+  # Newer setuptools (≥81) drops pkg_resources by default, breaking
+  # `import omicverse` at runtime.
+  - setuptools<81
+
+  # PyTorch — loose patch pin so the pytorch channel can serve a build that
+  # actually exists on the user's platform. Kept on conda so CUDA binaries
+  # (Linux) work out of the box.
+  - pytorch>=2.2,<2.4
+  - torchvision
+
+  # Numerical core. numpy and scipy are kept on conda because the wheel
+  # selection on PyPI is patchier on osx-arm64; conda-forge has reliable
+  # builds for every supported platform. scipy is pinned to the (1.12, 1.14)
+  # window because:
+  #   * anndata >=0.12 declares scipy>=1.12 in its metadata
+  #   * statsmodels 0.14.4 imports _lazywhere from scipy._lib._util, which
+  #     was removed in scipy 1.14
+  # The numpy 1.26.* pin keeps numba 0.60 / tensorflow 2.19 / openchord /
+  # matplotlib 3.6 ABI-compatible.
+  - numpy=1.26.*
+  - scipy>=1.12,<1.14
+  - pandas>=2.1,<2.4
+
+  # Conda-only / hard-to-pip packages.
+  - hdf5
+  - llvm-openmp        # required by xgboost (a PopV dep) on macOS
   - python-annoy
   - s_gd2
+
+  # Tools used during pip-build of native deps. Including these in conda
+  # avoids "no compiler found" errors on Linux installs that don't have
+  # build-essentials, and Conda's compilers play well across platforms.
+  - c-compiler
+  - cxx-compiler
+
   - pip:
-      # Core single-cell analysis
+      # Single-cell stack — kept entirely in pip to avoid bioconda's older
+      # scanpy/numba bundle being dragged in transitively.
+      #
+      # anndata >=0.12 is required: files written by newer anndata versions
+      # use IOSpec(encoding_type='null', encoding_version='0.1.0') which the
+      # 0.11.x readers don't recognize and 500 with "No read method
+      # registered". zarr<3 keeps the optional zarr backend on numpy 1.x so
+      # numba/tensorflow/openchord/matplotlib stay ABI-compatible.
+      #
+      # NOTE: omicverse 1.6.10 declares scipy<1.12 in its metadata, which
+      # conflicts with anndata 0.12.x (requires scipy>=1.12). At runtime the
+      # combination works correctly. omicverse is therefore installed by the
+      # launch script with `pip install --no-deps` after this env is created;
+      # see launch_cellpilot.sh.
       - scanpy==1.10.3
-      - anndata>=0.11
-      - omicverse==1.6.10
-      - cellphonedb==5.0.1
-      - infercnvpy==0.4.5
+      - anndata>=0.12,<0.13
+      - "zarr<3"
+      - celltypist==1.7.1
       - leidenalg==0.10.2
       - igraph==0.11.8
       - louvain==0.8.2
@@ -43,24 +87,33 @@ dependencies:
       - numba==0.60.0
       - harmonypy==0.0.10
       - pydeseq2==0.4.12
-      - gtfparse==2.5.0
       - geosketch==1.3
       - pymde==0.1.18
-      - biopython
-      - beautifulsoup4
-      # API server
+      - scrublet              # doublet detection (called by omicverse pp.qc)
+      - obonet                # Cell Ontology graph (powers consensus hierarchy)
+
+      # Ensemble annotation (PopV). scvi-tools >=1.3 is required because the
+      # PopV Tabula Sapiens HuggingFace reference is saved with scVI 1.3+
+      # (its checkpoint includes a `pyro_param_store` key that scVI 1.2.x
+      # rejects with KeyError when load_query_data rebuilds the state dict).
+      - scvi-tools>=1.3,<1.4
+      - popv>=0.6
+
+      # API server.
       - fastapi==0.115.12
       - uvicorn[standard]==0.34.2
       - python-dotenv==1.1.0
       - pydantic>=2.11
-      # ML / Deep learning
+
+      # ML / Deep learning. tensorflow is large; keep on pip so the
+      # platform-specific wheel selection is delegated to PyPI.
       - tensorflow==2.19.0
       - torch-geometric==2.6.1
       - transformers==4.50.3
-      # Data & visualization
-      - pandas==2.2.3
-      - scipy==1.14.1
+
+      # Visualization.
       - matplotlib==3.6.3
+      - seaborn==0.13.2
       - plotly==6.0.1
       - plotnine==0.12.4
       - pycomplexheatmap==1.8.2
@@ -68,13 +121,27 @@ dependencies:
       - chord==6.0.1
       - openchord==0.1.7
       - drawsvg==2.4.0
+
+      # Statistics + survival.
       - statsmodels==0.14.4
       - lifelines==0.30.0
-      - h5py>=3.13
-      - tqdm
+
+      # AI / LLM.
       - openai==2.11.0
       - anthropic>=0.97
       - mllmcelltype
-      # Ensemble annotation (PopV)
-      - scvi-tools>=1.2,<1.3
-      - popv>=0.6
+
+      # Utilities.
+      - h5py>=3.13
+      - scikit-learn==1.6.1
+      - scikit-image
+      - pillow
+      - pyyaml
+      - networkx
+      - openpyxl
+      - biopython
+      - beautifulsoup4
+      - tqdm
+
+      # Dev / test tooling.
+      - pytest>=8

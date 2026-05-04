@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Dna, ArrowLeftRight, Bot, ChevronDown, ChevronUp } from 'lucide-react';
+import { Dna, ArrowLeftRight, Bot, GitMerge, ChevronDown, ChevronUp } from 'lucide-react';
 import { useVizTheme } from '../../../theme/ThemeContext';
 
-export type DrawerTab = 'markers' | 'comparison' | 'chat';
+export type DrawerTab = 'markers' | 'comparison' | 'agreement' | 'chat';
 
 interface BottomDrawerProps {
   activeTab: DrawerTab;
@@ -22,6 +22,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'markers', label: 'Markers', icon: <Dna size={14} /> },
   { id: 'comparison', label: 'Comparison', icon: <ArrowLeftRight size={14} /> },
+  { id: 'agreement', label: 'Agreement', icon: <GitMerge size={14} /> },
   { id: 'chat', label: 'Chat', icon: <Bot size={14} /> },
 ];
 
