@@ -59,7 +59,15 @@ if ! python -c "import omicverse.utils" >/dev/null 2>&1; then
       echo "❌ Failed to install omicverse runtime dependencies."
       exit 1
     }
-  pip install -q --no-deps "omicverse==1.6.10" || {
+  # CellOntologyMapper (consensus normalization) requires omicverse >=1.7.1.
+  # sentence-transformers is a runtime dep of the mapper that omicverse does
+  # not declare in its metadata — it's lazy-imported when the user calls into
+  # the mapper, so install it here proactively.
+  pip install -q "sentence-transformers>=2.2" || {
+    echo "❌ Failed to install sentence-transformers."
+    exit 1
+  }
+  pip install -q --no-deps "omicverse>=1.7.1,<2.0" || {
     echo "❌ Failed to install omicverse."
     exit 1
   }

@@ -80,14 +80,71 @@ class OntologyNormalizer:
     # --------------------------------------------------------------- mapper
 
     def _ensure_mapper(self) -> None:
-        """Initialize the underlying mapper on first use."""
+        """Initialize the underlying mapper on first use.
+
+        ``CellOntologyMapper()`` returns an empty mapper — querying it without
+        loaded ontology embeddings raises ``ValueError("Please load or create
+        ontology embeddings first")``. We bootstrap the embeddings on first
+        use and cache them on disk so subsequent process starts are fast:
+
+          1. If ``ontology_embeddings.pkl`` exists in the cache dir, load it
+             (fast — restores ~16k pre-computed vectors).
+          2. Otherwise, download the Cell Ontology JSON release if not present,
+             call ``create_ontology_resources(...)`` to embed every term
+             (slow — minutes on CPU first time), and save the result.
+
+        Cache lives at ``$HOME/.cellpilot/cell_ontology/`` by default; can be
+        overridden via ``CELLPILOT_CL_CACHE_DIR``.
+        """
+        import os
+        from pathlib import Path
+
         if self._mapper is not None or not self.is_available():
             return
         from omicverse.single import CellOntologyMapper
-        # Default constructor uses the bundled CL + Cell Taxonomy reference and
-        # a general-purpose SentenceTransformer model. If a domain-specific
-        # encoder (e.g., sapBERT) is preferred, it can be plumbed through here.
-        self._mapper = CellOntologyMapper()
+
+        cache_dir = Path(os.environ.get(
+            "CELLPILOT_CL_CACHE_DIR",
+            str(Path.home() / ".cellpilot" / "cell_ontology"),
+        ))
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        embeddings_path = cache_dir / "ontology_embeddings.pkl"
+        cl_json_path = cache_dir / "cl.json"
+
+        mapper = CellOntologyMapper()
+
+        if embeddings_path.exists():
+            logger.info("Loading cached CL embeddings from %s", embeddings_path)
+            mapper.load_embeddings(str(embeddings_path))
+            self._mapper = mapper
+            return
+
+        # First-time bootstrap.
+        if not cl_json_path.exists():
+            logger.info(
+                "First-time CL setup: downloading Cell Ontology JSON to %s "
+                "(~10 MB, one-time)",
+                cl_json_path,
+            )
+            self._download_cl_json(cl_json_path)
+
+        logger.info(
+            "First-time CL setup: embedding ontology terms — this can take "
+            "several minutes on CPU. Subsequent runs reuse the cached "
+            "embeddings at %s.",
+            embeddings_path,
+        )
+        # save_embeddings=True writes ontology_embeddings.pkl into the parent
+        # dir of the supplied cl_json_path, which is exactly cache_dir.
+        mapper.create_ontology_resources(str(cl_json_path), save_embeddings=True)
+        self._mapper = mapper
+
+    @staticmethod
+    def _download_cl_json(target: Any) -> None:
+        """Fetch the canonical Cell Ontology JSON release to ``target``."""
+        import urllib.request
+        url = "http://purl.obolibrary.org/obo/cl.json"
+        urllib.request.urlretrieve(url, str(target))
 
     # --------------------------------------------------------------- public
 
