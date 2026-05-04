@@ -5,6 +5,7 @@ import {
   api,
   GeneExpressionData,
   MarkerGenesData,
+  MarkerGeneStatsData,
   DifferentialExpressionResponse,
   AnalysisFile,
   ResolutionInfo,
@@ -15,6 +16,7 @@ import AnnotationManager from './AnnotationManager';
 import VolcanoPlot from './VolcanoPlot';
 import AnnotationResults from './AnnotationResults';
 import MarkerGenesHeatmap from './MarkerGenesHeatmap';
+import ChatAgent from './ChatAgent';
 import ResolutionExplorer from './ResolutionExplorer';
 import {
   Settings,
@@ -32,6 +34,7 @@ import {
 import { Select } from './Shared';
 import SubclusterConfigModal from './SubclusterConfigModal';
 import ClusterDetailsPopup from './ClusterDetailsPopup';
+import PublicationExportModal from './PublicationExportModal';
 import { useVizTheme } from '../../theme/ThemeContext';
 import {
   TopBar,
@@ -95,10 +98,12 @@ export default function UMAPExplorer({
   const [selectedCells, setSelectedCells] = useState<string[]>([]);
   const [selectedClusterName, setSelectedClusterName] = useState<string | null>(null);
   const [customLabels, setCustomLabels] = useState<Record<string, string>>({});
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
 
   // ── Cached data ──────────────────────────────────────────────────
   const [geneExpression, setGeneExpression] = useState<GeneExpressionData>({});
   const [markerGenes, setMarkerGenes] = useState<MarkerGenesData>({});
+  const [markerStats, setMarkerStats] = useState<MarkerGeneStatsData>({});
   const [loadingGene, setLoadingGene] = useState(false);
 
   // ── UI state ─────────────────────────────────────────────────────
@@ -288,8 +293,11 @@ export default function UMAPExplorer({
         }
 
         try {
-          const markers = await api.getMarkerGenes(dataset.path, 'leiden', 5);
-          setMarkerGenes(markers);
+          const stats = await api.getMarkerGeneStats(dataset.path, 'leiden', 5);
+          setMarkerStats(stats);
+          const flat: MarkerGenesData = {};
+          for (const [c, rows] of Object.entries(stats)) flat[c] = rows.map((r) => r.gene);
+          setMarkerGenes(flat);
         } catch (e) {
           console.warn('Failed to load marker genes', e);
         }
@@ -341,8 +349,11 @@ export default function UMAPExplorer({
     const fetchMarkers = async () => {
       try {
         const clusterCol = `leiden_${activeResolution.toFixed(1)}`;
-        const markers = await api.getMarkerGenes(dataset.path, clusterCol, 5);
-        setMarkerGenes(markers);
+        const stats = await api.getMarkerGeneStats(dataset.path, clusterCol, 5);
+        setMarkerStats(stats);
+        const flat: MarkerGenesData = {};
+        for (const [c, rows] of Object.entries(stats)) flat[c] = rows.map((r) => r.gene);
+        setMarkerGenes(flat);
       } catch (e) {
         console.warn('Failed to refresh marker genes for resolution', activeResolution, e);
       }
@@ -761,6 +772,7 @@ export default function UMAPExplorer({
                   <CanvasToolbar
                     activeTool={activeTool}
                     onToolChange={setActiveTool}
+                    onExportFigure={() => setShowExportModal(true)}
                     compareMode={compareMode}
                     onCompareToggle={() => {
                       if (compareMode) {
@@ -919,6 +931,7 @@ export default function UMAPExplorer({
                 {drawerTab === 'markers' && (
                   <MarkersDrawerContent
                     sortedMarkerGenes={sortedMarkerGenes}
+                    markerStats={markerStats}
                     activeResolution={activeResolution}
                     selectedGene={selectedGene}
                     onGeneClick={(gene) => {
@@ -954,6 +967,14 @@ export default function UMAPExplorer({
                           .finally(() => setLoadingGene(false));
                       }
                     }}
+                  />
+                )}
+                {drawerTab === 'chat' && (
+                  <ChatAgent
+                    datasetPath={dataset.path}
+                    selectedCluster={selectedClusterName}
+                    selectedCells={selectedCells}
+                    onOpenSettings={() => window.dispatchEvent(new CustomEvent('cellpilot.openSettings'))}
                   />
                 )}
               </BottomDrawer>
@@ -998,8 +1019,10 @@ export default function UMAPExplorer({
           )}
 
           {mainView === 'files' && (
-            <div className="flex-1 overflow-hidden" style={{ background: v.panelBg }}>
-              <AnnotationResults analysisFiles={analysisFiles} />
+            <div className="flex-1 overflow-y-auto p-6" style={{ background: v.panelBg }}>
+              <div className="max-w-6xl mx-auto">
+                <AnnotationResults analysisFiles={analysisFiles} />
+              </div>
             </div>
           )}
 
@@ -1040,7 +1063,7 @@ export default function UMAPExplorer({
               <X size={20} />
             </button>
           </div>
-          <div className="flex-1 p-6 overflow-hidden" style={{ background: v.panelBg }}>
+          <div className="flex-1 p-6 overflow-y-auto" style={{ background: v.panelBg }}>
             <MarkerGenesHeatmap h5adPath={dataset.path} data={data} selectedCells={selectedCells} />
           </div>
         </div>
@@ -1149,6 +1172,22 @@ export default function UMAPExplorer({
             setShowClusterDetails(false);
             setMainView('annotations');
           }}
+        />
+      )}
+
+      {/* Publication Export Modal */}
+      {data && (
+        <PublicationExportModal
+          isOpen={showExportModal}
+          onClose={() => setShowExportModal(false)}
+          data={data}
+          colorBy={colorBy}
+          pointSize={pointSize}
+          showGeneExpression={showGeneExpression}
+          selectedGene={selectedGene}
+          geneExpression={geneExpression}
+          customLabels={customLabels}
+          datasetName={dataset.name}
         />
       )}
     </div>
@@ -2067,6 +2106,7 @@ const MousePointer2Icon: React.FC = () => {
 // ─── Markers Drawer ───────────────────────────────────────────────────────
 interface MarkersDrawerProps {
   sortedMarkerGenes: [string, string[]][];
+  markerStats: MarkerGeneStatsData;
   activeResolution: number | null;
   selectedGene: string;
   onGeneClick: (gene: string) => void;
@@ -2076,6 +2116,7 @@ interface MarkersDrawerProps {
 
 const MarkersDrawerContent: React.FC<MarkersDrawerProps> = ({
   sortedMarkerGenes,
+  markerStats,
   activeResolution,
   selectedGene,
   onGeneClick,
@@ -2083,6 +2124,18 @@ const MarkersDrawerContent: React.FC<MarkersDrawerProps> = ({
   onOpenHeatmap,
 }) => {
   const { v } = useVizTheme();
+  const statsByCluster = (cluster: string): Record<string, { log2fc: number | null; pval_adj: number | null; score: number | null }> => {
+    const rows = markerStats[cluster] ?? [];
+    const out: Record<string, { log2fc: number | null; pval_adj: number | null; score: number | null }> = {};
+    for (const r of rows) out[r.gene] = { log2fc: r.log2fc, pval_adj: r.pval_adj, score: r.score };
+    return out;
+  };
+  const fmtLogFC = (v: number | null) => (v === null || Number.isNaN(v) ? '' : (v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1)));
+  const fmtPval = (v: number | null) => {
+    if (v === null || Number.isNaN(v)) return '';
+    if (v === 0) return '0';
+    return v.toExponential(0);
+  };
 
   if (sortedMarkerGenes.length === 0) {
     return (
@@ -2126,48 +2179,68 @@ const MarkersDrawerContent: React.FC<MarkersDrawerProps> = ({
       {/* Cluster cards in horizontal scroll */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden">
         <div className="flex gap-2 h-full pb-1">
-          {sortedMarkerGenes.map(([cluster, genes]) => (
-            <div
-              key={cluster}
-              className="shrink-0 w-36 rounded-lg p-2 flex flex-col"
-              style={{ background: v.panelBgSecondary, border: `1px solid ${v.panelBorderSecondary}` }}
-            >
+          {sortedMarkerGenes.map(([cluster, genes]) => {
+            const stats = statsByCluster(cluster);
+            return (
               <div
-                className="mb-1.5 flex items-center justify-center"
-                style={{ color: v.textMuted }}
+                key={cluster}
+                className="shrink-0 w-44 rounded-lg p-2 flex flex-col"
+                style={{ background: v.panelBgSecondary, border: `1px solid ${v.panelBorderSecondary}` }}
               >
-                <span
-                  className="text-sm font-bold tabular-nums px-2 py-0.5 rounded"
-                  style={{ background: v.badgeBlue.bg, color: v.badgeBlue.text }}
+                <div
+                  className="mb-1.5 flex items-center justify-between"
+                  style={{ color: v.textMuted }}
                 >
-                  {cluster}
-                </span>
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-0.5">
-                {genes.map((gene) => (
-                  <div
-                    key={gene}
-                    onClick={() => onGeneClick(gene)}
-                    className="px-2 py-1 rounded cursor-pointer text-xs font-medium transition-colors flex items-center justify-between"
-                    style={
-                      selectedGene === gene
-                        ? { background: v.buttonPrimaryBg, color: v.buttonPrimaryText }
-                        : { color: v.textLabel }
-                    }
-                    onMouseEnter={(e) => {
-                      if (selectedGene !== gene) e.currentTarget.style.background = v.panelBg;
-                    }}
-                    onMouseLeave={(e) => {
-                      if (selectedGene !== gene) e.currentTarget.style.background = 'transparent';
-                    }}
+                  <span
+                    className="text-sm font-bold tabular-nums px-2 py-0.5 rounded"
+                    style={{ background: v.badgeBlue.bg, color: v.badgeBlue.text }}
                   >
-                    <span>{gene}</span>
-                    {selectedGene === gene && loadingGene && <span className="opacity-75">…</span>}
-                  </div>
-                ))}
+                    {cluster}
+                  </span>
+                  <span className="text-[9px] uppercase tracking-wider" title="log2 fold-change vs. rest of dataset">
+                    log2FC
+                  </span>
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-0.5">
+                  {genes.map((gene) => {
+                    const s = stats[gene];
+                    const lfc = s?.log2fc ?? null;
+                    const pval = s?.pval_adj ?? null;
+                    return (
+                      <div
+                        key={gene}
+                        onClick={() => onGeneClick(gene)}
+                        className="px-2 py-1 rounded cursor-pointer text-xs font-medium transition-colors flex items-center justify-between gap-2"
+                        style={
+                          selectedGene === gene
+                            ? { background: v.buttonPrimaryBg, color: v.buttonPrimaryText }
+                            : { color: v.textLabel }
+                        }
+                        onMouseEnter={(e) => {
+                          if (selectedGene !== gene) e.currentTarget.style.background = v.panelBg;
+                        }}
+                        onMouseLeave={(e) => {
+                          if (selectedGene !== gene) e.currentTarget.style.background = 'transparent';
+                        }}
+                        title={pval !== null ? `log2FC ${fmtLogFC(lfc)}, padj ${fmtPval(pval)}` : undefined}
+                      >
+                        <span className="truncate">{gene}</span>
+                        <span className="flex items-center gap-1 shrink-0">
+                          <span
+                            className="font-mono tabular-nums text-[10px]"
+                            style={{ color: selectedGene === gene ? v.buttonPrimaryText : v.textMuted }}
+                          >
+                            {fmtLogFC(lfc)}
+                          </span>
+                          {selectedGene === gene && loadingGene && <span className="opacity-75">…</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

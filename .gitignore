@@ -167,3 +167,10 @@ dist
 ./.claude
 
 CLAUDE.MD
+
+*.pdf
+methods_and_materials.txt
+render_methods_pdf.py
+
+backend/tmp
+backend/recent_datasets.json

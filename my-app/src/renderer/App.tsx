@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import AnalysisWizard from './components/wizard/AnalysisWizard';
 import VisualizationDashboard from './components/visualization/VisualizationDashboard';
+import Settings from './components/Settings';
+import Documentation from './components/Documentation';
 import { ThemeProvider, ThemeToggle, useTheme } from './theme/ThemeContext';
 import cellpilotLogo from '../assets/cellpilot_logo.png';
 
@@ -16,16 +18,21 @@ function AppContent() {
       setVisualizationDataset(datasetPath);
       setActiveSection('visualizations');
     };
+    const handleOpenSettings = () => setActiveSection('settings');
 
     window.addEventListener('switchToVisualizations', handleSwitchToVisualizations as EventListener);
+    window.addEventListener('cellpilot.openSettings', handleOpenSettings);
     return () => {
       window.removeEventListener('switchToVisualizations', handleSwitchToVisualizations as EventListener);
+      window.removeEventListener('cellpilot.openSettings', handleOpenSettings);
     };
   }, []);
 
   const sidebarItems = [
     { id: 'analysis', label: 'ANALYSIS', icon: '' },
     { id: 'visualizations', label: 'VISUALIZATIONS', icon: '' },
+    { id: 'documentation', label: 'DOCUMENTATION', icon: '' },
+    { id: 'settings', label: 'SETTINGS', icon: '' },
     { id: 'about', label: 'ABOUT', icon: '' },
   ];
 
@@ -110,6 +117,8 @@ function AppContent() {
               onBack={() => setActiveSection('analysis')}
             />
           )}
+          {activeSection === 'documentation' && <Documentation />}
+          {activeSection === 'settings' && <Settings />}
           {activeSection === 'about' && (
             <div className="p-8">
               <h2 className="text-3xl font-bold mb-4" style={{ color: colors.textPrimary }}>

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 from .logging_config import setup_logging
-from .routers import health, data, annotation, analysis, visualization, resolution, subcluster, chat
+from .routers import health, data, annotation, analysis, visualization, resolution, subcluster, chat, settings
 
 # Load environment variables from .env file
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
@@ -39,3 +39,4 @@ app.include_router(visualization.router)
 app.include_router(resolution.router)
 app.include_router(subcluster.router)
 app.include_router(chat.router)
+app.include_router(settings.router)

@@ -105,12 +105,19 @@ def extract_marker_genes(
     If ``rank_genes_groups`` is absent it will be computed on-the-fly using the
     Wilcoxon rank-sum test grouped by *groupby*.
     """
-    if "rank_genes_groups" not in adata.uns:
+    cached_groupby = None
+    if "rank_genes_groups" in adata.uns:
+        cached_groupby = adata.uns["rank_genes_groups"].get("params", {}).get("groupby")
+
+    if "rank_genes_groups" not in adata.uns or cached_groupby != groupby:
         if groupby not in adata.obs.columns:
             raise ValueError(
                 f"Cannot compute marker genes: '{groupby}' column missing from adata.obs."
             )
-        logger.info("rank_genes_groups not found; computing with Wilcoxon test...")
+        logger.info(
+            "Recomputing rank_genes_groups with groupby='%s' (cached groupby was %r)",
+            groupby, cached_groupby,
+        )
         sc.tl.rank_genes_groups(adata, groupby, method="wilcoxon")
 
     rgg = adata.uns["rank_genes_groups"]

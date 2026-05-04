@@ -343,10 +343,15 @@ export default function VisualizationDashboard({ initialPath, onBack }: Visualiz
                     {/* Type badge */}
                     <div>{analysisTypeBadge(d.analysis_type, colors, isDark)}</div>
 
-                    {/* Size */}
+                    {/* Size — h5ad only; full directory total in the tooltip */}
                     <span
                       className="text-sm tabular-nums"
                       style={{ color: colors.textMuted }}
+                      title={
+                        d.directory_size_mb !== undefined && d.directory_size_mb !== d.size_mb
+                          ? `h5ad ${formatSize(d.size_mb)} · all analysis files ${formatSize(d.directory_size_mb)}`
+                          : undefined
+                      }
                     >
                       {formatSize(d.size_mb)}
                     </span>
@@ -437,7 +442,10 @@ export default function VisualizationDashboard({ initialPath, onBack }: Visualiz
                 <div className="font-mono break-all" style={{ color: colors.textMuted }}>
                   {confirmDelete.path}
                 </div>
-                <div style={{ color: colors.textMuted }}>{formatSize(confirmDelete.size_mb)}</div>
+                <div style={{ color: colors.textMuted }}>
+                  {formatSize(confirmDelete.directory_size_mb ?? confirmDelete.size_mb)}
+                  <span className="ml-1 opacity-70">(folder total)</span>
+                </div>
               </div>
               <div className="flex justify-end gap-2">
                 <button

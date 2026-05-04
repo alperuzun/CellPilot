@@ -193,15 +193,18 @@ async def get_available_datasets() -> dict[str, Any]:
                     continue
 
                 stat = analysis_dir.stat()
+                h5ad_size_mb = round(Path(h5ad_path).stat().st_size / (1024 * 1024), 1)
+                dir_size_mb = round(
+                    sum(f.stat().st_size for f in analysis_dir.rglob("*") if f.is_file()) / (1024 * 1024), 1
+                )
 
                 datasets.append(
                     {
                         "path": h5ad_path,
                         "name": analysis_dir.name,
                         "date": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-                        "size_mb": round(
-                            sum(f.stat().st_size for f in analysis_dir.rglob("*") if f.is_file()) / (1024 * 1024), 1
-                        ),
+                        "size_mb": h5ad_size_mb,
+                        "directory_size_mb": dir_size_mb,
                         "directory": analysis_dir.name,
                         "analysis_type": "analysis",
                     }

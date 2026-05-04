@@ -129,37 +129,53 @@ def perform_differential_expression(
         # 1. Selection Group
         sel_mask = target_adata.obs[group_col] == 'Selection'
         ref_mask = target_adata.obs[group_col] == reference_group_name
-        
-        # Check if gene is in var_names (it should be)
+
+        # rank_genes_groups uses adata.raw by default when present, so the ranked
+        # gene names come from raw.var_names (e.g. all genes), not the HVG-filtered
+        # main matrix. Pull means from the same source so we don't silently drop
+        # genes that are ranked but not highly variable — that asymmetric drop
+        # was making one side of the volcano/comparison panel appear empty.
+        expr_source = target_adata.raw if target_adata.raw is not None else target_adata
+        source_var_names = expr_source.var_names
+
         genes_list = list(genes)
-        valid_genes = [g for g in genes_list if g in target_adata.var_names]
-        
-        # Compute means
-        if hasattr(target_adata.X, 'toarray'):
-             sel_expr = target_adata[sel_mask, valid_genes].X.toarray()
-             ref_expr = target_adata[ref_mask, valid_genes].X.toarray()
-        else:
-             sel_expr = target_adata[sel_mask, valid_genes].X
-             ref_expr = target_adata[ref_mask, valid_genes].X
-             
+        kept = [(i, g) for i, g in enumerate(genes_list) if g in source_var_names]
+        if not kept:
+            return {"error": "No ranked genes found in expression matrix"}
+
+        kept_indices, valid_genes = zip(*kept)
+        kept_indices = list(kept_indices)
+        valid_genes = list(valid_genes)
+
+        # Subset rows by mask, columns by gene name. raw indexing returns a
+        # numpy/sparse matrix matching the column order of valid_genes.
+        sel_idx = np.where(sel_mask.to_numpy())[0]
+        ref_idx = np.where(ref_mask.to_numpy())[0]
+        sel_expr = expr_source[sel_idx, valid_genes].X
+        ref_expr = expr_source[ref_idx, valid_genes].X
+        if hasattr(sel_expr, 'toarray'):
+            sel_expr = sel_expr.toarray()
+        if hasattr(ref_expr, 'toarray'):
+            ref_expr = ref_expr.toarray()
+
         mean_in = np.mean(sel_expr, axis=0)
         mean_out = np.mean(ref_expr, axis=0)
-        
+
         # Format output
         output_genes = []
-        for i, gene in enumerate(valid_genes):
+        for out_i, (rank_i, gene) in enumerate(zip(kept_indices, valid_genes)):
             pct_in = pts_df.loc[gene, 'Selection'] if 'Selection' in pts_df.columns else 0
             pct_out = pts_df.loc[gene, reference_group_name] if reference_group_name in pts_df.columns else 0
-            
+
             output_genes.append({
                 "gene": gene,
-                "log2fc": float(logfoldchanges[i]),
-                "pval": float(pvals[i]),
-                "pval_adj": float(pvals_adj[i]),
+                "log2fc": float(logfoldchanges[rank_i]),
+                "pval": float(pvals[rank_i]),
+                "pval_adj": float(pvals_adj[rank_i]),
                 "pct_in": float(pct_in),
                 "pct_out": float(pct_out),
-                "mean_in": float(mean_in[i]),
-                "mean_out": float(mean_out[i])
+                "mean_in": float(mean_in[out_i]),
+                "mean_out": float(mean_out[out_i])
             })
             
         return {

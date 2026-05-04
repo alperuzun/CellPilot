@@ -1,5 +1,5 @@
 import React from 'react';
-import { Move, Lasso, ArrowLeftRight } from 'lucide-react';
+import { Move, Lasso, ArrowLeftRight, ImageDown } from 'lucide-react';
 import { useVizTheme } from '../../../theme/ThemeContext';
 
 export type CanvasTool = 'select' | 'pan' | 'lasso';
@@ -9,6 +9,7 @@ interface CanvasToolbarProps {
   onToolChange: (tool: CanvasTool) => void;
   compareMode: boolean;
   onCompareToggle: () => void;
+  onExportFigure?: () => void;
 }
 
 export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
@@ -16,6 +17,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   onToolChange,
   compareMode,
   onCompareToggle,
+  onExportFigure,
 }) => {
   const { v } = useVizTheme();
 
@@ -90,6 +92,28 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
       >
         <ArrowLeftRight size={15} />
       </button>
+
+      {onExportFigure && (
+        <>
+          <div className="w-px h-5 mx-1" style={{ background: v.divider }} />
+          <button
+            onClick={onExportFigure}
+            className="p-1.5 rounded-md transition-colors flex items-center justify-center"
+            style={{ background: 'transparent', color: v.textMuted }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = v.toolbarHover;
+              e.currentTarget.style.color = v.textHeading;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = v.textMuted;
+            }}
+            title="Export publication figure"
+          >
+            <ImageDown size={15} />
+          </button>
+        </>
+      )}
     </div>
   );
 };

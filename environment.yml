@@ -73,6 +73,7 @@ dependencies:
       - h5py>=3.13
       - tqdm
       - openai==2.11.0
+      - anthropic>=0.97
       - mllmcelltype
       # Ensemble annotation (PopV)
       - scvi-tools>=1.2,<1.3

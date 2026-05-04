@@ -1,11 +1,11 @@
 [
   {
     "input_path": "/Users/colinpascual/SingleCell/backend/data/pbmc3k_raw.h5ad",
-    "name": "mllm_xd2",
+    "name": "pbmc3k_raw",
     "species": "human",
     "file_size": 5855727,
     "n_obs": 2700,
     "n_vars": 32738,
-    "last_used": "2026-04-06T13:20:05.403164"
+    "last_used": "2026-04-27T11:12:01.289202"
   }
 ]

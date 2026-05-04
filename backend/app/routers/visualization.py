@@ -9,6 +9,7 @@ from ..concurrency import lock_manager
 from ..visualization import (
     extract_visualization_data,
     get_gene_expression,
+    get_marker_gene_stats,
     get_marker_genes_by_cluster,
     get_celltype_markers_by_column,
     get_dot_plot_data,
@@ -54,6 +55,22 @@ async def get_marker_genes(h5ad_path: str, cluster_column: str = "leiden", n_gen
 
         return await lock_manager.locked_call(
             h5ad_path, get_marker_genes_by_cluster, h5ad_path, cluster_column, n_genes
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/marker_gene_stats")
+async def get_marker_gene_stats_endpoint(
+    h5ad_path: str, cluster_column: str = "leiden", n_genes: int = 10,
+) -> dict[str, list[dict[str, Any]]]:
+    """Top markers per cluster with the stats that ranked them (score, log2fc, pval_adj, pct_in)."""
+    try:
+        if not os.path.exists(h5ad_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
+
+        return await lock_manager.locked_call(
+            h5ad_path, get_marker_gene_stats, h5ad_path, cluster_column, n_genes
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -177,6 +177,18 @@ export interface MarkerGenesData {
   [cluster: string]: string[];
 }
 
+export interface MarkerGeneStat {
+  gene: string;
+  score: number | null;
+  log2fc: number | null;
+  pval_adj: number | null;
+  pct_in?: number | null;
+}
+
+export interface MarkerGeneStatsData {
+  [cluster: string]: MarkerGeneStat[];
+}
+
 export interface DotPlotData {
   clusters: string[];
   genes: string[];
@@ -197,7 +209,10 @@ export interface DatasetInfo {
   path: string;
   name: string;
   date: string;
+  /** Size of the h5ad file the row links to. */
   size_mb: number;
+  /** Total size of the analysis directory (h5ad + figures + intermediates). */
+  directory_size_mb?: number;
   directory: string;
   analysis_type: 'annotation' | 'subcluster' | 'unknown';
   parent_path?: string; // For subclusters
@@ -294,19 +309,47 @@ export interface DifferentialExpressionResponse {
   error?: string;
 }
 
+export type ChatProvider = 'openai' | 'anthropic';
+
 export interface ChatRequest {
   message: string;
   selection_id: string;
   input_path: string;
   history?: { role: string; content: string }[];
   model?: string;
+  provider?: ChatProvider;
   mode?: 'global' | 'cluster' | 'selection';
   cell_ids?: string[];
   hide_labels?: boolean;
 }
 
-export interface ChatResponse {
+export type ChatErrorCode = 'missing_api_key' | 'invalid_api_key';
+
+export interface ChatErrorResponse {
+  error: ChatErrorCode;
+  provider: ChatProvider;
+  reason?: string;
+}
+
+export interface ChatSuccessResponse {
   response: string;
+}
+
+export type ChatResponse = ChatSuccessResponse | ChatErrorResponse;
+
+export interface ApiKeyStatus {
+  provider: ChatProvider;
+  configured: boolean;
+  valid: boolean | null;
+  error: string | null;
+  last_validated: string | null;
+}
+
+export type ApiKeyStatusByProvider = Record<ChatProvider, ApiKeyStatus>;
+
+export interface LlmModelOption {
+  id: string;
+  label: string;
 }
 
 // Subclustering Interfaces
@@ -539,6 +582,10 @@ export const api = {
     });
   },
 
+  async getMarkerGeneStats(h5adPath: string, clusterColumn = 'leiden', nGenes = 10): Promise<MarkerGeneStatsData> {
+    return apiRequest(`/marker_gene_stats?h5ad_path=${encodeURIComponent(h5adPath)}&cluster_column=${clusterColumn}&n_genes=${nGenes}`);
+  },
+
   async getMarkerGenes(h5adPath: string, clusterColumn = 'leiden', nGenes = 10): Promise<MarkerGenesData> {
     return apiRequest(`/marker_genes?h5ad_path=${encodeURIComponent(h5adPath)}&cluster_column=${clusterColumn}&n_genes=${nGenes}`);
   },
@@ -632,10 +679,50 @@ export const api = {
   },
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
-    return apiRequest('/chat', {
+    const response = await fetch(`${API_BASE_URL}/chat`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = body?.detail;
+      if (detail && typeof detail === 'object' && detail.error && detail.provider) {
+        return {
+          error: detail.error as ChatErrorCode,
+          provider: detail.provider as ChatProvider,
+          reason: detail.reason,
+        };
+      }
+      throw new APIError(
+        `Chat request failed (${response.status}): ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`,
+        response.status,
+      );
+    }
+    return body as ChatSuccessResponse;
+  },
+
+  async getApiKeyStatus(): Promise<ApiKeyStatusByProvider> {
+    return apiRequest('/settings/api_keys');
+  },
+
+  async setApiKey(provider: ChatProvider, apiKey: string): Promise<ApiKeyStatus> {
+    return apiRequest('/settings/api_keys', {
+      method: 'POST',
+      body: JSON.stringify({ provider, api_key: apiKey }),
+    });
+  },
+
+  async deleteApiKey(provider: ChatProvider): Promise<ApiKeyStatus> {
+    return apiRequest(`/settings/api_keys/${provider}`, { method: 'DELETE' });
+  },
+
+  async validateApiKey(provider: ChatProvider): Promise<ApiKeyStatus> {
+    return apiRequest(`/settings/api_keys/${provider}/validate`, { method: 'POST' });
+  },
+
+  async getLlmModels(): Promise<Record<ChatProvider, LlmModelOption[]>> {
+    return apiRequest('/settings/llm_models');
   },
 
   // ========== MULTI-RESOLUTION CLUSTERING ENDPOINTS ==========

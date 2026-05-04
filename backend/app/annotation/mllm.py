@@ -20,31 +20,11 @@ from .utils import (
     generate_annotation_umap,
     save_confidence_json,
 )
+from ..llm_providers import MODEL_TO_PROVIDER, PROVIDER_API_KEY_ENV
 from abc import abstractmethod
 from enum import Enum
 
 logger = logging.getLogger(__name__)
-
-# Environment variable keys per provider
-PROVIDER_API_KEY_ENV = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "google": "GEMINI_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-}
-
-MODEL_TO_PROVIDER = {
-    # OpenAI
-    "gpt-4o": "openai",
-    "gpt-4.1": "openai",
-    "gpt-4o-mini": "openai",
-    # Anthropic
-    "claude-sonnet-4-5-20250929": "anthropic",
-    "claude-opus-4-20250514": "anthropic",
-    # Google
-    "gemini-2.0-flash": "google",
-    "gemini-2.5-pro": "google",
-}
 
 
 class MLLMMode(str, Enum):
@@ -171,6 +151,14 @@ class MLLMAnnotation(AnnotationMethod):
         # 3. Apply labels to adata.obs
         obs_key = "mllm_annotation"
         if "leiden" in adata.obs.columns:
+            leiden_ids = set(adata.obs["leiden"].astype(str).unique())
+            label_keys = set(labels.keys())
+            if leiden_ids and not (leiden_ids & label_keys):
+                self.logger.error(
+                    "mLLM label keys do not match any leiden cluster IDs — "
+                    "all cells will be 'Unknown'. leiden=%s, labels=%s",
+                    sorted(leiden_ids), sorted(label_keys),
+                )
             adata.obs[obs_key] = (
                 adata.obs["leiden"]
                 .astype(str)

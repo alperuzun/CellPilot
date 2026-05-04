@@ -1,22 +1,24 @@
+import logging
 import os
 
 from fastapi import APIRouter, HTTPException
 
-from ..models import ChatRequest
 from ..chat_service import get_chat_response
+from ..llm_providers import InvalidApiKeyError, MissingApiKeyError
+from ..models import ChatRequest
 
 router = APIRouter(tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/chat")
 async def chat_with_agent(request: ChatRequest) -> dict[str, str]:
-    """Chat with the Context-Aware Bioinformatician."""
+    if not request.input_path or not os.path.exists(request.input_path):
+        raise HTTPException(status_code=404, detail="Dataset path not found")
+
+    import scanpy as sc
+
     try:
-        if not request.input_path or not os.path.exists(request.input_path):
-            raise HTTPException(status_code=404, detail="Dataset path not found")
-
-        import scanpy as sc
-
         adata = sc.read_h5ad(request.input_path)
 
         response_text = get_chat_response(
@@ -29,10 +31,22 @@ async def chat_with_agent(request: ChatRequest) -> dict[str, str]:
             mode=request.mode,
             cell_ids=request.cell_ids,
             hide_labels=request.hide_labels,
+            provider=request.provider,
         )
-
         return {"response": response_text}
 
-    except Exception as e:
-        print(f"Chat endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except MissingApiKeyError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "missing_api_key", "provider": exc.provider},
+        )
+    except InvalidApiKeyError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_api_key", "provider": exc.provider, "reason": exc.reason},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Chat endpoint error")
+        raise HTTPException(status_code=500, detail=str(exc))

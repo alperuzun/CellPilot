@@ -491,20 +491,81 @@ def get_gene_expression(h5ad_path: str, gene_names: List[str]) -> Dict[str, List
     """
     adata = sc.read_h5ad(h5ad_path)
 
+    # rank_genes_groups uses adata.raw by default, so many marker genes won't
+    # be in adata.var when the main matrix is HVG-filtered. Fall back to raw
+    # so the heatmap and gene-expression overlays show real values for those.
+    raw = adata.raw if adata.raw is not None else None
+
     gene_expression = {}
     for gene in gene_names:
+        source = None
         if gene in adata.var.index:
-            # Get expression values - handle sparse matrices
-            if hasattr(adata.X, 'toarray'):
-                expr_values = adata[:, gene].X.toarray().flatten()
-            else:
-                expr_values = adata[:, gene].X.flatten()
-            gene_expression[gene] = expr_values.tolist()
-        else:
-            # Gene not found, return zeros
+            source = adata
+        elif raw is not None and gene in raw.var.index:
+            source = raw
+
+        if source is None:
             gene_expression[gene] = [0.0] * adata.n_obs
+            continue
+
+        x = source[:, gene].X
+        if hasattr(x, 'toarray'):
+            x = x.toarray()
+        gene_expression[gene] = list(map(float, np.asarray(x).flatten()))
 
     return gene_expression
+
+def get_marker_gene_stats(h5ad_path: str, cluster_column: str = 'leiden', n_genes: int = 10) -> Dict[str, List[Dict[str, Any]]]:
+    """Return top markers per cluster with the stats that ranked them.
+
+    Each entry is `{gene, score, log2fc, pval_adj, pct_in}` so the UI can
+    surface a numeric basis for the ranking.
+    """
+    adata = sc.read_h5ad(h5ad_path)
+    if cluster_column not in adata.obs.columns:
+        return {}
+
+    cached_groupby = None
+    if 'rank_genes_groups' in adata.uns:
+        try:
+            cached_groupby = adata.uns['rank_genes_groups'].get('params', {}).get('groupby')
+        except Exception:
+            cached_groupby = None
+
+    if 'rank_genes_groups' not in adata.uns or cached_groupby != cluster_column:
+        sc.tl.rank_genes_groups(adata, cluster_column, method='wilcoxon', pts=True)
+
+    rgg = adata.uns.get('rank_genes_groups', {})
+    names = rgg.get('names')
+    if names is None or not getattr(names, 'dtype', None) or not names.dtype.names:
+        return {}
+
+    pts_df = rgg.get('pts')
+
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for group in names.dtype.names:
+        genes = list(names[group][:n_genes])
+        scores = list(rgg.get('scores', {})[group][:n_genes]) if 'scores' in rgg else [None] * len(genes)
+        logfcs = list(rgg.get('logfoldchanges', {})[group][:n_genes]) if 'logfoldchanges' in rgg else [None] * len(genes)
+        pvals = list(rgg.get('pvals_adj', {})[group][:n_genes]) if 'pvals_adj' in rgg else [None] * len(genes)
+
+        rows: List[Dict[str, Any]] = []
+        for gene, score, lfc, pval in zip(genes, scores, logfcs, pvals):
+            entry: Dict[str, Any] = {
+                "gene": str(gene),
+                "score": float(score) if score is not None else None,
+                "log2fc": float(lfc) if lfc is not None else None,
+                "pval_adj": float(pval) if pval is not None else None,
+            }
+            if pts_df is not None and group in getattr(pts_df, 'columns', []):
+                try:
+                    entry["pct_in"] = float(pts_df.loc[str(gene), group])
+                except Exception:
+                    entry["pct_in"] = None
+            rows.append(entry)
+        out[group] = rows
+    return out
+
 
 def get_marker_genes_by_cluster(h5ad_path: str, cluster_column: str = 'leiden', n_genes: int = 10) -> Dict[str, List[str]]:
     """
