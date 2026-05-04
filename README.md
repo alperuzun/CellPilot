@@ -4,7 +4,26 @@
   <img src="cellpilot_logo.png" alt="CellPilot Logo" width="300"/>
 </p>
 
-CellPilot is an open-source desktop application for end-to-end single-cell RNA-seq analysis. It bundles quality control, clustering, multi-method cell-type annotation with consensus, interactive exploration, on-the-fly differential expression, subclustering, and an AI bioinformatics assistant into a single locally installable tool. All computation runs on your machine — datasets are never uploaded.
+**CellPilot** is an open-source desktop application for end-to-end single-cell RNA-seq analysis. From
+   a 10x Cell Ranger matrix or a pre-computed AnnData file, it runs quality control, normalization,    
+  multi-resolution Leiden clustering, and cell-type annotation across **seven complementary backends**
+  with majority-vote consensus normalized to the Cell Ontology. The visualization dashboard supports   
+  interactive UMAP/MDE exploration, lasso-based differential expression in three modes, gene-expression
+   search, marker-gene heatmaps, dot plots, QC violins, subclustering with merge-back, and a
+  publication-quality figure exporter. A built-in AI bioinformatics assistant (OpenAI / Anthropic)
+  answers questions grounded in the active cluster, lasso selection, or whole-dataset context. **All
+  computation runs locally — datasets are never uploaded.**
+
+  **Annotation backends:**                                                                             
+   
+  - **CellMarker**, **PanglaoDB**, **Cancer Single Cell Atlas** — curated marker-database scoring      
+  (z-score enrichment via OmicVerse pySCSA)              
+  - **CellTypist** — logistic-regression classifier on pretrained single-cell atlases                  
+  - **PopV** — eight-classifier ensemble (kNN over BBKNN/Scanorama/scVI/Harmony embeddings + random    
+  forest, SVM, scANVI, OnClass, CellTypist) with per-cell agreement scores                             
+  - **mLLMCelltype** — LLM-based annotation with optional multi-model consensus (OpenAI / Anthropic /  
+  Gemini / OpenRouter)                                                                                 
+  - **Manual markers** — user-supplied marker gene lists scored per cell
 
 > **Documentation lives inside the application.** Once CellPilot is running, click the **DOCUMENTATION** tab in the sidebar for a guided tour of the wizard, the visualization dashboard, the AI assistant, and tips for everyday use. The README covers setup only.
 
