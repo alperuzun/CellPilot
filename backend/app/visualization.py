@@ -123,6 +123,69 @@ def to_builtin(val: Any) -> Any:
         return float(val)
     return val
 
+
+def _extract_cl_annotations(adata: ad.AnnData) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Pull per-method Cell-Ontology mappings off ``adata.obs`` companion columns.
+
+    For every ``<base>_cl_name`` column written by the orchestrator, look for the
+    matching ``<base>_cl_id`` and ``<base>_cl_similarity`` columns and collapse
+    them into a per-cluster dict keyed by Leiden cluster id (computed against
+    whichever column is present, falling back to ``leiden``). The output shape
+    is ``{ method_obs_key: { cluster_id: {cl_id, cl_name, similarity} } }`` and
+    is consumed by the dashboard's right inspector to render CL pills next to
+    each backend's call.
+
+    Returns an empty dict when no CL companion columns are present (i.e., CL
+    normalization did not run, the OmicVerse mapper was unavailable, or the
+    AnnData predates the consensus refactor).
+    """
+    if 'leiden' not in adata.obs.columns:
+        return {}
+    leiden = adata.obs['leiden'].astype(str)
+
+    out: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for col in adata.obs.columns:
+        if not col.endswith('_cl_name'):
+            continue
+        base = col[: -len('_cl_name')]
+        id_col = f'{base}_cl_id'
+        sim_col = f'{base}_cl_similarity'
+        if id_col not in adata.obs.columns or sim_col not in adata.obs.columns:
+            continue
+
+        try:
+            df = pd.DataFrame({
+                'leiden': leiden,
+                'cl_name': adata.obs[col].astype(str),
+                'cl_id': adata.obs[id_col].astype(str),
+                'similarity': adata.obs[sim_col].astype(float),
+            })
+        except Exception:
+            continue
+
+        # Each cluster's cells share the same per-method label by construction
+        # (clusters are mapped, not cells), so taking the first row per cluster
+        # is correct and avoids spurious mode computation.
+        per_cluster: Dict[str, Dict[str, Any]] = {}
+        for cluster_id, group in df.groupby('leiden', observed=True):
+            row = group.iloc[0]
+            cl_id = str(row['cl_id'])
+            cl_name = str(row['cl_name'])
+            try:
+                similarity = float(row['similarity'])
+            except (TypeError, ValueError):
+                similarity = 0.0
+            if not cl_id or cl_id == 'nan' or not cl_name or cl_name == 'nan':
+                continue
+            per_cluster[str(cluster_id)] = {
+                'cl_id': cl_id,
+                'cl_name': cl_name,
+                'similarity': similarity,
+            }
+        if per_cluster:
+            out[base] = per_cluster
+    return out
+
 def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = None) -> Dict[str, Any]:
     """
     Extract visualization data from h5ad file for interactive frontend plotting
@@ -233,10 +296,20 @@ def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = Non
         'total_counts', 'n_genes_by_counts', 'pct_counts_mt', 'doublet_score',
         # PopV per-cell agreement (0..1) and ontology depth — numeric, not labels
         'popv_agreement', 'popv_prediction_depth',
+        # Consensus agreement fraction (0..1), written by the orchestrator.
+        'consensus_annotation_confidence',
+        # CL hierarchy agreement depth (integer), when obonet is available.
+        'consensus_annotation_agreement_depth',
     ]
     for col in qc_columns:
         if col in adata.obs.columns:
             qc_metrics[col] = adata.obs[col].tolist()
+
+    # Extract Cell-Ontology annotations as a structured block so the dashboard
+    # can render a CL pill alongside each method's per-cluster call. Companion
+    # columns (`<obs_key>_cl_name`, `<obs_key>_cl_id`, `<obs_key>_cl_similarity`)
+    # are written by the AnnotationOrchestrator after each backend runs.
+    cl_annotations = _extract_cl_annotations(adata)
 
     # Extract clusters and cell types dynamically
     clusters = {}
@@ -284,7 +357,15 @@ def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = Non
         print(f"DEBUG: Multi-res mode - primary leiden: {primary_leiden_col}, annotations: {primary_annotation_cols}")
 
     # Columns to skip entirely — internal artifacts, not useful for color-by
-    skip_suffixes = ('_cnt', '_cluster', '_probabilities')
+    skip_suffixes = (
+        '_cnt', '_cluster', '_probabilities',
+        # Cell-Ontology companion columns: surfaced separately under
+        # ``cl_annotations`` rather than as standalone color-by options.
+        '_cl_name', '_cl_id', '_cl_similarity',
+        # Consensus confidence and CL hierarchy depth are numeric, exposed
+        # via qc_metrics for color-by; not categorical labels.
+        '_confidence', '_agreement_depth',
+    )
     skip_columns = {
         '_dataset', '_labels_annotation',
         '_reference_labels_annotation', '_scvi_batch', '_scvi_labels',
@@ -457,7 +538,8 @@ def extract_visualization_data(h5ad_path: str, resolution: Optional[float] = Non
         'available_genes': top_genes,
         'summary_stats': summary_stats,
         'cell_ids': adata.obs.index.tolist(),
-        'qc_report': qc_report
+        'qc_report': qc_report,
+        'cl_annotations': cl_annotations,
     }
 
     # Include resolution info for multi-resolution datasets

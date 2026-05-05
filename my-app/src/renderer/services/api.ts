@@ -167,6 +167,34 @@ export interface VisualizationData {
     report_path?: string;
   };
   resolution_info?: ResolutionInfo;
+  /**
+   * Per-method Cell-Ontology annotations. Outer key is the method's obs_key
+   * (e.g. "cellmarker", "celltypist_prediction"); inner key is the Leiden
+   * cluster id. Empty when CL normalization didn't run on this dataset.
+   */
+  cl_annotations?: {
+    [methodObsKey: string]: {
+      [clusterId: string]: CLAnnotation;
+    };
+  };
+}
+
+export interface CLAnnotation {
+  cl_id: string;       // e.g. "CL:0000084"
+  cl_name: string;     // canonical CL term, e.g. "T cell"
+  similarity: number;  // 0..1 — confidence of the CL mapping
+}
+
+export interface OntologySearchResult {
+  cl_id: string;
+  cl_name: string;
+  similarity: number;
+}
+
+export interface OntologySearchResponse {
+  available: boolean;  // false → CL mapper not installed; UI should fall back
+  query: string;
+  results: OntologySearchResult[];
 }
 
 export interface GeneExpressionData {
@@ -642,6 +670,19 @@ export const api = {
     return apiRequest('/create_annotation_layer', {
       method: 'POST',
       body: JSON.stringify(params),
+    });
+  },
+
+  /**
+   * Look up Cell-Ontology candidates for a free-text query. Used by the
+   * Annotation Manager autocomplete; returns ``available: false`` when the
+   * upstream OmicVerse mapper isn't installed in this environment, in which
+   * case the UI should fall back to free-text entry without showing an error.
+   */
+  async ontologySearch(query: string, topK = 5): Promise<OntologySearchResponse> {
+    return apiRequest('/ontology_search', {
+      method: 'POST',
+      body: JSON.stringify({ query, top_k: topK }),
     });
   },
 

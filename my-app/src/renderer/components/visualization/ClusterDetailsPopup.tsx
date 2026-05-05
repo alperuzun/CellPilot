@@ -6,8 +6,9 @@ import {
   Users,
   BarChart3
 } from 'lucide-react';
-import { VisualizationData } from '../../services/api';
+import { VisualizationData, CLAnnotation } from '../../services/api';
 import { useVizTheme } from '../../theme/ThemeContext';
+import CLBadge from './CLBadge';
 
 interface ClusterDetailsPopupProps {
   isOpen: boolean;
@@ -30,6 +31,9 @@ interface MethodAnnotation {
   distribution: { type: string; count: number; percentage: number }[];
   confidence?: string;
   confidenceLabel?: string;
+  /** Cell-Ontology mapping for this cluster's top-prediction label, when the
+   * orchestrator produced one. Rendered as a CL pill next to the method name. */
+  cl?: CLAnnotation;
 }
 
 const COMPOSITION_COLORS = [
@@ -152,6 +156,7 @@ const ClusterDetailsPopup: React.FC<ClusterDetailsPopupProps> = ({
         distribution,
         confidence,
         confidenceLabel,
+        cl: data.cl_annotations?.[key]?.[clusterName],
       });
     });
 
@@ -235,7 +240,7 @@ const ClusterDetailsPopup: React.FC<ClusterDetailsPopupProps> = ({
               <div key={method.method} className="space-y-2">
                 {/* Section header with type badge */}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <BarChart3 size={14} style={{ color: v.textFaint }} />
                     <span className="text-xs font-semibold" style={{ color: v.textBody }}>
                       {method.displayName}
@@ -249,6 +254,9 @@ const ClusterDetailsPopup: React.FC<ClusterDetailsPopupProps> = ({
                     >
                       {method.annotationType === 'per-cell' ? 'per-cell' : 'cluster'}
                     </span>
+                    {method.cl && (
+                      <CLBadge annotation={method.cl} rawLabel={method.topPrediction} />
+                    )}
                   </div>
                   {method.confidence && (
                     <span

@@ -1,0 +1,564 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CellPilot Pipeline Infographic
+  Publication-quality SVG flowchart of the CellPilot single-cell RNA-seq
+  analysis platform.
+
+  All text is in <text> elements (selectable). Boxes are grouped by stage with
+  comments for easy editing in Inkscape / Illustrator / Figma, or by hand-
+  editing this XML.
+
+  Pipeline:
+      Input  ->  Preprocessing & QC  ->  Multi-method annotation
+              ->  Consensus  ->  Interactive exploration & AI assistant
+              ->  Outputs
+
+  A dashed feedback arrow runs from the dashboard back into annotation,
+  labeled "Subclustering & merge-back".
+
+  Layout: 1400 x 900.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" width="1400" height="900"
+     font-family="Inter, Helvetica, Arial, sans-serif">
+
+  <!-- ============================================================
+       PALETTE & REUSABLE DEFS
+       Palette (print-safe):
+         #1F3A5F  deep navy        - structure / titles
+         #2A8A8A  teal             - input / preprocess
+         #C56A4F  coral            - annotation
+         #D9A441  amber            - consensus / pivot
+         #6E5BA8  violet           - exploration / AI assistant
+         #4A4A4A  graphite         - body text
+         #7A7A7A  muted            - secondary text
+         #F4F1EC  warm paper       - canvas
+         #E5E0D6  paper accent     - rules / dividers
+       ============================================================ -->
+  <defs>
+    <!-- Arrowhead marker (single definition, reused) -->
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8"
+            orient="auto-start-reverse">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#1F3A5F"/>
+    </marker>
+    <marker id="arrow-light" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7" markerHeight="7"
+            orient="auto-start-reverse">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#7A7A7A"/>
+    </marker>
+
+    <!-- Subtle drop shadow filter, reused everywhere -->
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2.2"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.18"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle dot grid for the canvas -->
+    <pattern id="dotGrid" x="0" y="0" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.6" fill="#D8D2C5" opacity="0.55"/>
+    </pattern>
+  </defs>
+
+  <!-- ============================================================
+       CANVAS
+       ============================================================ -->
+  <rect width="1400" height="900" fill="#F4F1EC"/>
+  <rect width="1400" height="900" fill="url(#dotGrid)"/>
+
+  <!-- Top rule + title band -->
+  <rect x="0" y="0" width="1400" height="68" fill="#FFFFFF"/>
+  <line x1="0" y1="68" x2="1400" y2="68" stroke="#E5E0D6" stroke-width="1"/>
+
+  <!-- ============================================================
+       HEADER
+       ============================================================ -->
+  <g id="header">
+    <text x="44" y="42" font-size="22" font-weight="700" fill="#1F3A5F" letter-spacing="0.5">
+      CellPilot
+    </text>
+    <text x="148" y="42" font-size="13" font-weight="500" fill="#4A4A4A">
+      An end-to-end single-cell RNA-seq annotation platform
+    </text>
+    <text x="148" y="58" font-size="11" font-weight="400" fill="#7A7A7A">
+      Electron + React desktop UI &#8226; FastAPI backend &#8226; Python scientific core
+    </text>
+  </g>
+
+  <!-- Stage strip labels (top row) -->
+  <g id="stage-strip-top" font-size="10" font-weight="600" fill="#7A7A7A" letter-spacing="2">
+    <text x="40"   y="100">01 &#8226; INPUT</text>
+    <text x="270"  y="100">02 &#8226; PREPROCESSING &amp; QC</text>
+    <text x="600"  y="100">03 &#8226; MULTI-METHOD ANNOTATION</text>
+    <text x="1130" y="100">04 &#8226; CONSENSUS</text>
+  </g>
+
+  <!-- Stage strip labels (bottom row) -->
+  <g id="stage-strip-bottom" font-size="10" font-weight="600" fill="#7A7A7A" letter-spacing="2">
+    <text x="40"   y="540">05 &#8226; INTERACTIVE EXPLORATION &amp; AI ASSISTANT</text>
+    <text x="980"  y="540">06 &#8226; OUTPUTS</text>
+  </g>
+
+  <!-- ============================================================
+       STAGE 01  -  INPUT
+       ============================================================ -->
+  <g id="stage-input" filter="url(#softShadow)">
+    <rect x="40" y="120" width="200" height="380" rx="14" ry="14"
+          fill="#FFFFFF" stroke="#2A8A8A" stroke-width="2"/>
+    <rect x="40" y="120" width="200" height="36" rx="14" ry="14" fill="#2A8A8A"/>
+    <rect x="40" y="138" width="200" height="18" fill="#2A8A8A"/>
+    <text x="56" y="143" font-size="14" font-weight="700" fill="#FFFFFF">Input data</text>
+
+    <!-- Tiny matrix glyph (cells x genes) -->
+    <g transform="translate(72,180)">
+      <rect x="0"  y="0"  width="16" height="16" fill="#2A8A8A" opacity="0.85"/>
+      <rect x="18" y="0"  width="16" height="16" fill="#2A8A8A" opacity="0.55"/>
+      <rect x="36" y="0"  width="16" height="16" fill="#2A8A8A" opacity="0.30"/>
+      <rect x="54" y="0"  width="16" height="16" fill="#2A8A8A" opacity="0.55"/>
+      <rect x="0"  y="18" width="16" height="16" fill="#2A8A8A" opacity="0.55"/>
+      <rect x="18" y="18" width="16" height="16" fill="#2A8A8A" opacity="0.85"/>
+      <rect x="36" y="18" width="16" height="16" fill="#2A8A8A" opacity="0.40"/>
+      <rect x="54" y="18" width="16" height="16" fill="#2A8A8A" opacity="0.30"/>
+      <rect x="0"  y="36" width="16" height="16" fill="#2A8A8A" opacity="0.30"/>
+      <rect x="18" y="36" width="16" height="16" fill="#2A8A8A" opacity="0.40"/>
+      <rect x="36" y="36" width="16" height="16" fill="#2A8A8A" opacity="0.85"/>
+      <rect x="54" y="36" width="16" height="16" fill="#2A8A8A" opacity="0.55"/>
+    </g>
+    <text x="80" y="258" font-size="10" font-style="italic" fill="#7A7A7A">
+      cells &#215; genes data matrix
+    </text>
+
+    <line x1="56" y1="278" x2="224" y2="278" stroke="#E5E0D6" stroke-width="1"/>
+
+    <!-- 10x Cell Ranger -->
+    <text x="56" y="300" font-size="11" font-weight="600" fill="#1F3A5F">10x Cell Ranger</text>
+    <text x="56" y="316" font-size="11" font-weight="400" fill="#4A4A4A">filtered_feature_bc_matrix.h5</text>
+    <text x="56" y="332" font-size="11" font-weight="400" fill="#4A4A4A">raw_feature_bc_matrix.h5</text>
+
+    <line x1="56" y1="348" x2="224" y2="348" stroke="#E5E0D6" stroke-width="1"/>
+
+    <!-- AnnData -->
+    <text x="56" y="370" font-size="11" font-weight="600" fill="#1F3A5F">AnnData</text>
+    <text x="56" y="386" font-size="11" font-weight="400" fill="#4A4A4A">.h5ad (pre-processed)</text>
+
+    <line x1="56" y1="402" x2="224" y2="402" stroke="#E5E0D6" stroke-width="1"/>
+
+    <text x="56" y="424" font-size="11" font-weight="600" fill="#1F3A5F">Metadata</text>
+    <text x="56" y="440" font-size="11" font-weight="400" fill="#4A4A4A">tissue, organism, batch</text>
+    <text x="56" y="456" font-size="11" font-weight="400" fill="#4A4A4A">user-supplied marker lists</text>
+
+    <text x="56" y="484" font-size="10" font-style="italic" fill="#7A7A7A">
+      validated on upload
+    </text>
+  </g>
+
+  <!-- ============================================================
+       STAGE 02  -  PREPROCESSING & QC
+       ============================================================ -->
+  <g id="stage-preprocess" filter="url(#softShadow)">
+    <rect x="270" y="120" width="290" height="380" rx="14" ry="14"
+          fill="#FFFFFF" stroke="#2A8A8A" stroke-width="2"/>
+    <rect x="270" y="120" width="290" height="36" rx="14" ry="14" fill="#2A8A8A"/>
+    <rect x="270" y="138" width="290" height="18" fill="#2A8A8A"/>
+    <text x="286" y="143" font-size="14" font-weight="700" fill="#FFFFFF">Preprocessing &amp; QC</text>
+    <text x="286" y="174" font-size="11" font-weight="400" fill="#4A4A4A">scanpy &#8226; omicverse &#8226; scrublet</text>
+
+    <!-- Steps as small chips -->
+    <g font-size="11" fill="#1F3A5F">
+      <rect x="286" y="190" width="258" height="26" rx="6" ry="6" fill="#EAF2F2" stroke="#2A8A8A" stroke-width="0.8"/>
+      <text x="298" y="207" font-weight="500">QC filtering &#8226; mito %, n_genes, counts</text>
+
+      <rect x="286" y="222" width="258" height="26" rx="6" ry="6" fill="#EAF2F2" stroke="#2A8A8A" stroke-width="0.8"/>
+      <text x="298" y="239" font-weight="500">Doublet removal  <tspan fill="#7A7A7A" font-weight="400">Scrublet</tspan></text>
+
+      <rect x="286" y="254" width="258" height="26" rx="6" ry="6" fill="#EAF2F2" stroke="#2A8A8A" stroke-width="0.8"/>
+      <text x="298" y="271" font-weight="500">Normalize &#8226; log1p</text>
+
+      <rect x="286" y="286" width="258" height="26" rx="6" ry="6" fill="#EAF2F2" stroke="#2A8A8A" stroke-width="0.8"/>
+      <text x="298" y="303" font-weight="500">HVG selection (top 2 000)</text>
+
+      <rect x="286" y="318" width="258" height="26" rx="6" ry="6" fill="#EAF2F2" stroke="#2A8A8A" stroke-width="0.8"/>
+      <text x="298" y="335" font-weight="500">PCA (50 PCs) &#8226; kNN graph</text>
+
+      <rect x="286" y="350" width="258" height="26" rx="6" ry="6" fill="#EAF2F2" stroke="#2A8A8A" stroke-width="0.8"/>
+      <text x="298" y="367" font-weight="500">UMAP / MDE embeddings</text>
+
+      <rect x="286" y="382" width="258" height="26" rx="6" ry="6" fill="#EAF2F2" stroke="#2A8A8A" stroke-width="0.8"/>
+      <text x="298" y="399" font-weight="500">Leiden clustering &#8226; multi-resolution</text>
+    </g>
+
+    <line x1="286" y1="424" x2="544" y2="424" stroke="#E5E0D6" stroke-width="1"/>
+    <text x="286" y="446" font-size="11" font-weight="600" fill="#1F3A5F">Output</text>
+    <text x="286" y="462" font-size="11" font-weight="400" fill="#4A4A4A">clusters at multiple resolutions,</text>
+    <text x="286" y="478" font-size="11" font-weight="400" fill="#4A4A4A">embeddings, per-cluster marker genes</text>
+  </g>
+
+  <!-- ============================================================
+       STAGE 03  -  MULTI-METHOD ANNOTATION
+       Seven backends fanned out as chips. Three pySCSA backends are
+       grouped together (shared scoring). mLLMCelltype is colored to
+       echo the AI assistant downstream.
+       ============================================================ -->
+  <g id="stage-annotation" filter="url(#softShadow)">
+    <rect x="590" y="120" width="500" height="380" rx="14" ry="14"
+          fill="#FFFFFF" stroke="#C56A4F" stroke-width="2"/>
+    <rect x="590" y="120" width="500" height="36" rx="14" ry="14" fill="#C56A4F"/>
+    <rect x="590" y="138" width="500" height="18" fill="#C56A4F"/>
+    <text x="606" y="143" font-size="14" font-weight="700" fill="#FFFFFF">
+      Multi-method cell-type annotation
+    </text>
+    <text x="606" y="174" font-size="11" font-weight="400" fill="#4A4A4A">
+      seven independent backends run in parallel on the same clustering
+    </text>
+
+    <!-- Group A: pySCSA marker scoring (three backends) -->
+    <g id="ann-pyscsa">
+      <rect x="606" y="194" width="468" height="116" rx="10" ry="10"
+            fill="#FBEDE7" stroke="#C56A4F" stroke-width="1" opacity="0.55"/>
+      <text x="618" y="212" font-size="10" font-weight="700" fill="#C56A4F" letter-spacing="1">
+        pySCSA marker scoring &#8226; shared algorithm
+      </text>
+
+      <!-- CellMarker chip -->
+      <rect x="618" y="222" width="142" height="74" rx="8" ry="8"
+            fill="#FFFFFF" stroke="#C56A4F" stroke-width="1.2"/>
+      <circle cx="638" cy="244" r="9" fill="#C56A4F"/>
+      <text x="638" y="248" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">CM</text>
+      <text x="654" y="248" font-size="11" font-weight="700" fill="#1F3A5F">CellMarker</text>
+      <text x="630" y="270" font-size="9.5" fill="#4A4A4A">curated tissue +</text>
+      <text x="630" y="284" font-size="9.5" fill="#4A4A4A">cancer markers</text>
+
+      <!-- PanglaoDB chip -->
+      <rect x="768" y="222" width="142" height="74" rx="8" ry="8"
+            fill="#FFFFFF" stroke="#C56A4F" stroke-width="1.2"/>
+      <circle cx="788" cy="244" r="9" fill="#C56A4F"/>
+      <text x="788" y="248" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">PD</text>
+      <text x="804" y="248" font-size="11" font-weight="700" fill="#1F3A5F">PanglaoDB</text>
+      <text x="780" y="270" font-size="9.5" fill="#4A4A4A">healthy tissue</text>
+      <text x="780" y="284" font-size="9.5" fill="#4A4A4A">marker panels</text>
+
+      <!-- Cancer Single Cell Atlas chip -->
+      <rect x="918" y="222" width="148" height="74" rx="8" ry="8"
+            fill="#FFFFFF" stroke="#C56A4F" stroke-width="1.2"/>
+      <circle cx="938" cy="244" r="9" fill="#C56A4F"/>
+      <text x="938" y="248" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">CS</text>
+      <text x="954" y="248" font-size="11" font-weight="700" fill="#1F3A5F">Cancer SCA</text>
+      <text x="930" y="270" font-size="9.5" fill="#4A4A4A">Cancer Single</text>
+      <text x="930" y="284" font-size="9.5" fill="#4A4A4A">Cell Atlas markers</text>
+    </g>
+
+    <!-- Group B: classifier-based -->
+    <g id="ann-classifier">
+      <!-- CellTypist chip -->
+      <rect x="606" y="320" width="226" height="80" rx="8" ry="8"
+            fill="#FFFFFF" stroke="#C56A4F" stroke-width="1.2"/>
+      <circle cx="626" cy="342" r="9" fill="#C56A4F"/>
+      <text x="626" y="346" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">CT</text>
+      <text x="642" y="346" font-size="11" font-weight="700" fill="#1F3A5F">CellTypist</text>
+      <text x="618" y="368" font-size="9.5" fill="#4A4A4A">logistic-regression atlas</text>
+      <text x="618" y="382" font-size="9.5" fill="#4A4A4A">classifier (downloadable models)</text>
+
+      <!-- PopV chip -->
+      <rect x="848" y="320" width="226" height="80" rx="8" ry="8"
+            fill="#FFFFFF" stroke="#C56A4F" stroke-width="1.2"/>
+      <circle cx="868" cy="342" r="9" fill="#C56A4F"/>
+      <text x="868" y="346" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">PV</text>
+      <text x="884" y="346" font-size="11" font-weight="700" fill="#1F3A5F">PopV</text>
+      <text x="924" y="346" font-size="9.5" fill="#7A7A7A">8-classifier ensemble</text>
+      <text x="860" y="368" font-size="9.5" fill="#4A4A4A">kNN (BBKNN/Scanorama/scVI/Harmony),</text>
+      <text x="860" y="382" font-size="9.5" fill="#4A4A4A">RF, SVM, scANVI, OnClass, CellTypist</text>
+    </g>
+
+    <!-- Group C: LLM + manual (right column dashed for LLM) -->
+    <g id="ann-llm-manual">
+      <!-- mLLMCelltype chip -->
+      <rect x="606" y="412" width="304" height="74" rx="8" ry="8"
+            fill="#FFFFFF" stroke="#6E5BA8" stroke-width="1.4" stroke-dasharray="4 3"/>
+      <circle cx="626" cy="434" r="9" fill="#6E5BA8"/>
+      <text x="626" y="438" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">LM</text>
+      <text x="642" y="438" font-size="11" font-weight="700" fill="#1F3A5F">mLLMCelltype</text>
+      <text x="738" y="438" font-size="9.5" fill="#7A7A7A">LLM-driven</text>
+      <text x="618" y="460" font-size="9.5" fill="#4A4A4A">single or multi-model consensus across</text>
+      <text x="618" y="474" font-size="9.5" fill="#4A4A4A">OpenAI &#8226; Anthropic &#8226; Gemini &#8226; OpenRouter</text>
+
+      <!-- Manual markers chip -->
+      <rect x="926" y="412" width="148" height="74" rx="8" ry="8"
+            fill="#FFFFFF" stroke="#C56A4F" stroke-width="1.2"/>
+      <circle cx="946" cy="434" r="9" fill="#C56A4F"/>
+      <text x="946" y="438" font-size="11" font-weight="700" fill="#FFFFFF" text-anchor="middle">MM</text>
+      <text x="962" y="438" font-size="11" font-weight="700" fill="#1F3A5F">Manual</text>
+      <text x="938" y="460" font-size="9.5" fill="#4A4A4A">user marker lists,</text>
+      <text x="938" y="474" font-size="9.5" fill="#4A4A4A">scored per cell</text>
+    </g>
+  </g>
+
+  <!-- Legend chip: LLM accent -->
+  <g id="ann-legend">
+    <rect x="606" y="500" width="14" height="10" fill="#FFFFFF" stroke="#6E5BA8" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="626" y="509" font-size="9.5" fill="#7A7A7A">
+      dashed violet outline = LLM-touching (shares provider layer with the AI assistant)
+    </text>
+  </g>
+
+  <!-- ============================================================
+       STAGE 04  -  CONSENSUS  (junction / pivot node)
+       ============================================================ -->
+  <g id="stage-consensus" filter="url(#softShadow)">
+    <!-- Hexagonal pivot -->
+    <polygon points="1180,210 1280,160 1380,210 1380,310 1280,360 1180,310"
+             fill="#FFFFFF" stroke="#D9A441" stroke-width="2.5"/>
+    <polygon points="1180,210 1280,160 1380,210 1380,224 1180,224"
+             fill="#D9A441"/>
+    <text x="1280" y="200" font-size="13" font-weight="700" fill="#FFFFFF" text-anchor="middle">
+      Consensus
+    </text>
+    <text x="1280" y="248" font-size="10.5" font-weight="600" fill="#1F3A5F" text-anchor="middle">
+      per-cluster majority vote
+    </text>
+    <text x="1280" y="266" font-size="10" fill="#4A4A4A" text-anchor="middle">
+      across the seven backends
+    </text>
+    <text x="1280" y="290" font-size="10" font-weight="600" fill="#C56A4F" text-anchor="middle">
+      consensus_annotation
+    </text>
+    <text x="1280" y="306" font-size="10" font-style="italic" fill="#7A7A7A" text-anchor="middle">
+      + agreement fraction
+    </text>
+    <text x="1280" y="328" font-size="10" fill="#4A4A4A" text-anchor="middle">
+      per-method confidence kept
+    </text>
+    <text x="1280" y="344" font-size="10" fill="#4A4A4A" text-anchor="middle">
+      as separate obs columns
+    </text>
+  </g>
+
+  <!-- ============================================================
+       STAGE 05  -  INTERACTIVE EXPLORATION & AI ASSISTANT
+       ============================================================ -->
+  <g id="stage-exploration" filter="url(#softShadow)">
+    <rect x="40" y="560" width="900" height="280" rx="14" ry="14"
+          fill="#FFFFFF" stroke="#6E5BA8" stroke-width="2"/>
+    <rect x="40" y="560" width="900" height="36" rx="14" ry="14" fill="#6E5BA8"/>
+    <rect x="40" y="578" width="900" height="18" fill="#6E5BA8"/>
+    <text x="56" y="583" font-size="14" font-weight="700" fill="#FFFFFF">
+      Interactive exploration &amp; AI assistant
+    </text>
+    <text x="720" y="583" font-size="11" font-weight="500" fill="#FFFFFF" opacity="0.9">
+      Electron + React + Material UI
+    </text>
+
+    <!-- Left subpanel: visualization dashboard -->
+    <g id="dashboard-panel">
+      <text x="60" y="618" font-size="12" font-weight="700" fill="#1F3A5F">
+        Visualization dashboard
+      </text>
+      <text x="60" y="636" font-size="11" fill="#4A4A4A">
+        UMAP / MDE canvas with lasso selection, on-the-fly differential
+      </text>
+      <text x="60" y="652" font-size="11" fill="#4A4A4A">
+        expression, live recoloring, and versioned annotation layers.
+      </text>
+
+      <!-- Chips: dashboard features -->
+      <g font-size="10" fill="#1F3A5F">
+        <rect x="60"  y="666" width="100" height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="110" y="681" font-weight="600" text-anchor="middle">UMAP / MDE</text>
+
+        <rect x="166" y="666" width="80"  height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="206" y="681" font-weight="600" text-anchor="middle">Lasso</text>
+
+        <rect x="252" y="666" width="124" height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="314" y="681" font-weight="600" text-anchor="middle">Marker heatmaps</text>
+
+        <rect x="382" y="666" width="80"  height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="422" y="681" font-weight="600" text-anchor="middle">Dot plot</text>
+
+        <rect x="60"  y="694" width="100" height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="110" y="709" font-weight="600" text-anchor="middle">Volcano plot</text>
+
+        <rect x="166" y="694" width="92"  height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="212" y="709" font-weight="600" text-anchor="middle">QC violins</text>
+
+        <rect x="264" y="694" width="148" height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="338" y="709" font-weight="600" text-anchor="middle">Resolution Explorer</text>
+
+        <rect x="60"  y="722" width="166" height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8" stroke-dasharray="4 3"/>
+        <text x="143" y="737" font-weight="600" text-anchor="middle">Subclustering &amp; merge-back</text>
+
+        <rect x="232" y="722" width="148" height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="306" y="737" font-weight="600" text-anchor="middle">Publication export</text>
+      </g>
+
+      <text x="60" y="772" font-size="11" font-weight="600" fill="#1F3A5F">
+        Subclustering &amp; merge-back
+      </text>
+      <text x="60" y="788" font-size="11" fill="#4A4A4A">
+        Lasso a region or pick a cluster &#8594; re-cluster &#8594; re-annotate &#8594; merge
+      </text>
+      <text x="60" y="804" font-size="11" fill="#4A4A4A">
+        refined labels back into the parent AnnData (nested supported).
+      </text>
+      <text x="60" y="824" font-size="10" font-style="italic" fill="#7A7A7A">
+        300 DPI exports (PNG / SVG / PDF / JPEG) preserve full vector fidelity.
+      </text>
+    </g>
+
+    <!-- Divider between dashboard and AI assistant -->
+    <line x1="500" y1="612" x2="500" y2="828" stroke="#E5E0D6" stroke-width="1"/>
+
+    <!-- Right subpanel: AI assistant -->
+    <g id="ai-panel">
+      <text x="520" y="618" font-size="12" font-weight="700" fill="#1F3A5F">
+        AI bioinformatics assistant
+      </text>
+      <text x="520" y="636" font-size="11" fill="#4A4A4A">
+        In-app chat sidebar with a pluggable provider layer
+      </text>
+      <text x="520" y="652" font-size="11" fill="#4A4A4A">
+        (<tspan font-weight="700" fill="#1F3A5F">OpenAI</tspan> &#8226;
+        <tspan font-weight="700" fill="#1F3A5F">Anthropic</tspan>)
+        configured through the Settings panel.
+      </text>
+
+      <!-- Context-mode chips -->
+      <text x="520" y="678" font-size="10" font-weight="700" fill="#7A7A7A" letter-spacing="1">
+        CONTEXT MODES
+      </text>
+      <g font-size="10" fill="#1F3A5F">
+        <rect x="520" y="686" width="116" height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="578" y="701" font-weight="600" text-anchor="middle">Global dataset</text>
+
+        <rect x="642" y="686" width="116" height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="700" y="701" font-weight="600" text-anchor="middle">Cluster-specific</text>
+
+        <rect x="764" y="686" width="138" height="22" rx="11" ry="11" fill="#EFEAF8" stroke="#6E5BA8" stroke-width="0.8"/>
+        <text x="833" y="701" font-weight="600" text-anchor="middle">Lasso selection</text>
+      </g>
+
+      <text x="520" y="730" font-size="11" fill="#4A4A4A">
+        Interprets QC, marker genes, heterogeneity; reasons over the
+      </text>
+      <text x="520" y="746" font-size="11" fill="#4A4A4A">
+        per-method confidence and the consensus call to suggest labels.
+      </text>
+
+      <text x="520" y="772" font-size="11" font-weight="600" fill="#1F3A5F">
+        Shared LLM layer
+      </text>
+      <text x="520" y="788" font-size="11" fill="#4A4A4A">
+        the same provider abstraction backs mLLMCelltype upstream
+      </text>
+      <text x="520" y="804" font-size="11" fill="#4A4A4A">
+        and the chat assistant downstream.
+      </text>
+      <text x="520" y="824" font-size="10" font-style="italic" fill="#7A7A7A">
+        Blind-analysis mode hides labels for unbiased review.
+      </text>
+    </g>
+  </g>
+
+  <!-- ============================================================
+       STAGE 06  -  OUTPUTS
+       ============================================================ -->
+  <g id="stage-outputs" filter="url(#softShadow)">
+    <rect x="980" y="560" width="380" height="280" rx="14" ry="14"
+          fill="#FFFFFF" stroke="#1F3A5F" stroke-width="2"/>
+    <rect x="980" y="560" width="380" height="36" rx="14" ry="14" fill="#1F3A5F"/>
+    <rect x="980" y="578" width="380" height="18" fill="#1F3A5F"/>
+    <text x="996" y="583" font-size="14" font-weight="700" fill="#FFFFFF">Outputs</text>
+
+    <g font-size="11">
+      <!-- Data column -->
+      <text x="996" y="618" font-weight="700" fill="#1F3A5F">Data</text>
+      <text x="996" y="636" fill="#4A4A4A">annotated .h5ad / AnnData</text>
+      <text x="996" y="652" fill="#4A4A4A">subcluster .h5ad (merged back)</text>
+      <text x="996" y="668" fill="#4A4A4A">obs: per-method labels +</text>
+      <text x="1010" y="684" fill="#4A4A4A">consensus_annotation</text>
+
+      <!-- Tables column -->
+      <text x="996" y="712" font-weight="700" fill="#1F3A5F">Tables &amp; JSON</text>
+      <text x="996" y="730" fill="#4A4A4A">per-method confidence (JSON)</text>
+      <text x="996" y="746" fill="#4A4A4A">differential expression results</text>
+      <text x="996" y="762" fill="#4A4A4A">per-cluster marker genes</text>
+
+      <!-- Figures column -->
+      <text x="996" y="790" font-weight="700" fill="#1F3A5F">Figures &#8226; publication-quality</text>
+      <text x="996" y="808" fill="#4A4A4A">UMAP / MDE, heatmaps,</text>
+      <text x="996" y="824" fill="#4A4A4A">volcano, dot, QC violins (PNG / SVG / PDF / JPEG)</text>
+    </g>
+  </g>
+
+  <!-- ============================================================
+       FLOW ARROWS
+       Primary navy arrows along the main pipeline.
+       ============================================================ -->
+  <g id="arrows-primary" fill="none" stroke="#1F3A5F" stroke-width="2">
+    <!-- Input -> Preprocessing -->
+    <line x1="240" y1="310" x2="268" y2="310" marker-end="url(#arrow)"/>
+
+    <!-- Preprocessing -> Annotation -->
+    <line x1="560" y1="310" x2="588" y2="310" marker-end="url(#arrow)"/>
+
+    <!-- Annotation -> Consensus pivot (fan-in trunk) -->
+    <path d="M 1090 310 L 1180 260" marker-end="url(#arrow)"/>
+
+    <!-- Consensus -> Exploration (down + left) -->
+    <path d="M 1280 360 L 1280 480 L 490 480 L 490 558" marker-end="url(#arrow)"/>
+
+    <!-- Consensus -> Outputs -->
+    <path d="M 1330 360 L 1330 500 L 1170 500 L 1170 558" marker-end="url(#arrow)"/>
+
+    <!-- Exploration -> Outputs -->
+    <line x1="940" y1="700" x2="978" y2="700" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- ============================================================
+       FEEDBACK ARROW
+       Dashed loop from dashboard back into annotation, labeled
+       "Subclustering & merge-back".
+       ============================================================ -->
+  <g id="arrows-feedback" fill="none" stroke="#7A7A7A" stroke-width="1.6" stroke-dasharray="5 4">
+    <!-- Path: top of exploration card -> rises above exploration -> over to annotation card bottom -->
+    <path d="M 300 558 L 300 524 L 840 524 L 840 500"
+          marker-end="url(#arrow-light)"/>
+  </g>
+  <g id="arrows-feedback-label">
+    <rect x="468" y="510" width="208" height="22" rx="11" ry="11"
+          fill="#F4F1EC" stroke="#7A7A7A" stroke-width="0.8" stroke-dasharray="3 2"/>
+    <text x="572" y="525" font-size="10.5" font-weight="600" fill="#4A4A4A" text-anchor="middle">
+      Subclustering &amp; merge-back
+    </text>
+  </g>
+
+  <!-- ============================================================
+       LEGEND
+       ============================================================ -->
+  <g id="legend" font-size="10" fill="#7A7A7A">
+    <line x1="56" y1="868" x2="86" y2="868" stroke="#1F3A5F" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="94" y="872">primary data flow</text>
+
+    <line x1="240" y1="868" x2="270" y2="868" stroke="#7A7A7A" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow-light)"/>
+    <text x="278" y="872">feedback loop (subclustering, re-annotation)</text>
+
+    <rect x="616" y="861" width="14" height="14" rx="3" ry="3" fill="#FFFFFF" stroke="#6E5BA8" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="636" y="872">violet outline = shared LLM provider layer (mLLMCelltype + AI assistant)</text>
+  </g>
+
+  <!-- ============================================================
+       FOOTER WORDMARK
+       ============================================================ -->
+  <g id="footer">
+    <line x1="0" y1="884" x2="1400" y2="884" stroke="#E5E0D6" stroke-width="1"/>
+    <text x="1228" y="876" font-size="10" fill="#7A7A7A" text-anchor="end">
+      CellPilot pipeline &#8226; v0.9 &#8226; 2026-05-03
+    </text>
+    <text x="1356" y="876" font-size="11" font-weight="700" fill="#1F3A5F" text-anchor="end">
+      CellPilot
+    </text>
+  </g>
+
+</svg>

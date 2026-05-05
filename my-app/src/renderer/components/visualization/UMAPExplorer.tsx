@@ -17,6 +17,7 @@ import VolcanoPlot from './VolcanoPlot';
 import AnnotationResults from './AnnotationResults';
 import MarkerGenesHeatmap from './MarkerGenesHeatmap';
 import ChatAgent from './ChatAgent';
+import AnnotationAgreementPanel from './AnnotationAgreementPanel';
 import ResolutionExplorer from './ResolutionExplorer';
 import {
   Settings,
@@ -968,6 +969,9 @@ export default function UMAPExplorer({
                       }
                     }}
                   />
+                )}
+                {drawerTab === 'agreement' && (
+                  <AnnotationAgreementPanel data={data} />
                 )}
                 {drawerTab === 'chat' && (
                   <ChatAgent

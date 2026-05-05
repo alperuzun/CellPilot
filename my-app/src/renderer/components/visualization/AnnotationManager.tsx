@@ -3,6 +3,7 @@ import { VisualizationData, api } from '../../services/api';
 import { Button, Modal, Select } from './Shared';
 import { Plus, Save, Edit2, Check, X, Layers, Trash2 } from 'lucide-react';
 import { useVizTheme } from '../../theme/ThemeContext';
+import CLLabelInput from './CLLabelInput';
 
 interface AnnotationManagerProps {
   data: VisualizationData;
@@ -237,18 +238,17 @@ export default function AnnotationManager({
                     Label {selectedCells.length} Selected Cells
                 </h4>
                 <div className="flex gap-2">
-                    <input
-                        type="text"
+                    <CLLabelInput
                         value={selectionLabel}
-                        onChange={(e) => setSelectionLabel(e.target.value)}
-                        placeholder="New Category Name"
-                        className="flex-1 rounded px-3 py-1.5 text-sm focus:outline-none"
+                        onChange={setSelectionLabel}
+                        placeholder="New Category Name (type to search Cell Ontology)"
+                        className="w-full rounded px-3 py-1.5 text-sm focus:outline-none"
                         style={{ backgroundColor: v.inputBg, border: `1px solid ${v.badgeBlue.border}`, color: v.inputText }}
                         onFocus={(e) => e.currentTarget.style.borderColor = v.inputFocusBorder}
                         onBlur={(e) => e.currentTarget.style.borderColor = v.badgeBlue.border}
                     />
-                    <Button 
-                        variant="primary" 
+                    <Button
+                        variant="primary"
                         size="sm"
                         onClick={handleApplySelectionLabel}
                         disabled={applyingSelection || !selectionLabel.trim()}
