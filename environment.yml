@@ -78,9 +78,18 @@ dependencies:
       # launch_cellpilot.sh. The version is pinned to >=1.7.1 because that is
       # the first omicverse release that ships CellOntologyMapper, which
       # powers consensus normalization to Cell Ontology IDs.
-      - scanpy==1.10.3
+      # scanpy >=1.11 is required because omicverse 1.7.x's pp module imports
+      # `_CSMatrix` from scanpy._utils, a symbol added in scanpy 1.11.
+      - "scanpy>=1.11,<1.12"
       - anndata>=0.12,<0.13
       - "zarr<3"
+      # pyarrow<19 + pyarrow_hotfix 0.7: tiledbsoma (popv -> cellxgene_census
+      # transitive dep) imports pyarrow_hotfix which calls
+      # pa.unregister_extension_type — pyarrow 19+ no longer registers that
+      # name and the import dies with ArrowKeyError. Pinning both back to a
+      # known compatible pair fixes popv import.
+      - "pyarrow<19"
+      - "pyarrow-hotfix==0.7"
       - celltypist==1.7.1
       - leidenalg==0.10.2
       - igraph==0.11.8
@@ -93,6 +102,12 @@ dependencies:
       - pymde==0.1.18
       - scrublet              # doublet detection (called by omicverse pp.qc)
       - obonet                # Cell Ontology graph (powers consensus hierarchy)
+      # Required by omicverse 1.7.x at import time (pl/_dotplot, _settings).
+      - marsilea
+      - tomli
+      # Required by CellOntologyMapper (omicverse 1.7.x lazy-imports it).
+      - "sentence-transformers>=2.2"
+      - tf-keras              # transformers + Keras 3 compat shim
 
       # Ensemble annotation (PopV). scvi-tools >=1.3 is required because the
       # PopV Tabula Sapiens HuggingFace reference is saved with scVI 1.3+
@@ -114,7 +129,9 @@ dependencies:
       - transformers==4.50.3
 
       # Visualization.
-      - matplotlib==3.6.3
+      # matplotlib bumped from 3.6.3 to >=3.7,<4: scanpy 1.11.x requires
+      # matplotlib>=3.7.5 in its declared metadata.
+      - "matplotlib>=3.7,<4"
       - seaborn==0.13.2
       - plotly==6.0.1
       - plotnine==0.12.4

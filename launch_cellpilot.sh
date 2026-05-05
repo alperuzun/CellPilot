@@ -3,16 +3,24 @@
 set -e
 
 # --- Initialize conda -------------------------------------------
-# Source conda configuration
-if [ -f "$HOME/miniforge3/etc/profile.d/conda.sh" ]; then
+# Source conda from whichever installation is currently on the user's PATH
+# (i.e. the one they used to create CellPilot-dev-311). This must take
+# priority over hardcoded $HOME/miniforge3 / $HOME/miniconda3 fallbacks
+# because some users have multiple conda installations side by side; the
+# fallbacks would otherwise pick the wrong one and `conda activate` would
+# raise EnvironmentNameNotFound even though the env exists.
+CONDA_BASE="$(command -v conda >/dev/null 2>&1 && conda info --base 2>/dev/null)"
+if [ -n "$CONDA_BASE" ] && [ -f "$CONDA_BASE/etc/profile.d/conda.sh" ]; then
+    source "$CONDA_BASE/etc/profile.d/conda.sh"
+elif [ -f "$HOME/miniforge3/etc/profile.d/conda.sh" ]; then
     source "$HOME/miniforge3/etc/profile.d/conda.sh"
 elif [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
     source "$HOME/miniconda3/etc/profile.d/conda.sh"
-elif [ -f "$(conda info --base)/etc/profile.d/conda.sh" ]; then
-    source "$(conda info --base)/etc/profile.d/conda.sh"
+elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/anaconda3/etc/profile.d/conda.sh"
 else
     echo "❌ Could not find conda installation!"
-    echo "   Please ensure conda is installed and accessible"
+    echo "   Please ensure conda is installed and accessible (run 'which conda' to verify)."
     exit 1
 fi
 
@@ -21,14 +29,29 @@ echo "🔍 Checking prerequisites..."
 
 # Check if conda environment exists
 if ! conda env list | grep -q "CellPilot-dev-311"; then
-  echo "❌ CellPilot-dev-311 conda environment not found!"
-  echo "   Please run: conda env create -f environment.yml -n CellPilot-dev-311"
+  echo "❌ CellPilot-dev-311 conda environment not found in $(conda info --base)."
+  echo "   This conda installation knows about these envs:"
+  conda env list | sed 's/^/     /'
+  echo
+  echo "   If the env was created with a different conda installation, run:"
+  echo "     which -a conda     # see all conda binaries on PATH"
+  echo "     conda info --base  # see which one this script is using"
+  echo "   Otherwise, create the env: conda env create -f environment.yml"
   exit 1
 fi
 
 # Activate the conda environment
 echo "🔄 Activating CellPilot-dev-311 environment..."
-conda activate CellPilot-dev-311
+if ! conda activate CellPilot-dev-311 2>/dev/null; then
+  echo "❌ conda activate CellPilot-dev-311 failed."
+  echo "   The env was found in 'conda env list' but cannot be activated."
+  echo "   This usually means there are multiple conda installations and the"
+  echo "   env lives in one but the script is sourced from another. Run:"
+  echo "     conda info --base       # source this script is using"
+  echo "     conda env list          # envs visible to this conda"
+  echo "     which -a conda          # all conda binaries on PATH"
+  exit 1
+fi
 
 # --- Self-heal: install omicverse if missing ----------------------------
 # omicverse 1.6.10 declares scipy<1.12 in its metadata, which conflicts
@@ -49,25 +72,33 @@ if ! python -c "import omicverse.utils" >/dev/null 2>&1; then
     exit 1
   }
   pip install -q \
-    "scanpy>=1.9" "matplotlib<3.7" "scikit-learn>=1.2" "networkx>=2.8" \
+    "scanpy>=1.11,<1.12" "matplotlib>=3.7,<4" "scikit-learn>=1.2" "networkx>=2.8" \
     "multiprocess>=0.70" "datetime>=4.5" "ipywidgets>=8.0" "lifelines>=0.27" \
     "ktplotspy>=0.1" "python-dotplot>=0.0.1" "boltons>=23.0" "ctxcore>=0.2" \
     "termcolor>=2.1" "pygam==0.8.0" "gdown>=4.6" "graphtools>=1.5" \
     "pydeseq2>=0.4.1" "mofax>=0.3" "adjustText>=0.8" "scikit-misc>=0.1" \
     "metatime>=1.3.0" "einops>=0.6" "tensorboard>=2.6" pynvml plotly \
-    progressbar2 future traitlets || {
+    progressbar2 future traitlets \
+    marsilea tomli \
+    "pyarrow<19" "pyarrow-hotfix==0.7" || {
       echo "❌ Failed to install omicverse runtime dependencies."
       exit 1
     }
   # CellOntologyMapper (consensus normalization) requires omicverse >=1.7.1.
-  # sentence-transformers is a runtime dep of the mapper that omicverse does
-  # not declare in its metadata — it's lazy-imported when the user calls into
-  # the mapper, so install it here proactively.
-  pip install -q "sentence-transformers>=2.2" || {
-    echo "❌ Failed to install sentence-transformers."
+  # We pin to 1.7.9 specifically because:
+  #   * 1.7.9 is the latest 1.7.x with CellOntologyMapper
+  #   * omicverse declares scipy<1.12 + anndata<0.12 in metadata that conflict
+  #     with our pinned anndata 0.12.x and scipy 1.13.x — `--no-deps` lets the
+  #     install proceed, and runtime works fine
+  #   * 2.x adds extra constraints (anndata<0.12 hard-coded internally) and
+  #     hasn't been validated end-to-end yet
+  # sentence-transformers + tf-keras are runtime deps of CellOntologyMapper
+  # that omicverse doesn't declare in its metadata.
+  pip install -q "sentence-transformers>=2.2" tf-keras || {
+    echo "❌ Failed to install sentence-transformers / tf-keras."
     exit 1
   }
-  pip install -q --no-deps "omicverse>=1.7.1,<2.0" || {
+  pip install -q --no-deps "omicverse==1.7.9" || {
     echo "❌ Failed to install omicverse."
     exit 1
   }
