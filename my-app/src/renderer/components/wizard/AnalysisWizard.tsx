@@ -20,9 +20,13 @@ export default function AnalysisWizard({ onAnalysisComplete }: AnalysisWizardPro
 
   const handleStep2Complete = (data: AnalysisData, outputPath?: string) => {
     setAnalysisData(data);
-    // Redirect directly to VisualizationDashboard via App.tsx
-    if (outputPath && onAnalysisComplete) {
-      onAnalysisComplete(outputPath);
+    // Always redirect to the visualization dashboard once a job finishes.
+    // If we couldn't resolve a specific output path, fall back to whatever
+    // is on the AnalysisData payload, then to an empty string — the
+    // dashboard will load the most recent dataset by default rather than
+    // leaving the user stuck on the analysis screen.
+    if (onAnalysisComplete) {
+      onAnalysisComplete(outputPath || data.annotatedDatasetPath || '');
     }
   };
 

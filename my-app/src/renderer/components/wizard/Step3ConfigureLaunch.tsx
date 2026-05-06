@@ -180,18 +180,34 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
         setCurrentStep(status.current_step);
 
         if (status.status === 'completed') {
-          let datasetPath = '';
-          try {
-            const datasetsResponse = await api.getAvailableDatasets();
-            const annotationDatasets = datasetsResponse.datasets
-              .filter(d => d.analysis_type === 'annotation')
-              .sort((a, b) => b.date.localeCompare(a.date));
-            datasetPath = annotationDatasets.length > 0 ? annotationDatasets[0].path : '';
-          } catch (error) {
-            console.error('[Step3] Error fetching datasets:', error);
-            if (status.result?.annotation?.[0]?.data?.adata_output_file) {
-              datasetPath = status.result.annotation[0].data.adata_output_file;
+          // Resolve the output path in priority order. The backend sets two
+          // canonical fields (`outputPath` and `annotation.adata_output_file`)
+          // when the job finishes — read those first because they're written
+          // synchronously with completion. Only fall back to the dataset
+          // listing when neither is present, since that listing can lag
+          // behind the just-written file.
+          let datasetPath: string =
+            status.result?.outputPath
+            || status.result?.annotation?.adata_output_file
+            || '';
+
+          if (!datasetPath) {
+            try {
+              const datasetsResponse = await api.getAvailableDatasets();
+              const annotationDatasets = datasetsResponse.datasets
+                .filter(d => d.analysis_type === 'annotation')
+                .sort((a, b) => b.date.localeCompare(a.date));
+              datasetPath = annotationDatasets.length > 0 ? annotationDatasets[0].path : '';
+            } catch (error) {
+              console.error('[Step3] Error fetching datasets:', error);
             }
+          }
+
+          if (!datasetPath) {
+            console.error(
+              '[Step3] Job marked completed but no output path could be resolved.',
+              { result: status.result },
+            );
           }
 
           // Store the completed dataset path for the UI button

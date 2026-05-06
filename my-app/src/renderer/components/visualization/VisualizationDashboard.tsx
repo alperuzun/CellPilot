@@ -91,20 +91,21 @@ export default function VisualizationDashboard({ initialPath, onBack }: Visualiz
   const [searchQuery, setSearchQuery] = useState('');
 
   React.useEffect(() => {
-    if (pathStack.length === 0) {
-      const fetchDatasets = async () => {
-        setLoadingDatasets(true);
-        try {
-          const response = await api.getAvailableDatasets();
-          setDatasets(response.datasets);
-        } catch (error) {
-          console.error('Failed to fetch datasets:', error);
-        } finally {
-          setLoadingDatasets(false);
-        }
-      };
-      fetchDatasets();
-    }
+    // Fetch dataset metadata unconditionally — needed both for the picker
+    // view and for resolving the human-readable name shown in the explorer
+    // header when entering directly via initialPath.
+    const fetchDatasets = async () => {
+      setLoadingDatasets(true);
+      try {
+        const response = await api.getAvailableDatasets();
+        setDatasets(response.datasets);
+      } catch (error) {
+        console.error('Failed to fetch datasets:', error);
+      } finally {
+        setLoadingDatasets(false);
+      }
+    };
+    fetchDatasets();
   }, [pathStack.length]);
 
   const currentPath = pathStack[pathStack.length - 1];
@@ -477,11 +478,26 @@ export default function VisualizationDashboard({ initialPath, onBack }: Visualiz
   }
 
   // ── Explorer view ────────────────────────────────────────────────
-  const currentDatasetInfo: DatasetInfo = {
-    name: isSubcluster ? 'Subcluster View' : 'Main Dataset',
+  // Prefer the real DatasetInfo from the dataset listing so the header
+  // shows the dataset's actual name. Fall back to deriving a friendly name
+  // from the analysis directory when entering directly via initialPath
+  // before the listing has loaded — output dirs follow the
+  // `output/{name}_{YYYYMMDD_HHMM}/` convention, so stripping that suffix
+  // recovers the user-supplied name. UMAPExplorer takes care of prefixing
+  // "Subcluster: " for subcluster views, so we just supply the base name.
+  const matchedDataset = datasets.find(d => d.path === currentPath);
+  const fallbackName = (() => {
+    if (!currentPath) return '';
+    const parts = currentPath.split('/').filter(Boolean);
+    const dirName = parts[parts.length - 2] || parts[parts.length - 1] || '';
+    return dirName.replace(/_\d{8}_\d{4}$/, '') || dirName;
+  })();
+
+  const currentDatasetInfo: DatasetInfo = matchedDataset ?? {
+    name: fallbackName || 'Dataset',
     path: currentPath,
     date: '',
-    analysis_type: 'annotation',
+    analysis_type: isSubcluster ? 'subcluster' : 'annotation',
     size_mb: 0,
     directory: '',
   };
