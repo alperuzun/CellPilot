@@ -8,6 +8,8 @@ from ..models import AdataRequest, DotPlotRequest, DotPlotResponse
 from ..concurrency import lock_manager
 from ..visualization import (
     extract_visualization_data,
+    get_agreement_summary,
+    get_cluster_lineage,
     get_gene_expression,
     get_marker_gene_stats,
     get_marker_genes_by_cluster,
@@ -30,6 +32,44 @@ async def get_visualization_data(h5ad_path: str, resolution: Optional[float] = N
             raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
 
         return await lock_manager.locked_call(h5ad_path, extract_visualization_data, h5ad_path, resolution)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/agreement_summary")
+async def agreement_summary_endpoint(h5ad_path: str) -> dict[str, Any]:
+    """Per-cluster LCA / agreement-depth summary across annotation backends.
+
+    Returns the most-specific CL term at which every voting method agreed,
+    for every cluster. Powers the agreement panel's "Agree at" column.
+    """
+    try:
+        if not os.path.exists(h5ad_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
+        return await lock_manager.locked_call(h5ad_path, get_agreement_summary, h5ad_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/cluster_lineage")
+async def cluster_lineage_endpoint(h5ad_path: str, cluster_id: str) -> dict[str, Any]:
+    """Cell-Ontology lineage path for one cluster's consensus call.
+
+    Returns the path from the CL root (``cell``) down to the cluster's
+    consensus CL term, with per-step counts of how many annotation methods
+    landed at-or-below that node. Used by the cluster details popup to
+    render a breadcrumb-style lineage view.
+    """
+    try:
+        if not os.path.exists(h5ad_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {h5ad_path}")
+        return await lock_manager.locked_call(
+            h5ad_path, get_cluster_lineage, h5ad_path, cluster_id,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

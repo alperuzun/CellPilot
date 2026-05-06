@@ -971,7 +971,18 @@ export default function UMAPExplorer({
                   />
                 )}
                 {drawerTab === 'agreement' && (
-                  <AnnotationAgreementPanel data={data} />
+                  <AnnotationAgreementPanel
+                    data={data}
+                    h5adPath={dataset.path}
+                    onClusterClick={(clusterId, position) => {
+                      // Reuse the same handler the UMAP cluster click uses.
+                      // The popup positions itself near the click; if no
+                      // event position came through, selectCluster's default
+                      // center-screen layout takes over.
+                      selectCluster(clusterId);
+                      if (position) setClusterDetailsPosition(position);
+                    }}
+                  />
                 )}
                 {drawerTab === 'chat' && (
                   <ChatAgent
@@ -1167,6 +1178,7 @@ export default function UMAPExplorer({
           data={data}
           annotationConfidence={annotationConfidence}
           customLabels={customLabels}
+          h5adPath={dataset.path}
           position={clusterDetailsPosition || undefined}
           onSubcluster={() => {
             setShowClusterDetails(false);

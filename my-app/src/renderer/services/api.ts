@@ -475,6 +475,58 @@ export interface PropagateAnnotationsResponse {
   ambiguous_count: number;
 }
 
+/**
+ * One step in the cluster lineage path from CL root down to consensus.
+ * `n_methods_at_or_below` tells you how many backends produced a label at
+ * this depth or deeper — i.e., agreed at least this far down the ontology.
+ */
+export interface LineagePathStep {
+  cl_id: string;
+  cl_name: string;
+  depth: number;
+  n_methods_at_or_below: number;
+  methods_at_or_below: string[];
+}
+
+export interface LineageMethodCall {
+  method: string;
+  method_display: string;
+  cl_id: string;
+  cl_name: string;
+  /** Per-method ballot weight in the consensus vote. For per-cell methods
+   *  (PopV / CellTypist), this is the fraction of the cluster's cells whose
+   *  per-cell label matches the cluster-level call — e.g., 0.58 means 58%
+   *  of the cluster agreed with the cluster-level call. For cluster-level
+   *  native methods (CellMarker, mLLM) it's always 1.0. */
+  weight: number;
+  weight_kind: 'cluster' | 'per-cell';
+}
+
+export interface ClusterLineageResponse {
+  path: LineagePathStep[];
+  method_calls: LineageMethodCall[];
+  consensus_cl_id: string;
+  consensus_cl_name: string;
+  n_methods_total: number;
+  available: boolean;
+  reason: string;
+}
+
+/** Per-cluster LCA across annotation methods — the most-specific CL term
+ *  on which every voting backend agreed. Powers the "Agree at" column. */
+export interface AgreementSummaryEntry {
+  agreement_cl_id: string;
+  agreement_cl_name: string;
+  agreement_depth: number;
+  n_methods_voting: number;
+}
+
+export interface AgreementSummaryResponse {
+  available: boolean;
+  clusters: Record<string, AgreementSummaryEntry>;
+  reason: string;
+}
+
 class APIError extends Error {
   constructor(message: string, public status?: number) {
     super(message);
@@ -616,6 +668,16 @@ export const api = {
 
   async getMarkerGenes(h5adPath: string, clusterColumn = 'leiden', nGenes = 10): Promise<MarkerGenesData> {
     return apiRequest(`/marker_genes?h5ad_path=${encodeURIComponent(h5adPath)}&cluster_column=${clusterColumn}&n_genes=${nGenes}`);
+  },
+
+  async getClusterLineage(h5adPath: string, clusterId: string): Promise<ClusterLineageResponse> {
+    return apiRequest(
+      `/cluster_lineage?h5ad_path=${encodeURIComponent(h5adPath)}&cluster_id=${encodeURIComponent(clusterId)}`,
+    );
+  },
+
+  async getAgreementSummary(h5adPath: string): Promise<AgreementSummaryResponse> {
+    return apiRequest(`/agreement_summary?h5ad_path=${encodeURIComponent(h5adPath)}`);
   },
 
   async getCellTypeMarkers(h5adPath: string, clusterColumn = 'cellmarker'): Promise<MarkerGenesData> {

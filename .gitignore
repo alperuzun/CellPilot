@@ -131,3 +131,9 @@ figures/*
 # Generated PDFs (the manuscript PDF is rebuilt from .txt; track .txt only)
 # =====================================================================
 *.pdf
+
+experiments
+
+backend/tests
+
+backend/ontology

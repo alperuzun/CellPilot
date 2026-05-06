@@ -1,10 +1,19 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useVizTheme } from '../../theme/ThemeContext';
-import type { VisualizationData } from '../../services/api';
+import {
+  api,
+  type VisualizationData,
+  type AgreementSummaryEntry,
+} from '../../services/api';
 import CLBadge from './CLBadge';
 
 interface AnnotationAgreementPanelProps {
   data: VisualizationData;
+  /** Path to the h5ad on disk — needed to fetch the bulk LCA summary. */
+  h5adPath?: string;
+  /** Optional callback fired when a cluster row is clicked. Wires the panel
+   *  up as a navigation surface into the cluster details popup. */
+  onClusterClick?: (clusterId: string, position?: { x: number; y: number }) => void;
 }
 
 interface ClusterRow {
@@ -33,8 +42,38 @@ const DEPTH_QC_KEY = 'consensus_annotation_agreement_depth';
  * panel renders a quiet "no consensus data" message in that case rather
  * than fabricating signal.
  */
-export const AnnotationAgreementPanel: React.FC<AnnotationAgreementPanelProps> = ({ data }) => {
+export const AnnotationAgreementPanel: React.FC<AnnotationAgreementPanelProps> = ({
+  data,
+  h5adPath,
+  onClusterClick,
+}) => {
   const { v, colors } = useVizTheme();
+  const [agreementByCluster, setAgreementByCluster] = useState<
+    Record<string, AgreementSummaryEntry>
+  >({});
+
+  // Fetch the LCA term name per cluster in one bulk round trip. Keyed on
+  // h5adPath so switching datasets refreshes; debounced via cancelled flag
+  // so a quick navigation doesn't apply stale results.
+  useEffect(() => {
+    if (!h5adPath) return;
+    let cancelled = false;
+    api
+      .getAgreementSummary(h5adPath)
+      .then((resp) => {
+        if (cancelled) return;
+        setAgreementByCluster(resp.available ? resp.clusters : {});
+      })
+      .catch((err) => {
+        // Soft-fail: panel still renders without the "Agree at" data.
+        // eslint-disable-next-line no-console
+        console.warn('[AgreementPanel] Failed to load agreement summary', err);
+        if (!cancelled) setAgreementByCluster({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [h5adPath]);
 
   const rows = useMemo<ClusterRow[]>(() => {
     const clusters = data.clusters['leiden'];
@@ -97,10 +136,14 @@ export const AnnotationAgreementPanel: React.FC<AnnotationAgreementPanelProps> =
   return (
     <div className="p-4">
       <div className="text-xs mb-3" style={{ color: v.textMuted }}>
-        Per-cluster consensus across annotation backends. Hover any CL pill for
-        the full ontology ID, raw label, and similarity. Agreement depth is the
-        depth of the lowest common ancestor across the per-method CL terms — a
-        low number means the methods only agree at a coarse level.
+        Per-cluster consensus across annotation backends. The "Agree at" column
+        names the most-specific Cell-Ontology term where every voting method
+        agreed — when it's shallow ("lymphocyte" vs. a leaf), the methods
+        diverged on subtype and the consensus call should be treated as a
+        family-level annotation, not a final answer.
+        {onClusterClick && (
+          <span> Click any row to open the cluster details popup with full lineage.</span>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs border-collapse">
@@ -109,61 +152,105 @@ export const AnnotationAgreementPanel: React.FC<AnnotationAgreementPanelProps> =
               <th className="text-left py-2 pr-3 font-semibold">Cluster</th>
               <th className="text-left py-2 pr-3 font-semibold">Consensus</th>
               <th className="text-left py-2 pr-3 font-semibold">Confidence</th>
-              <th className="text-left py-2 pr-3 font-semibold">Depth</th>
+              <th className="text-left py-2 pr-3 font-semibold">Agree at</th>
               <th className="text-left py-2 pr-3 font-semibold">Per-method calls</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr
-                key={row.clusterId}
-                style={{ borderTop: `1px solid ${v.panelBorderSecondary}` }}
-              >
-                <td className="py-2 pr-3 font-medium" style={{ color: v.textBody }}>
-                  {row.clusterId}
-                </td>
-                <td className="py-2 pr-3" style={{ color: v.textBody }}>
-                  {row.consensusLabel ?? <span style={{ color: v.textFaint }}>—</span>}
-                </td>
-                <td className="py-2 pr-3 tabular-nums" style={{ color: v.textBody }}>
-                  {row.consensusConfidence !== undefined ? (
-                    <span
-                      className="inline-block px-1.5 py-0.5 rounded"
-                      style={{
-                        background: confidencePalette(row.consensusConfidence, v).bg,
-                        color: confidencePalette(row.consensusConfidence, v).text,
-                      }}
-                    >
-                      {row.consensusConfidence.toFixed(2)}
-                    </span>
-                  ) : <span style={{ color: v.textFaint }}>—</span>}
-                </td>
-                <td className="py-2 pr-3 tabular-nums" style={{ color: v.textMuted }}>
-                  {row.agreementDepth !== undefined ? row.agreementDepth.toFixed(0) : '—'}
-                </td>
-                <td className="py-2 pr-3">
-                  <div className="flex flex-wrap gap-1.5">
-                    {row.perMethod.length === 0 && (
+            {rows.map((row) => {
+              const agreement = agreementByCluster[row.clusterId];
+              const clickable = !!onClusterClick;
+              return (
+                <tr
+                  key={row.clusterId}
+                  onClick={
+                    clickable
+                      ? (e) => onClusterClick!(row.clusterId, { x: e.clientX, y: e.clientY })
+                      : undefined
+                  }
+                  className={clickable ? 'transition-colors' : undefined}
+                  style={{
+                    borderTop: `1px solid ${v.panelBorderSecondary}`,
+                    cursor: clickable ? 'pointer' : 'default',
+                  }}
+                  onMouseEnter={
+                    clickable
+                      ? (e) => {
+                          (e.currentTarget as HTMLTableRowElement).style.backgroundColor =
+                            v.panelBgSecondary;
+                        }
+                      : undefined
+                  }
+                  onMouseLeave={
+                    clickable
+                      ? (e) => {
+                          (e.currentTarget as HTMLTableRowElement).style.backgroundColor =
+                            'transparent';
+                        }
+                      : undefined
+                  }
+                >
+                  <td className="py-2 pr-3 font-medium" style={{ color: v.textBody }}>
+                    {row.clusterId}
+                  </td>
+                  <td className="py-2 pr-3" style={{ color: v.textBody }}>
+                    {row.consensusLabel ?? <span style={{ color: v.textFaint }}>—</span>}
+                  </td>
+                  <td className="py-2 pr-3 tabular-nums" style={{ color: v.textBody }}>
+                    {row.consensusConfidence !== undefined ? (
+                      <span
+                        className="inline-block px-1.5 py-0.5 rounded"
+                        style={{
+                          background: confidencePalette(row.consensusConfidence, v).bg,
+                          color: confidencePalette(row.consensusConfidence, v).text,
+                        }}
+                      >
+                        {row.consensusConfidence.toFixed(2)}
+                      </span>
+                    ) : <span style={{ color: v.textFaint }}>—</span>}
+                  </td>
+                  <td className="py-2 pr-3" style={{ color: v.textBody }}>
+                    {agreement ? (
+                      <div className="flex flex-col leading-tight">
+                        <span title={agreement.agreement_cl_id}>
+                          {agreement.agreement_cl_name}
+                        </span>
+                        <span className="text-[10px]" style={{ color: v.textFaint }}>
+                          depth {agreement.agreement_depth} · {agreement.n_methods_voting} methods
+                        </span>
+                      </div>
+                    ) : row.agreementDepth !== undefined ? (
+                      <span className="tabular-nums" style={{ color: v.textMuted }}>
+                        depth {row.agreementDepth.toFixed(0)}
+                      </span>
+                    ) : (
                       <span style={{ color: v.textFaint }}>—</span>
                     )}
-                    {row.perMethod.map((m) => (
-                      <div key={m.method} className="flex items-center gap-1">
-                        <span style={{ color: v.textMuted }} className="text-[10px]">
-                          {m.method}
-                        </span>
-                        <CLBadge
-                          annotation={{
-                            cl_id: m.cl_id,
-                            cl_name: m.cl_name,
-                            similarity: m.similarity,
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="py-2 pr-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {row.perMethod.length === 0 && (
+                        <span style={{ color: v.textFaint }}>—</span>
+                      )}
+                      {row.perMethod.map((m) => (
+                        <div key={m.method} className="flex items-center gap-1">
+                          <span style={{ color: v.textMuted }} className="text-[10px]">
+                            {m.method}
+                          </span>
+                          <CLBadge
+                            annotation={{
+                              cl_id: m.cl_id,
+                              cl_name: m.cl_name,
+                              similarity: m.similarity,
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Optional, Any
 
 import anndata as ad
+import numpy as np
 import pandas as pd
 import scanpy as sc
+import scipy.sparse as sp
 
 from .base import (
     AnnotationCategory,
@@ -32,6 +34,36 @@ DEFAULT_CACHE_DIR = str(
 # ======================================================================
 # Subprocess worker (module-level so it's picklable by mp.spawn)
 # ======================================================================
+
+def _looks_like_raw_counts(matrix: Any) -> bool:
+    """Heuristic check: does ``matrix`` look like a raw integer count matrix?
+
+    PopV's ``Process_Query`` requires raw counts but raises an opaque
+    ValueError several frames into a subprocess if it gets something else.
+    We sample up to a million entries from the matrix and check that they
+    are non-negative and integer-valued. Sparse matrices: only the stored
+    nonzero entries are sampled, which is the right thing — zero entries
+    can't violate either condition. Returns False on empty matrices.
+    """
+    if matrix is None:
+        return False
+    if sp.issparse(matrix):
+        data = matrix.data
+        if data.size == 0:
+            return False
+        sample = data if data.size <= 1_000_000 else np.random.default_rng(0).choice(data, 1_000_000, replace=False)
+    else:
+        arr = np.asarray(matrix)
+        if arr.size == 0:
+            return False
+        flat = arr.ravel()
+        sample = flat if flat.size <= 1_000_000 else np.random.default_rng(0).choice(flat, 1_000_000, replace=False)
+    if (sample < 0).any():
+        return False
+    # Integer-valued: tolerant comparison so float storage of integers
+    # (1.0, 2.0, ...) still passes; log-transformed floats won't.
+    return bool(np.allclose(sample, np.rint(sample), atol=1e-6))
+
 
 def _popv_worker(
     input_path: str,
@@ -376,11 +408,37 @@ except Exception:
     # ------------------------------------------------------------------
 
     def _load_raw_counts(self, adata: ad.AnnData, input_file: str) -> ad.AnnData:
-        """Reload raw counts from the original input file, subset to cells in *adata*."""
+        """Reload raw counts, subset to cells in *adata*.
+
+        Tries three sources in order:
+
+        1. ``adata.layers['counts']`` on the in-memory object — preferred, no
+           file read needed. CellPilot's preprocessor stashes raw counts here
+           before normalizing (see ``Preprocessor._normalize``).
+        2. ``adata.raw`` on the in-memory object — set by the preprocessor on
+           the pre-HVG snapshot, contains raw counts in ``.X``.
+        3. The original ``input_file`` reloaded from disk. After loading,
+           re-check the same two sources on the freshly-loaded object,
+           because preprocessed h5ad files keep raw counts in
+           ``layers['counts']`` / ``.raw`` but have normalized data in ``.X``.
+
+        Raises ``ValueError`` with an actionable message when none of these
+        contain integer-looking counts, since PopV's preprocessing will
+        otherwise fail with an opaque error several frames deep in a
+        subprocess.
+        """
+        # 1 & 2: in-memory recovery. Cheapest path — no disk I/O.
+        recovered = self._extract_counts(adata, source="in-memory")
+        if recovered is not None:
+            return recovered
+
+        # 3: reload from the original input file.
         if not input_file or not os.path.exists(input_file):
             raise ValueError(
-                "PopV requires raw counts but no valid input_file was provided. "
-                "Ensure the analysis pipeline passes the original data file path."
+                "PopV requires raw counts but the in-memory adata has neither "
+                "`layers['counts']` nor a `.raw` slot, and no valid input_file "
+                "was provided to fall back on. Ensure the analysis pipeline "
+                "passes the original data file path."
             )
 
         self.logger.info("Reloading raw counts from %s", input_file)
@@ -406,7 +464,58 @@ except Exception:
         self.logger.info(
             "Matched %d / %d cells from raw input", len(shared), adata.n_obs
         )
-        return adata_raw[shared].copy()
+        adata_raw = adata_raw[shared].copy()
+        recovered = self._extract_counts(adata_raw, source=f"file {input_file!r}")
+        if recovered is not None:
+            return recovered
+        # Last-ditch: trust adata_raw.X. Validates as integer-looking; if
+        # not, raise a clear error rather than letting PopV fail opaquely
+        # several stack frames into a subprocess.
+        if not _looks_like_raw_counts(adata_raw.X):
+            raise ValueError(
+                f"Loaded file {input_file!r} does not contain raw counts: "
+                f"adata.X is non-integer (looks normalized/log-transformed) "
+                "and there is no `layers['counts']` or `.raw` slot to fall "
+                "back on. PopV requires raw integer counts. Re-run from the "
+                "original count matrix or a preprocessed file that preserved "
+                "`adata.layers['counts']`."
+            )
+        return adata_raw
+
+    def _extract_counts(
+        self,
+        a: ad.AnnData,
+        *,
+        source: str,
+    ) -> Optional[ad.AnnData]:
+        """Return an AnnData with raw counts in ``.X`` if any standard slot
+        on ``a`` carries them, else ``None``. Logs which slot was used."""
+        if "counts" in a.layers:
+            self.logger.info("Using raw counts from adata.layers['counts'] (source: %s)", source)
+            out = a.copy()
+            counts = out.layers["counts"]
+            # `.copy()` is defined on both numpy arrays and scipy sparse
+            # matrices but Pylance's stub for AnnData.layers infers a less
+            # specific type. Casting through scipy/numpy at runtime is safe
+            # and gives Pylance a concrete type.
+            out.X = sp.csr_matrix(counts).copy() if sp.issparse(counts) else np.asarray(counts).copy()
+            return out
+        if a.raw is not None and a.raw.X is not None:
+            self.logger.info("Using raw counts from adata.raw (source: %s)", source)
+            raw_obj = a.raw.to_adata()
+            # adata.raw can contain a superset of vars (pre-HVG); subset to
+            # what's currently in `a` so the var index aligns with the
+            # rest of the pipeline.
+            shared_vars = a.var_names.intersection(raw_obj.var_names)
+            if len(shared_vars) > 0:
+                raw_obj = raw_obj[:, shared_vars].copy()
+            # Carry obs forward from `a` so any clustering / metadata on the
+            # in-memory object (like Leiden labels) survives the swap.
+            shared_cells = a.obs_names.intersection(raw_obj.obs_names)
+            raw_obj = raw_obj[shared_cells].copy()
+            raw_obj.obs = a.obs.loc[shared_cells].copy()
+            return raw_obj
+        return None
 
     # ------------------------------------------------------------------
     # Result extraction helpers

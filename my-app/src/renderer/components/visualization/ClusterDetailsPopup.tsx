@@ -9,6 +9,7 @@ import {
 import { VisualizationData, CLAnnotation } from '../../services/api';
 import { useVizTheme } from '../../theme/ThemeContext';
 import CLBadge from './CLBadge';
+import OntologyLineagePath from './OntologyLineagePath';
 
 interface ClusterDetailsPopupProps {
   isOpen: boolean;
@@ -18,6 +19,8 @@ interface ClusterDetailsPopupProps {
   data: VisualizationData;
   annotationConfidence: any;
   customLabels: Record<string, string>;
+  /** Path to the h5ad on disk — used to fetch the cluster's CL lineage. */
+  h5adPath?: string;
   onSubcluster: () => void;
   onManualEdit: () => void;
   position?: { x: number; y: number };
@@ -77,6 +80,7 @@ const ClusterDetailsPopup: React.FC<ClusterDetailsPopupProps> = ({
   data,
   annotationConfidence,
   customLabels,
+  h5adPath,
   onSubcluster,
   onManualEdit,
   position
@@ -231,6 +235,17 @@ const ClusterDetailsPopup: React.FC<ClusterDetailsPopupProps> = ({
 
         {/* Content */}
         <div className="p-4 space-y-4 max-h-[450px] overflow-y-auto custom-scrollbar">
+          {h5adPath && isOpen && (
+            <div
+              className="rounded-lg p-3"
+              style={{
+                backgroundColor: v.panelBgSecondary,
+                border: `1px solid ${v.panelBorderSecondary}`,
+              }}
+            >
+              <OntologyLineagePath h5adPath={h5adPath} clusterId={clusterName} />
+            </div>
+          )}
           {methodAnnotations.length === 0 ? (
             <div className="text-sm text-center py-4" style={{ color: v.textFaint }}>
               No annotation data available

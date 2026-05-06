@@ -124,6 +124,306 @@ def to_builtin(val: Any) -> Any:
     return val
 
 
+def get_cluster_lineage(h5ad_path: str, cluster_id: str) -> Dict[str, Any]:
+    """Compute the Cell-Ontology lineage path for one cluster's consensus call.
+
+    For the cluster's consensus CL ID, returns the shortest path from the CL
+    root (``CL:0000000`` *cell*) down to that node, annotated at each step
+    with how many of the per-method calls land at-or-below that node. This is
+    the data the frontend uses to render the breadcrumb-style lineage view in
+    the cluster details popup.
+
+    Returns an empty payload (``{"path": [], ...}``) when:
+      * the AnnData has no consensus CL column (CL normalization didn't run)
+      * the requested cluster is missing from ``adata.obs.leiden``
+      * the consensus CL ID isn't resolvable in the ontology
+    """
+    from .annotation.ontology import _get_shared_indexer
+
+    adata = ad.read_h5ad(h5ad_path)
+    indexer = _get_shared_indexer()
+    if indexer is None or indexer.ontology is None:
+        return {
+            "path": [],
+            "method_calls": [],
+            "consensus_cl_id": "",
+            "consensus_cl_name": "",
+            "n_methods_total": 0,
+            "available": False,
+            "reason": "Cell Ontology indexer is not available.",
+        }
+
+    obs = adata.obs
+    leiden_col = "leiden"
+    consensus_id_col = "consensus_annotation_cl_id"
+    if leiden_col not in obs.columns or consensus_id_col not in obs.columns:
+        return {
+            "path": [],
+            "method_calls": [],
+            "consensus_cl_id": "",
+            "consensus_cl_name": "",
+            "n_methods_total": 0,
+            "available": False,
+            "reason": "AnnData has no consensus CL annotation columns.",
+        }
+
+    # Locate the cluster's representative row (cluster -> single CL ID by construction)
+    cluster_str = str(cluster_id)
+    leiden = obs[leiden_col].astype(str)
+    mask = leiden == cluster_str
+    if not mask.any():
+        return {
+            "path": [],
+            "method_calls": [],
+            "consensus_cl_id": "",
+            "consensus_cl_name": "",
+            "n_methods_total": 0,
+            "available": False,
+            "reason": f"Cluster {cluster_str!r} not found in adata.obs[{leiden_col!r}].",
+        }
+    sub = obs.loc[mask].iloc[0]
+    consensus_cl_id = str(sub.get(consensus_id_col, "") or "")
+    consensus_cl_name = str(sub.get("consensus_annotation", "") or "")
+    if not consensus_cl_id or consensus_cl_id == "nan":
+        return {
+            "path": [],
+            "method_calls": [],
+            "consensus_cl_id": "",
+            "consensus_cl_name": consensus_cl_name,
+            "n_methods_total": 0,
+            "available": False,
+            "reason": "No consensus CL ID for this cluster.",
+        }
+
+    ontology = indexer.ontology
+    path_ids = ontology.path_to_root(consensus_cl_id)
+    if not path_ids:
+        return {
+            "path": [],
+            "method_calls": [],
+            "consensus_cl_id": consensus_cl_id,
+            "consensus_cl_name": consensus_cl_name,
+            "n_methods_total": 0,
+            "available": False,
+            "reason": f"Consensus CL ID {consensus_cl_id} not reachable in the ontology graph.",
+        }
+
+    # Pull each per-method CL ID for this cluster from companion obs columns.
+    # Column convention: '<base>_cl_id' alongside '<base>_cl_name'. Skip the
+    # consensus columns themselves. For per-cell methods we also compute the
+    # ballot weight (= fraction of cluster cells whose per-cell label matches
+    # the method's cluster-level call) so the popup can show "PopV's CD8+ T
+    # ballot is weighted 0.58 because that's the fraction of the cluster
+    # actually labeled CD8+ T cell at the per-cell level".
+    leiden_for_weights = obs["leiden"].astype(str) if "leiden" in obs.columns else None
+    cluster_total = int((leiden_for_weights == cluster_str).sum()) if leiden_for_weights is not None else 0
+    method_calls: List[Dict[str, Any]] = []
+    for col in obs.columns:
+        if not col.endswith("_cl_id"):
+            continue
+        base = col[: -len("_cl_id")]
+        if base == "consensus_annotation":
+            continue
+        cl_id = str(sub.get(col, "") or "")
+        if not cl_id or cl_id == "nan":
+            continue
+        cl_name_col = f"{base}_cl_name"
+        cl_name = (
+            str(sub.get(cl_name_col, "") or "")
+            if cl_name_col in obs.columns
+            else ""
+        )
+        # Compute ballot weight if a per-cell column exists for this method.
+        weight = 1.0
+        weight_kind = "cluster"  # 'cluster' or 'per-cell'
+        if base in obs.columns and leiden_for_weights is not None and cluster_total > 0:
+            per_cell = obs[base].astype(str).str.lower()
+            # Match against the method's cluster-level call (cl_name is
+            # CL-canonical; per-cell labels are the model's own vocabulary —
+            # case-insensitive equality is the conservative match).
+            cluster_call = cl_name.strip().lower()
+            if cluster_call:
+                cluster_mask = leiden_for_weights == cluster_str
+                n_match = int(((per_cell == cluster_call) & cluster_mask).sum())
+                fraction = n_match / cluster_total if cluster_total > 0 else 0.0
+                # Same floor as the orchestrator uses to avoid silent zero-
+                # ing on vocabulary mismatches.
+                weight = max(0.5, float(fraction))
+                weight_kind = "per-cell"
+        method_calls.append({
+            "method": base,
+            "method_display": _pretty_method_name(base),
+            "cl_id": cl_id,
+            "cl_name": cl_name,
+            "weight": float(weight),
+            "weight_kind": weight_kind,
+        })
+
+    # Pre-compute each method's ancestor set so the per-step counting loop
+    # is O(path_len * n_methods) rather than re-walking the graph each time.
+    method_ancestors: Dict[str, set] = {}
+    for mc in method_calls:
+        cid = mc["cl_id"]
+        if cid in ontology.graph:
+            method_ancestors[mc["method"]] = ontology.ancestors(cid) | {cid}
+        else:
+            method_ancestors[mc["method"]] = set()
+
+    path: List[Dict[str, Any]] = []
+    for depth_idx, node_id in enumerate(path_ids):
+        node = ontology.graph.get(node_id)
+        if node is None:
+            continue
+        supporting: List[str] = []
+        for mc in method_calls:
+            ancs = method_ancestors.get(mc["method"], set())
+            if node_id in ancs:
+                supporting.append(mc["method"])
+        path.append({
+            "cl_id": node_id,
+            "cl_name": node.label,
+            "depth": depth_idx,
+            "n_methods_at_or_below": len(supporting),
+            "methods_at_or_below": supporting,
+        })
+
+    return {
+        "path": path,
+        "method_calls": method_calls,
+        "consensus_cl_id": consensus_cl_id,
+        "consensus_cl_name": consensus_cl_name,
+        "n_methods_total": len(method_calls),
+        "available": True,
+        "reason": "",
+    }
+
+
+def get_agreement_summary(h5ad_path: str) -> Dict[str, Any]:
+    """Per-cluster agreement summary across annotation backends.
+
+    For every Leiden cluster, returns the lowest common ancestor (LCA) of
+    the per-method CL IDs — the most-specific CL term at which every voting
+    backend agreed. Used by the agreement panel to render an "Agree at"
+    column alongside the existing depth integer, so a researcher can see at
+    a glance "the methods only agreed at *lymphocyte*" without opening each
+    cluster's lineage popup.
+
+    Returns ``{"available": False, "clusters": {}}`` when CL normalization
+    didn't run on this dataset (no per-method ``*_cl_id`` columns) or the
+    indexer can't be loaded.
+    """
+    from .annotation.ontology import _get_shared_indexer
+
+    adata = ad.read_h5ad(h5ad_path)
+    indexer = _get_shared_indexer()
+    if indexer is None or indexer.ontology is None:
+        return {
+            "available": False,
+            "clusters": {},
+            "reason": "Cell Ontology indexer is not available.",
+        }
+
+    obs = adata.obs
+    if "leiden" not in obs.columns:
+        return {
+            "available": False,
+            "clusters": {},
+            "reason": "AnnData has no 'leiden' column.",
+        }
+
+    # Identify per-method CL ID columns (skip the consensus column itself).
+    method_id_cols: List[str] = []
+    for col in obs.columns:
+        if not col.endswith("_cl_id"):
+            continue
+        base = col[: -len("_cl_id")]
+        if base == "consensus_annotation":
+            continue
+        method_id_cols.append(col)
+    if not method_id_cols:
+        return {
+            "available": False,
+            "clusters": {},
+            "reason": "No per-method CL columns on this dataset.",
+        }
+
+    leiden = obs["leiden"].astype(str)
+    ontology = indexer.ontology
+    out_clusters: Dict[str, Dict[str, Any]] = {}
+
+    # Walk each cluster once; the row chosen is arbitrary because per-method
+    # labels are constant within a cluster by construction (clusters get
+    # mapped, not individual cells).
+    for cluster_id in pd.unique(leiden):
+        cluster_str = str(cluster_id)
+        mask = leiden == cluster_str
+        if not mask.any():
+            continue
+        sub = obs.loc[mask].iloc[0]
+
+        # Collect per-method CL IDs for this cluster, restricted to ones the
+        # ontology actually knows. Unknown IDs would crash the LCA walk.
+        cl_ids: List[str] = []
+        for id_col in method_id_cols:
+            cid = str(sub.get(id_col, "") or "")
+            if not cid or cid == "nan":
+                continue
+            if cid in ontology.graph:
+                cl_ids.append(cid)
+        if not cl_ids:
+            continue
+
+        # LCA = deepest CL term in the intersection of all methods' ancestor
+        # sets (each set including the method's own term). Same algorithm as
+        # CellOntologyHierarchy.agreement_depth, plus we surface the CL term.
+        ancestor_sets = [ontology.ancestors(cid) | {cid} for cid in cl_ids]
+        common = set.intersection(*ancestor_sets) if ancestor_sets else set()
+        if not common:
+            continue
+        try:
+            lca_id = max(common, key=lambda cid: ontology.depth(cid))
+        except Exception:
+            continue
+        lca_term = ontology.graph.get(lca_id)
+        if lca_term is None:
+            continue
+
+        out_clusters[cluster_str] = {
+            "agreement_cl_id": lca_id,
+            "agreement_cl_name": lca_term.label,
+            "agreement_depth": ontology.depth(lca_id),
+            "n_methods_voting": len(cl_ids),
+        }
+
+    return {
+        "available": True,
+        "clusters": out_clusters,
+        "reason": "",
+    }
+
+
+_METHOD_DISPLAY: Dict[str, str] = {
+    "cellmarker": "CellMarker",
+    "panglaodb": "PanglaoDB",
+    "cancersea": "CancerSEA",
+    "celltypist": "CellTypist",
+    "celltypist_prediction": "CellTypist",
+    "popv": "PopV",
+    "popv_prediction": "PopV",
+    "mllm": "mLLM Celltype",
+    "mllm_annotation": "mLLM Celltype",
+    "manual_annotation": "Manual",
+}
+
+
+def _pretty_method_name(base: str) -> str:
+    if base in _METHOD_DISPLAY:
+        return _METHOD_DISPLAY[base]
+    if base.startswith("celltypist_"):
+        return "CellTypist " + base[len("celltypist_"):].replace("_", " ")
+    return base.replace("_", " ").title()
+
+
 def _extract_cl_annotations(adata: ad.AnnData) -> Dict[str, Dict[str, Dict[str, Any]]]:
     """Pull per-method Cell-Ontology mappings off ``adata.obs`` companion columns.
 
