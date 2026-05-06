@@ -15,7 +15,7 @@ const muiTheme = createTheme({
 
 interface Step3Props {
   uploadData: UploadData;
-  onComplete: (analysisData: AnalysisData) => void;
+  onComplete: (analysisData: AnalysisData, outputPath?: string) => void;
   onBack: () => void;
   analysisData?: AnalysisData;
 }
@@ -199,18 +199,29 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
           setCurrentStep('Analysis Complete!');
           setProgress(100);
 
-          // System notification so user knows even if they switched tabs
-          if (Notification.permission === 'granted') {
-            new Notification('CellPilot', {
-              body: `Analysis of "${uploadData.datasetName}" is complete!`,
+          // System notification — clicking it routes to the new dataset.
+          // Permission was requested up front when the analysis was launched
+          // so this should normally just fire without prompting.
+          const fireNotification = () => {
+            const note = new Notification('CellPilot', {
+              body: `Analysis of "${uploadData.datasetName}" is complete — click to view visualizations.`,
+              tag: `cellpilot-job-${jobId}`,  // dedupe if user re-runs
             });
+            note.onclick = () => {
+              if (datasetPath) {
+                window.dispatchEvent(new CustomEvent('switchToVisualizations', {
+                  detail: { datasetPath },
+                }));
+              }
+              window.focus();
+              note.close();
+            };
+          };
+          if (Notification.permission === 'granted') {
+            fireNotification();
           } else if (Notification.permission !== 'denied') {
             Notification.requestPermission().then(perm => {
-              if (perm === 'granted') {
-                new Notification('CellPilot', {
-                  body: `Analysis of "${uploadData.datasetName}" is complete!`,
-                });
-              }
+              if (perm === 'granted') fireNotification();
             });
           }
 
@@ -222,7 +233,12 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
             currentStep: 'Analysis Complete!',
             annotatedDatasetPath: datasetPath
           };
-          onComplete(completedAnalysis);
+          // Pass the dataset path through to the wizard so it can
+          // auto-route to the visualization dashboard. Previously the
+          // second argument was omitted, leaving the user stuck on the
+          // annotation screen until they manually clicked the
+          // "View Visualizations" button.
+          onComplete(completedAnalysis, datasetPath);
           setRunning(false);
           clearInterval(pollInterval);
         } else if (status.status === 'failed') {
@@ -291,6 +307,16 @@ export default function Step3ConfigureLaunch({ uploadData, onComplete, onBack, a
     setRunning(true);
     setProgress(0);
     setCurrentStep('Starting analysis...');
+
+    // Request notification permission up front while the user is at the
+    // wizard. Annotation runs can take many minutes; prompting at *completion*
+    // (the original behavior) means the user has often switched apps and
+    // never sees the permission dialog, so the completion notification never
+    // fires. Asking now ensures permission is granted by the time the job
+    // finishes. Idempotent if permission was already granted/denied.
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => { /* ignore */ });
+    }
 
     try {
       const outputDir = `annotation_${uploadData.datasetName}`;
